@@ -68,6 +68,7 @@ Star Citizen Joystick Mapper simplifies the complex task of configuring control 
    - Use the Binding Page to set up keyboard, mouse, and joystick inputs
    - Use the Visual View to see your joystick layout
 5. **Apply Changes**: Auto-save will update your Star Citizen installation automatically when you save your bindings
+6. 6. While in-game, go to your advanced key bindings, and import your saved profile (sometimes may need to import twice, idk why)
 
 ## Tips & Tricks
 
