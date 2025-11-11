@@ -62,11 +62,12 @@ Star Citizen Joystick Mapper simplifies the complex task of configuring control 
 ## Usage
 
 1. **Launch the Application**: Start the Joystick Mapper
-2. **Load or Create a Profile**: Select an existing profile or create a new one
-3. **Customize Bindings**: 
+2. **Load or Create a Profile**: Select an existing keybinding .xml file or create a new one
+   - When saving a key binding file, name is "layout_NAME_exported.xml" replacing NAME with your bindings name.
+4. **Customize Bindings**: 
    - Use the Binding Page to set up keyboard, mouse, and joystick inputs
    - Use the Visual View to see your joystick layout
-4. **Apply Changes**: Auto-save will update your Star Citizen installation automatically when you save your bindings
+5. **Apply Changes**: Auto-save will update your Star Citizen installation automatically when you save your bindings
 
 ## Tips & Tricks
 
