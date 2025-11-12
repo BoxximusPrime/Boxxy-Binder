@@ -72,6 +72,7 @@ Star Citizen Joystick Mapper simplifies the complex task of configuring control 
 
 ## Tips & Tricks
 
+- **Template Editor And Visual View**: Use middle-click and drag to pan the view, double-click buttons on the template view to edit them.
 - **Profile Management**: Store multiple joystick profiles and switch between them easily
 - **Visual Debugging**: Use the Visual View to spot binding gaps or conflicts
 - **Template Sharing**: Export and share custom templates with other players
