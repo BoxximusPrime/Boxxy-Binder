@@ -1,3 +1,17 @@
+/* Quick Tips */
+.quick-tips {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    color: #e0e0e0;
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+    z-index: 99;
+    pointer-events: none;
+    letter-spacing: 0.3px;
+}
+
 /* Joystick Viewer Specific Styles */
 
 .viewer-content {

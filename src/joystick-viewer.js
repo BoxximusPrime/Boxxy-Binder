@@ -224,6 +224,19 @@ async function onTemplateFileSelected(e)
         localStorage.setItem('currentTemplate', JSON.stringify(templateData));
         localStorage.setItem('templateFileName', file.name);
 
+        // Update header template name
+        console.log('onTemplateFileSelected - templateData.name:', templateData.name);
+        console.log('window.updateTemplateIndicator exists:', typeof window.updateTemplateIndicator);
+        if (window.updateTemplateIndicator)
+        {
+            console.log('Calling updateTemplateIndicator with:', templateData.name);
+            window.updateTemplateIndicator(templateData.name);
+        }
+        else
+        {
+            console.log('window.updateTemplateIndicator is not available');
+        }
+
         hasUnsavedChanges = false;
         displayTemplate();
 
@@ -346,6 +359,12 @@ function loadPersistedTemplate()
             if (typeof currentTemplate.imageFlipped === 'boolean')
             {
                 currentTemplate.imageFlipped = currentTemplate.imageFlipped ? 'left' : 'right';
+            }
+
+            // Update header template name
+            if (window.updateTemplateIndicator)
+            {
+                window.updateTemplateIndicator(currentTemplate.name);
             }
 
             displayTemplate();

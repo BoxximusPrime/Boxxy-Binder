@@ -251,6 +251,16 @@ window.addEventListener("DOMContentLoaded", async () =>
   initializeEventListeners();
   initializeTabSystem();
 
+  // Show default file indicator
+  document.getElementById('loaded-file-indicator').style.display = 'flex';
+
+  // Load persisted template name
+  const savedTemplateName = localStorage.getItem('currentTemplateName');
+  if (savedTemplateName)
+  {
+    updateTemplateIndicator(savedTemplateName);
+  }
+
   // Load categories
   try
   {
@@ -623,6 +633,39 @@ function updateFileIndicator(filePath)
     const fileName = filePath.split(/[\\/]/).pop();
     fileNameEl.textContent = fileName;
     indicator.style.display = 'flex';
+  }
+}
+
+function updateTemplateIndicator(templateName)
+{
+  const templateNameEl = document.getElementById('header-template-name');
+  console.log('updateTemplateIndicator called with:', templateName);
+  console.log('templateNameEl:', templateNameEl);
+  if (templateNameEl)
+  {
+    templateNameEl.textContent = templateName || 'Untitled Template';
+    console.log('Updated header to:', templateNameEl.textContent);
+  }
+  // Always save to localStorage for persistence
+  if (templateName)
+  {
+    localStorage.setItem('currentTemplateName', templateName);
+  }
+}
+
+// Make it globally accessible
+window.updateTemplateIndicator = updateTemplateIndicator;
+
+// Helper to call updateTemplateIndicator safely (waits if not yet defined)
+window.safeUpdateTemplateIndicator = function (name)
+{
+  if (window.updateTemplateIndicator)
+  {
+    window.updateTemplateIndicator(name);
+  } else
+  {
+    // If the function isn't ready yet, store in localStorage and it will be called on DOMContentLoaded
+    localStorage.setItem('pendingTemplateName', name);
   }
 }
 

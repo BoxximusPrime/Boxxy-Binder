@@ -34,7 +34,7 @@
         <div class="header-file-info">
           <div id="loaded-file-indicator" class="loaded-file-indicator" style="display: none;">
             <span class="file-icon">📄</span>
-            <span id="loaded-file-name">No file loaded</span>
+            <span id="loaded-file-name">layout_NewBindings_exported.xml</span>
           </div>
         </div>
       </div>
@@ -46,6 +46,9 @@
           <button id="tab-visual" class="tab-btn" data-tab="visual">Visual View</button>
           <button id="tab-template" class="tab-btn" data-tab="template">Template Editor</button>
           <button id="tab-debugger" class="tab-btn" data-tab="debugger">Input Debugger</button>
+        </div>
+        <div class="header-template-info">
+          <span id="header-template-name">Untitled Template</span>
         </div>
       </div>
     </header>
@@ -121,6 +124,9 @@
         <div class="viewer-content">
           <!-- Joystick Display -->
           <div class="joystick-display">
+            <!-- Quick Tips -->
+            <div class="quick-tips" style="top:3rem;right:3rem;">Middle click to pan view</div>
+
             <div id="welcome-screen-visual" class="welcome-screen">
               <div class="welcome-content">
                 <h2>Select a joystick template to view your bindings</h2>
@@ -163,7 +169,7 @@
               <div class="control-group">
                 <button id="select-template-btn" class="control-btn" title="Select Template">
                   <span class="control-icon">📋</span>
-                  <span>Template</span>
+                  <span>Open</span>
                 </button>
                 <button id="export-image-btn" class="control-btn" title="Export as Image">
                   <span class="control-icon">💾</span>
@@ -301,6 +307,9 @@
           <!-- Main Panel - Canvas Editor -->
           <main class="editor-panel">
             <div class="canvas-container" id="canvas-container">
+              <!-- Quick Tips -->
+              <div class="quick-tips">Middle click to pan view<br>Double click buttons to edit</div>
+
               <!-- Floating Template Controls Panel -->
               <div class="template-controls-panel">
                 <div class="control-group">
@@ -311,7 +320,7 @@
                 </div>
                 <div class="control-divider"></div>
                 <div class="control-group">
-                  <button id="new-template-btn" class="control-btn" title="Create new template">+ New</button>
+                  <button id="new-template-btn" class="control-btn" title="Create new template">✨ New</button>
                   <button id="load-template-btn" class="control-btn" title="Load existing template">📂 Load</button>
                 </div>
                 <div class="control-divider"></div>

@@ -2,6 +2,7 @@ use serde::Serialize;
 use gilrs::{Gilrs, EventType, Button, Axis};
 use std::time::{Duration, Instant};
 use tauri::Emitter;
+use rusty_xinput::XInputHandle;
 
 // Get currently pressed modifiers using Windows API
 #[cfg(windows)]
@@ -80,6 +81,21 @@ struct AxisState {
 pub fn wait_for_input(session_id: String, timeout_secs: u64) -> Result<Option<DetectedInput>, String> {
     let mut gilrs = Gilrs::new().map_err(|e| e.to_string())?;
     
+    eprintln!("wait_for_input: Starting input detection for {} seconds", timeout_secs);
+    eprintln!("wait_for_input: Connected gamepads: {}", gilrs.gamepads().count());
+    
+    // Initialize XInput for Xbox controller support
+    let xinput = XInputHandle::load_default().map_err(|e| format!("Failed to load XInput: {:?}", e))?;
+    let mut xinput_prev_states = [None, None, None, None]; // Track previous state for 4 possible controllers
+    
+    // Initialize XInput states
+    for i in 0..4 {
+        if let Ok(state) = xinput.get_state(i) {
+            xinput_prev_states[i as usize] = Some(state);
+            eprintln!("wait_for_input: XInput controller {} initialized", i);
+        }
+    }
+    
     // Track axis states to prevent duplicate triggers
     let mut axis_states: HashMap<(usize, u32), AxisState> = HashMap::new();
     
@@ -120,7 +136,9 @@ pub fn wait_for_input(session_id: String, timeout_secs: u64) -> Result<Option<De
     const AXIS_RESET_THRESHOLD: f32 = 0.3;    // 30% to reset (hysteresis)
 
     while start.elapsed() < timeout {
-        while let Some(event) = gilrs.next_event_blocking(Some(Duration::from_millis(50))) {
+        // Process all available gilrs events (non-blocking)
+        while let Some(event) = gilrs.next_event() {
+            eprintln!("wait_for_input: Received event: {:?}", event);
             match event.event {
                 EventType::ButtonPressed(button, code) => {
                     let joystick_id: usize = event.id.into();
@@ -272,6 +290,56 @@ pub fn wait_for_input(session_id: String, timeout_secs: u64) -> Result<Option<De
                 _ => {}
             }
         }
+        
+        // Poll XInput controllers for button presses
+        for controller_id in 0..4 {
+            if let Ok(state) = xinput.get_state(controller_id) {
+                if let Some(prev_state) = &xinput_prev_states[controller_id as usize] {
+                    // Check if any button was newly pressed
+                    let buttons_pressed = state.raw.Gamepad.wButtons & !prev_state.raw.Gamepad.wButtons;
+                    
+                    if buttons_pressed != 0 {
+                        eprintln!("XInput controller {} button pressed: 0x{:04X}", controller_id, buttons_pressed);
+                        
+                        // Find which button was pressed
+                        let button_num = if buttons_pressed & 0x1000 != 0 { 1 }      // A
+                        else if buttons_pressed & 0x2000 != 0 { 2 }                  // B  
+                        else if buttons_pressed & 0x4000 != 0 { 3 }                  // X
+                        else if buttons_pressed & 0x8000 != 0 { 4 }                  // Y
+                        else if buttons_pressed & 0x0100 != 0 { 5 }                  // LB
+                        else if buttons_pressed & 0x0200 != 0 { 6 }                  // RB
+                        else if buttons_pressed & 0x0010 != 0 { 7 }                  // Back
+                        else if buttons_pressed & 0x0020 != 0 { 8 }                  // Start
+                        else if buttons_pressed & 0x0040 != 0 { 9 }                  // LS
+                        else if buttons_pressed & 0x0080 != 0 { 10 }                 // RS
+                        else if buttons_pressed & 0x0001 != 0 { 11 }                 // DPad Up
+                        else if buttons_pressed & 0x0002 != 0 { 12 }                 // DPad Down
+                        else if buttons_pressed & 0x0004 != 0 { 13 }                 // DPad Left
+                        else if buttons_pressed & 0x0008 != 0 { 14 }                 // DPad Right
+                        else { 0 };
+                        
+                        if button_num > 0 {
+                            let sc_instance = controller_id as usize + 1;
+                            return Ok(Some(DetectedInput {
+                                input_string: format!("js{}_button{}", sc_instance, button_num),
+                                display_name: format!("Joystick {} - Button {}", sc_instance, button_num),
+                                device_type: "Joystick".to_string(),
+                                axis_value: None,
+                                modifiers: get_active_modifiers(),
+                                is_modifier: false,
+                                session_id: session_id.clone(),
+                            }));
+                        }
+                    }
+                }
+                
+                // Update previous state
+                xinput_prev_states[controller_id as usize] = Some(state);
+            }
+        }
+        
+        // Small sleep to prevent CPU spinning
+        std::thread::sleep(Duration::from_millis(10));
     }
 
     Ok(None) // Timeout
@@ -715,16 +783,29 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
     
     let mut joysticks = Vec::new();
     
+    eprintln!("=== Gilrs Gamepad Detection ===");
+    eprintln!("Gilrs version: {}", env!("CARGO_PKG_VERSION"));
+    
     for (_id, gamepad) in gilrs.gamepads() {
+        let name = gamepad.name().to_string();
+        let is_connected = gamepad.is_connected();
+        let id = usize::from(gamepad.id());
+        
+        eprintln!("Found gamepad ID {}: {} (connected: {})", id, name, is_connected);
+        eprintln!("  Power info: {:?}", gamepad.power_info());
+        eprintln!("  Is FF supported: {}", gamepad.is_ff_supported());
+        eprintln!("  UUID: {:?}", gamepad.uuid());
+        
         joysticks.push(JoystickInfo {
-            id: usize::from(gamepad.id()),
-            name: gamepad.name().to_string(),
-            is_connected: gamepad.is_connected(),
+            id,
+            name: name.clone(),
+            is_connected,
             button_count: 32, // gilrs doesn't provide exact count, estimate
             axis_count: 8,     // gilrs doesn't provide exact count, estimate
             hat_count: 1,      // Most devices have at least 1 hat
         });
     }
+    eprintln!("=== Total gamepads found: {} ===", joysticks.len());
     
     Ok(joysticks)
 }

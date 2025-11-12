@@ -101,6 +101,10 @@ function initializeEventListeners()
     {
         templateData.name = e.target.value;
         markAsChanged();
+        if (window.updateTemplateIndicator)
+        {
+            window.updateTemplateIndicator(e.target.value);
+        }
     });
 
     document.getElementById('joystick-model').addEventListener('input', (e) =>
@@ -354,6 +358,12 @@ async function newTemplate()
     localStorage.removeItem('templateFileName');
     hasUnsavedChanges = false;
     updateUnsavedIndicator();
+
+    // Reset header template name
+    if (window.updateTemplateIndicator)
+    {
+        window.updateTemplateIndicator('Untitled Template');
+    }
 }
 
 // Handle image type selection
@@ -2304,6 +2314,12 @@ async function saveTemplate()
         hasUnsavedChanges = false;
         updateUnsavedIndicator();
 
+        // Update header template name
+        if (window.updateTemplateIndicator)
+        {
+            window.updateTemplateIndicator(templateData.name);
+        }
+
         await alert('Template saved successfully!');
     } catch (error)
     {
@@ -2398,6 +2414,19 @@ async function loadTemplate()
         // Reset unsaved changes
         hasUnsavedChanges = false;
         updateUnsavedIndicator();
+
+        // Update header template name
+        console.log('loadTemplate - data.name:', data.name);
+        console.log('window.updateTemplateIndicator exists:', typeof window.updateTemplateIndicator);
+        if (window.updateTemplateIndicator)
+        {
+            console.log('Calling updateTemplateIndicator with:', data.name || 'Untitled Template');
+            window.updateTemplateIndicator(data.name || 'Untitled Template');
+        }
+        else
+        {
+            console.log('window.updateTemplateIndicator is not available');
+        }
 
         // Update UI
         document.getElementById('template-name').value = templateData.name;
@@ -2860,7 +2889,11 @@ async function startTemplateJoystickTest(physicalId, detectedScNum)
     try
     {
         // Wait for input from this specific joystick
-        const result = await invoke('wait_for_input_binding', { timeoutSecs: 10 });
+        const sessionId = 'verify-session-' + Date.now();
+        const result = await invoke('wait_for_input_binding', {
+            sessionId: sessionId,
+            timeoutSecs: 10
+        });
 
         if (result)
         {

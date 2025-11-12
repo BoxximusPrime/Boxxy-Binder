@@ -69,7 +69,11 @@ async function detectInputs()
     try
     {
         // Wait for input with a 1-second timeout
-        const result = await invoke('wait_for_input_binding', { timeoutSecs: 1 });
+        const sessionId = 'debug-session-' + Date.now();
+        const result = await invoke('wait_for_input_binding', {
+            sessionId: sessionId,
+            timeoutSecs: 1
+        });
 
         if (result)
         {

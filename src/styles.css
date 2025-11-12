@@ -374,6 +374,21 @@ p[style*="color: red"] {
   border-bottom: 2px solid #000;
 }
 
+.header-template-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 1rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.header-template-info #header-template-name {
+  color: var(--text-primary);
+}
+
 .header-tabs {
   display: flex;
   gap: 0.5rem;
