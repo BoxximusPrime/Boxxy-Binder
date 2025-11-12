@@ -7,6 +7,10 @@ mod directinput;
 
 use keybindings::{ActionMaps, OrganizedKeybindings, AllBinds, MergedBindings, ActionMap, Action};
 
+// Resources subfolder name - change this to customize the bundled resources folder
+// Note: Tauri automatically names this "_up_" in the bundle, so this must match that name
+const RESOURCES_SUBFOLDER: &str = "_up_";
+
 // Command to get the app version from Cargo.toml
 #[tauri::command]
 fn get_app_version() -> String {
@@ -352,11 +356,11 @@ fn load_all_binds(state: tauri::State<Mutex<AppState>>, app_handle: tauri::AppHa
             .join("AllBinds.xml")
     } else {
         // Production: use Tauri's resource resolver
-        // File is in the _up_ subfolder within resources
+        // File is in the resources subfolder within resources
         app_handle.path()
             .resource_dir()
             .map_err(|e| format!("Failed to get resource dir: {}", e))?
-            .join("_up_")
+            .join(RESOURCES_SUBFOLDER)
             .join("AllBinds.xml")
     };
     
@@ -732,6 +736,30 @@ fn get_log_file_path(app_handle: tauri::AppHandle) -> Result<String, String> {
     Ok(log_file.to_string_lossy().to_string())
 }
 
+#[tauri::command]
+fn get_resource_dir(app_handle: tauri::AppHandle) -> Result<String, String> {
+    let resource_dir = if cfg!(debug_assertions) {
+        // Development: look in project root
+        let exe_path = std::env::current_exe()
+            .map_err(|e| format!("Failed to get exe path: {}", e))?;
+        let exe_dir = exe_path.parent()
+            .ok_or_else(|| "Failed to get exe directory".to_string())?;
+        exe_dir.parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .ok_or_else(|| "Failed to find project root".to_string())?
+            .to_path_buf()
+    } else {
+        // Production: use Tauri's resource resolver
+        app_handle.path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to get resource dir: {}", e))?
+            .join(RESOURCES_SUBFOLDER)
+    };
+    
+    Ok(resource_dir.to_string_lossy().to_string())
+}
+
 fn setup_logging(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     use std::fs::OpenOptions;
     use std::io::Write;
@@ -798,7 +826,8 @@ pub fn run() {
             write_binary_file,
             log_error,
             log_info,
-            get_log_file_path
+            get_log_file_path,
+            get_resource_dir
         ])
         .setup(|app| {
             // Set up logging

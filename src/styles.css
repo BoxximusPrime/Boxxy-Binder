@@ -277,7 +277,7 @@ p[style*="color: red"] {
 }
 
 #app-version {
-  font-size: 0.8em;
+  font-size: 0.7em;
   color: #8f6969;
 }
 
@@ -380,7 +380,7 @@ p[style*="color: red"] {
 }
 
 .header-template-info {
-  display: flex;
+  display: none;
   align-items: center;
   gap: 0.5rem;
   padding: 0 1rem;
@@ -392,6 +392,18 @@ p[style*="color: red"] {
 
 .header-template-info #header-template-name {
   color: var(--text-primary);
+}
+
+/* Show template info only on visual and template tabs */
+.tab-content.active[id="tab-content-visual"]~.app-header .header-template-info,
+.tab-content.active[id="tab-content-template"]~.app-header .header-template-info {
+  display: flex;
+}
+
+/* Alternative approach: use JavaScript to control visibility based on active tab */
+body.tab-visual .header-template-info,
+body.tab-template .header-template-info {
+  display: flex !important;
 }
 
 .header-tabs {
@@ -428,6 +440,7 @@ p[style*="color: red"] {
   display: flex;
   gap: 0.75rem;
   flex-shrink: 0;
+  margin-right: 40px;
 }
 
 .main-content {
@@ -1328,7 +1341,7 @@ input[type="checkbox"]:disabled:hover {
 
 .joystick-mapping-item {
   background: var(--bg-medium);
-  border: 1px solid var(--button-border);
+  border: 1px solid var(--bg-lightest);
   border-radius: 6px;
   padding: 1rem;
   display: flex;
@@ -1361,6 +1374,8 @@ input[type="checkbox"]:disabled:hover {
 .joystick-mapping-controls label {
   color: var(--text-secondary);
   font-size: 0.9rem;
+  display: flex;
+  align-items: center;
 }
 
 .joystick-mapping-info {
@@ -1580,6 +1595,76 @@ input[type="checkbox"]:disabled:hover {
   }
 }
 
+.modal-header {
+  justify-content: space-between;
+  align-items: center;
+  padding: 0;
+  border-bottom: 1px solid #444;
+  margin-left: -28px;
+  margin-right: -28px;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.4em;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.5em;
+  cursor: pointer;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.modal-close:hover {
+  background: #444;
+  color: #fff;
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.5em;
+  cursor: pointer;
+  padding: 0;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.btn-close:hover {
+  background: #444;
+  color: #fff;
+}
+
+.modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-footer {
+  padding: 15px 20px;
+  border-top: 2px solid #444;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .confirmation-modal-content .modal-header h2 {
   color: var(--text-primary);
   font-size: 1.2rem;
@@ -1703,4 +1788,68 @@ input[type="checkbox"]:disabled:hover {
   display: none;
   margin-top: 0.5rem;
   text-align: center;
+}
+
+/* Help Page */
+.help-page-container {
+  width: 100%;
+  margin: 0 auto;
+  overflow-y: auto;
+  height: calc(100vh - 140px);
+  padding: 2rem 8rem 2rem 8rem;
+}
+
+.help-section {
+  margin-bottom: 2.5rem;
+  padding-bottom: 2rem;
+  border-bottom: 1px solid var(--bg-lightest);
+}
+
+.help-section:last-child {
+  border-bottom: none;
+}
+
+.help-section h3 {
+  color: var(--accent-primary);
+  margin-bottom: 1rem;
+  font-size: 1.5rem;
+}
+
+.help-section h4 {
+  color: var(--text-primary);
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  font-size: 1.2rem;
+}
+
+.help-section p {
+  margin-bottom: 1rem;
+  line-height: 1.8;
+  font-size: 1rem;
+}
+
+.help-section ul,
+.help-section ol {
+  margin-left: 2rem;
+  margin-bottom: 1rem;
+}
+
+.help-section li {
+  margin-bottom: 0.75rem;
+  line-height: 1.8;
+  font-size: 1rem;
+}
+
+.help-section strong {
+  color: var(--accent-hover);
+}
+
+.help-note {
+  background: var(--bg-medium);
+  padding: 1rem;
+  border-left: 3px solid var(--accent-primary);
+  border-radius: 4px;
+  margin-top: 1rem;
+  font-style: italic;
+  font-size: 0.95rem;
 }

@@ -1297,6 +1297,7 @@ async function clearAllButtons()
     const buttons = getCurrentButtons();
     if (buttons.length === 0) return;
 
+
     const showConfirmation = window.showConfirmation;
     if (!showConfirmation)
     {
@@ -1308,7 +1309,8 @@ async function clearAllButtons()
         'Are you sure you want to clear all buttons? This cannot be undone.',
         'Clear All Buttons',
         'Clear All',
-        'Cancel'
+        'Cancel',
+        'btn-danger'
     );
 
     if (!confirmed) return;
@@ -1324,76 +1326,109 @@ async function mirrorTemplate()
 {
     if (!loadedImage)
     {
-        await alert('Please load an image first');
+        await window.showAlert('Please load an image first', 'Load Image First');
         return;
     }
 
     if (templateData.imageFlipped === 'none')
     {
-        await alert('Cannot mirror template in dual image mode or when mirroring is disabled');
+        await window.showAlert('Cannot mirror template in dual image mode or when mirroring is disabled', 'Mirror Disabled');
         return;
     }
 
-    if (!await confirm('Mirror template? This will flip the imageFlipped setting and mirror all button positions for the current stick.'))
+    // Show custom confirmation with direction options
+    const stickName = currentStick === 'left' ? 'Left' : 'Right';
+    const otherStick = currentStick === 'left' ? 'Right' : 'Left';
+
+    const confirmed = await window.showConfirmation(
+        `Mirror ${stickName} stick buttons to ${otherStick} stick?\n\nThis will copy and flip all button positions for the current stick to the other stick horizontally.`,
+        'Mirror Template',
+        `Mirror ${stickName} → ${otherStick}`,
+        'Cancel',
+        'btn-secondary'
+    );
+
+    if (!confirmed)
     {
         return;
     }
 
-    // Toggle imageFlipped between 'left' and 'right'
-    templateData.imageFlipped = templateData.imageFlipped === 'left' ? 'right' : 'left';
-    document.getElementById('image-flip-select').value = templateData.imageFlipped;
+    // Determine source and destination sticks
+    const sourceStick = currentStick;
+    const sourceData = currentStick === 'left' ? templateData.leftStick : templateData.rightStick;
+    const destStick = currentStick === 'left' ? 'right' : 'left';
+    const destData = currentStick === 'left' ? templateData.rightStick : templateData.leftStick;
 
-    // Mirror all button positions for current stick horizontally
+    // Mirror all button positions from source to destination
     const imageWidth = loadedImage.width;
-    const buttons = getCurrentButtons();
+    const sourceButtons = sourceData.buttons;
 
-    buttons.forEach(button =>
+    // Create mirrored copies of all buttons
+    const mirroredButtons = sourceButtons.map(button =>
     {
+        const mirroredButton = JSON.parse(JSON.stringify(button)); // Deep copy
+        mirroredButton.id = Date.now() + Math.random(); // Give new unique ID
+
         // Mirror button position
-        button.buttonPos.x = imageWidth - button.buttonPos.x;
+        mirroredButton.buttonPos.x = imageWidth - mirroredButton.buttonPos.x;
 
         // Mirror label position
-        if (button.labelPos)
+        if (mirroredButton.labelPos)
         {
-            button.labelPos.x = imageWidth - button.labelPos.x;
+            mirroredButton.labelPos.x = imageWidth - mirroredButton.labelPos.x;
         }
+
+        return mirroredButton;
     });
 
-    markAsChanged();
-    updateButtonList();
-    redraw();
+    // Replace destination stick buttons with mirrored copies
+    destData.buttons = mirroredButtons;
 
-    await alert(`Template mirrored! ImageFlipped is now: ${templateData.imageFlipped}`);
+    markAsChanged();
+
+    // Switch to destination stick to show the mirrored result
+    switchStick(destStick);
+
+    await window.showAlert(
+        `Successfully mirrored ${stickName} stick buttons to ${otherStick} stick!`,
+        'Mirror Complete'
+    );
 }
+
 
 async function changeAllJoystickNumbers()
 {
-    const allButtons = [...templateData.leftStick, ...templateData.rightStick];
-    if (allButtons.length === 0)
+    // Get current stick data
+    const currentStickData = currentStick === 'left' ? templateData.leftStick : templateData.rightStick;
+    const buttons = currentStickData.buttons;
+
+    if (buttons.length === 0)
     {
-        await alert('No buttons to update');
+        await window.showAlert('No buttons in current view to update', 'No Buttons');
         return;
     }
 
-    // Show a dialog to let the user choose the target joystick number
-    const targetJs = await prompt('Enter target joystick number (1 or 2):', '1');
+    // Get current joystick number and toggle it
+    const currentJsNum = currentStickData.joystickNumber || 1;
+    const targetJsNum = currentJsNum === 1 ? 2 : 1;
 
-    if (targetJs === null) return; // User cancelled
+    const confirmed = await window.showConfirmation(
+        `Change all button joystick numbers in ${currentStick} stick from js${currentJsNum} to js${targetJsNum}?`,
+        'Change Joystick Numbers',
+        'Change',
+        'Cancel'
+    );
 
-    const targetJsNum = parseInt(targetJs);
-    if (isNaN(targetJsNum) || targetJsNum < 1 || targetJsNum > 2)
+    if (!confirmed)
     {
-        await alert('Invalid joystick number. Please enter 1 or 2.');
         return;
     }
 
-    if (!await confirm(`Change all button joystick numbers to js${targetJsNum}?`))
-    {
-        return;
-    }
+    // Update the stick's joystick number
+    currentStickData.joystickNumber = targetJsNum;
 
-    // Update all button inputs in both sticks
-    allButtons.forEach(button =>
+    // Update all button inputs in the current stick
+    buttons.forEach(button =>
     {
         if (button.inputs)
         {
@@ -1402,7 +1437,7 @@ async function changeAllJoystickNumbers()
                 const input = button.inputs[key];
                 if (typeof input === 'string')
                 {
-                    // Replace any js1_ or js2_ with the target js number
+                    // Replace the old js number with the new one
                     button.inputs[key] = input.replace(/^js[1-2]_/, `js${targetJsNum}_`);
                 }
             });
@@ -1413,7 +1448,10 @@ async function changeAllJoystickNumbers()
     updateButtonList();
     redraw();
 
-    await alert(`All buttons updated to use joystick ${targetJsNum}!`);
+    await window.showAlert(
+        `All buttons in ${currentStick} stick updated to use joystick ${targetJsNum}!`,
+        'Update Complete'
+    );
 }
 
 function updateButtonList()
@@ -2262,12 +2300,23 @@ async function saveTemplate()
 
     try
     {
+        let resourceDir;
+        try
+        {
+            resourceDir = await invoke('get_resource_dir');
+        }
+        catch (e)
+        {
+            console.warn('Could not get resource directory:', e);
+            resourceDir = undefined;
+        }
+
         const filePath = await save({
             filters: [{
                 name: 'Joystick Template',
                 extensions: ['json']
             }],
-            defaultPath: `${templateData.name.replace(/[^a-z0-9]/gi, '_')}.json`
+            defaultPath: resourceDir ? `${resourceDir}/${templateData.name.replace(/[^a-z0-9]/gi, '_')}.json` : `${templateData.name.replace(/[^a-z0-9]/gi, '_')}.json`
         });
 
         if (!filePath) return; // User cancelled
@@ -2355,12 +2404,23 @@ async function loadTemplate()
 {
     try
     {
+        let defaultPath;
+        try
+        {
+            defaultPath = await invoke('get_resource_dir');
+        }
+        catch (e)
+        {
+            console.warn('Could not get resource directory:', e);
+        }
+
         const filePath = await open({
             filters: [{
                 name: 'Joystick Template',
                 extensions: ['json']
             }],
-            multiple: false
+            multiple: false,
+            defaultPath: defaultPath
         });
 
         if (!filePath) return; // User cancelled

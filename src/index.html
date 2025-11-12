@@ -46,8 +46,10 @@
           <button id="tab-visual" class="tab-btn" data-tab="visual">Visual View</button>
           <button id="tab-template" class="tab-btn" data-tab="template">Template Editor</button>
           <button id="tab-debugger" class="tab-btn" data-tab="debugger">Input Debugger</button>
+          <button id="tab-help" class="tab-btn" data-tab="help">❓ Help</button>
         </div>
         <div class="header-template-info">
+          <span>Template:</span>
           <span id="header-template-name">Untitled Template</span>
         </div>
       </div>
@@ -414,6 +416,101 @@
           </main>
         </div>
       </div>
+
+      <!-- TAB 5: Help Page -->
+      <div id="tab-content-help" class="tab-content">
+        <div class="tab-subheader">
+          <h2>❓ Help & Tips</h2>
+        </div>
+
+        <div class="help-page-container">
+          <div class="help-section">
+            <h3>🎮 Understanding JS1 and JS2</h3>
+            <p>Star Citizen uses "js1", "js2", "js3", etc. to identify different joystick/gamepad devices. This
+              numbering
+              system is crucial for proper binding management.</p>
+            <ul>
+              <li><strong>js1</strong> = First joystick device</li>
+              <li><strong>js2</strong> = Second joystick device</li>
+              <li><strong>gp1</strong> = First gamepad device (Xbox controllers, etc.)</li>
+            </ul>
+            <p class="help-note"><strong>Important:</strong> Windows may enumerate devices differently each time you
+              plug
+              them in or restart your PC. This is why device mapping is critical!</p>
+          </div>
+
+          <div class="help-section">
+            <h3>📝 Template Editor Tips</h3>
+            <p>When creating a joystick template:</p>
+            <ol>
+              <li><strong>Configure Joystick Mapping First!</strong> Click the "Configure Joystick Mapping" button in
+                the
+                Template Info section before adding any buttons.</li>
+              <li>This tells the template which physical device corresponds to the left stick and which is the right
+                stick.</li>
+              <li>Without this mapping, the template won't know which device you're configuring buttons for.</li>
+              <li>You can test device detection by clicking "Test" next to each device to confirm you're pressing
+                buttons
+                on the correct stick.</li>
+            </ol>
+            <p class="help-note"><strong>Tip:</strong> If you have a dual stick setup (e.g., VKB Gladiator), typically
+              the
+              left stick is js1 and right stick is js2, but this can vary!</p>
+          </div>
+
+          <div class="help-section">
+            <h3>🎯 Keybindings Page Tips</h3>
+            <p>Before editing keybindings:</p>
+            <ol>
+              <li><strong>Set Joystick Mapping!</strong> Click "Configure Joystick Mapping" at the top of the page.</li>
+              <li>This assigns device IDs (js1, js2, etc.) to your physical devices.</li>
+              <li>When you press a button on a device, the app will know which js number to use based on this mapping.
+              </li>
+              <li>Use the "Test" button to confirm which physical device corresponds to each js number.</li>
+              <li>Save the mapping - it persists between sessions so you don't have to reconfigure every time!</li>
+            </ol>
+            <p class="help-note"><strong>Why is this important?</strong> If you don't map devices first, bindings may be
+              assigned to the wrong js number, causing controls to not work correctly in Star Citizen.</p>
+          </div>
+
+          <div class="help-section">
+            <h3>🔄 Common Workflows</h3>
+            <h4>Creating a New Template:</h4>
+            <ol>
+              <li>Go to Template Editor tab</li>
+              <li>Click "Configure Joystick Mapping"</li>
+              <li>Assign your left and right sticks</li>
+              <li>Load an image of your joystick</li>
+              <li>Add buttons by clicking their positions</li>
+              <li>Save your template</li>
+            </ol>
+
+            <h4>Editing Keybindings:</h4>
+            <ol>
+              <li>Click "Configure Joystick Mapping" (first time only)</li>
+              <li>Load your keybindings XML file (or it auto-loads)</li>
+              <li>Select a template in Visual View (optional but helpful)</li>
+              <li>Find the action you want to bind</li>
+              <li>Click "Detect Input" and press the button</li>
+              <li>Save your changes</li>
+            </ol>
+          </div>
+
+          <div class="help-section">
+            <h3>❓ Troubleshooting</h3>
+            <ul>
+              <li><strong>Buttons not working in-game?</strong> Check your joystick mapping. The js numbers in your
+                bindings file must match how Star Citizen sees your devices.</li>
+              <li><strong>Wrong device responding?</strong> Reconfigure joystick mapping and make sure to test each
+                device.</li>
+              <li><strong>Lost your mapping?</strong> The app stores device mapping in localStorage, but you can always
+                reconfigure it.</li>
+              <li><strong>Template buttons look wrong?</strong> Use the mirror template feature or adjust image flip
+                settings.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -470,7 +567,7 @@
       </div>
       <div class="modal-footer">
         <button id="joystick-mapping-detect" class="btn btn-primary">🔄 Detect Joysticks</button>
-        <button id="joystick-mapping-save" class="btn btn-primary">Save Mapping</button>
+        <button id="joystick-mapping-save" class="btn btn-success">Save Mapping</button>
         <button id="joystick-mapping-cancel" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
@@ -612,7 +709,7 @@
       </div>
       <div class="modal-footer">
         <button id="template-joystick-mapping-detect" class="btn btn-primary">🔄 Detect Joysticks</button>
-        <button id="template-joystick-mapping-save" class="btn btn-primary">Save Mapping</button>
+        <button id="template-joystick-mapping-save" class="btn btn-success">Save Mapping</button>
         <button id="template-joystick-mapping-cancel" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
@@ -633,7 +730,10 @@
       </div>
     </div>
   </div>
+  </div>
+  </div>
 
+  <!-- Help Modal -->
   <!-- Hidden file inputs -->
   <input type="file" id="image-file-input" accept="image/*" style="display: none;" />
   <input type="file" id="template-file-input" accept=".json" style="display: none;" />

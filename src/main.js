@@ -170,7 +170,7 @@ function convertKeyCodeToSC(code, key)
  * @param {string} cancelText - Optional text for cancel button (default: "Cancel")
  * @returns {Promise<boolean>} - Resolves to true if confirmed, false if cancelled
  */
-async function showConfirmation(message, title = "Confirm Action", confirmText = "Confirm", cancelText = "Cancel")
+async function showConfirmation(message, title = "Confirm Action", confirmText = "Confirm", cancelText = "Cancel", confirmBtnClass = "btn-primary")
 {
   return new Promise((resolve) =>
   {
@@ -185,6 +185,10 @@ async function showConfirmation(message, title = "Confirm Action", confirmText =
     messageEl.textContent = message;
     confirmBtn.textContent = confirmText;
     cancelBtn.textContent = cancelText;
+
+    // Reset and apply button classes
+    confirmBtn.className = 'btn ' + confirmBtnClass;
+    cancelBtn.className = 'btn btn-secondary';
 
     // Show modal
     modal.style.display = 'flex';
@@ -414,6 +418,10 @@ function switchTab(tabName)
   {
     content.classList.toggle('active', content.id === `tab-content-${tabName}`);
   });
+
+  // Update body class for CSS selectors to show/hide template info
+  document.body.classList.remove('tab-main', 'tab-visual', 'tab-template', 'tab-debugger');
+  document.body.classList.add(`tab-${tabName}`);
 
   // Save to localStorage
   localStorage.setItem('currentTab', tabName);
@@ -967,7 +975,8 @@ function renderCategories()
   {
     item.addEventListener('click', (e) =>
     {
-      document.querySelectorAll('.category-item').forEach(i => i.classList.remove('active'));
+      // Only remove active from items within this category list, not filter buttons
+      categoryList.querySelectorAll('.category-item').forEach(i => i.classList.remove('active'));
       e.target.classList.add('active');
       currentCategory = e.target.dataset.category === 'all' ? null : e.target.dataset.category;
       renderKeybindings();

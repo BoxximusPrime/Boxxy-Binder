@@ -308,7 +308,7 @@
 }
 
 .modal-content {
-    background: #2a2a2a;
+    background: var(--bg-light);
     border-radius: 8px;
     width: 90%;
     max-width: 600px;
@@ -329,76 +329,6 @@
         transform: translateY(0);
         opacity: 1;
     }
-}
-
-.modal-header {
-    justify-content: space-between;
-    align-items: center;
-    padding: 0;
-    border-bottom: 1px solid #444;
-    margin-left: -28px;
-    margin-right: -28px;
-}
-
-.modal-header h2 {
-    margin: 0;
-    font-size: 1.4em;
-}
-
-.modal-close {
-    background: none;
-    border: none;
-    color: #888;
-    font-size: 1.5em;
-    cursor: pointer;
-    padding: 0;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-    transition: all 0.2s;
-}
-
-.modal-close:hover {
-    background: #444;
-    color: #fff;
-}
-
-.btn-close {
-    background: none;
-    border: none;
-    color: #888;
-    font-size: 1.5em;
-    cursor: pointer;
-    padding: 0;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 4px;
-    transition: all 0.2s;
-}
-
-.btn-close:hover {
-    background: #444;
-    color: #fff;
-}
-
-.modal-body {
-    padding: 20px;
-    overflow-y: auto;
-    flex: 1;
-}
-
-.modal-footer {
-    padding: 15px 20px;
-    border-top: 2px solid #444;
-    display: flex;
-    justify-content: flex-end;
-    gap: 10px;
 }
 
 .device-list {

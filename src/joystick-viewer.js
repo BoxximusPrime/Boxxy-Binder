@@ -1566,8 +1566,19 @@ async function exportToImage()
             {
                 // Open save dialog
                 const fileName = `joystick_bindings_${new Date().getTime()}.png`;
+
+                let resourceDir;
+                try
+                {
+                    resourceDir = await invoke('get_resource_dir');
+                }
+                catch (e)
+                {
+                    console.warn('Could not get resource directory:', e);
+                }
+
                 const filePath = await save({
-                    defaultPath: fileName,
+                    defaultPath: resourceDir ? `${resourceDir}/${fileName}` : fileName,
                     filters: [
                         {
                             name: 'PNG Image',
