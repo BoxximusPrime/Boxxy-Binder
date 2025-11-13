@@ -1709,14 +1709,21 @@ input[type="checkbox"]:disabled:hover {
 }
 
 .update-badge {
-  display: inline-block;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 1.1em;
-  color: #ffcc00;
+  color: #4ebf68;
   transition: transform 0.2s ease;
 }
 
+.update-badge img {
+  height: 2.0em;
+  width: auto;
+}
+
 .update-badge:hover {
-  transform: scale(1.2);
+  transform: scale(1.05);
 }
 
 .modal-header {

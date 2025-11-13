@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="input-debugger.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Star Citizen Bindnig Utility</title>
+  <script type="module" src="/button-renderer.js" defer></script>
   <script type="module" src="/main.js" defer></script>
   <script type="module" src="/joystick-viewer.js" defer></script>
   <script type="module" src="/template-editor.js" defer></script>
@@ -129,7 +130,8 @@
           <!-- Joystick Display -->
           <div class="joystick-display">
             <!-- Quick Tips -->
-            <div class="quick-tips" style="top:3rem;right:3rem;">Middle click to pan view<br>Scroll wheel to zoom</div>
+            <div class="quick-tips" style="top:3rem;right:3rem;">Middle click to pan view<br>Scroll wheel to
+              zoom<br>Click on button boxes to show all actions<br>Grey actions are default SC bind actions</div>
 
             <div id="welcome-screen-visual" class="welcome-screen">
               <div class="welcome-content">
@@ -312,7 +314,8 @@
           <main class="editor-panel">
             <div class="canvas-container" id="canvas-container">
               <!-- Quick Tips -->
-              <div class="quick-tips">Middle click to pan view<br>Scroll wheel to zoom<br>Double click buttons to
+              <div class="quick-tips">Middle click to pan view<br>Scroll wheel to zoom<br>Press <kbd>F</kbd> to fit
+                view<br>Double click buttons to
                 edit<br>Left click + drag buttons to move
               </div>
 
@@ -333,6 +336,9 @@
                 <div class="control-group">
                   <button id="save-template-btn" class="control-btn btn-success" title="Save current template">💾
                     Save</button>
+                  <button id="save-template-as-btn" class="control-btn btn-primary"
+                    title="Save template with a new name">💾
+                    Save As</button>
                 </div>
               </div>
               <canvas id="editor-canvas"></canvas>
@@ -785,6 +791,7 @@
     <span id="debug-log-path" style="cursor: pointer; text-decoration: underline;"
       title="Click to copy log file path">Logs</span>
   </div>
+  <img id="hidden-back" src="/src/icons/update_avail.png" hidden>
 </body>
 
 </html>

@@ -1,22 +1,110 @@
 const { invoke } = window.__TAURI__.core;
 const { open, save } = window.__TAURI__.dialog;
 
-// State
+// Import shared rendering utilities
+import
+{
+    ButtonFrameWidth,
+    ButtonFrameHeight,
+    HatFrameWidth,
+    HatFrameHeight,
+    simplifyButtonName,
+    drawConnectingLine,
+    drawButtonMarker,
+    drawButtonBox,
+    getHat4WayPositions,
+    drawHat4WayBoxes,
+    roundRect
+} from './button-renderer.js';
+
+// ========================================
+// State Management
+// ========================================
+
+// Template and bindings
 let currentTemplate = null;
 let currentBindings = null;
+
+// Canvas elements
 let canvas, ctx;
-let hasUnsavedChanges = false;
+
+// UI state
 let selectedButton = null;
+let selectedBox = null; // Track the currently selected/clicked box for highlighting
 let clickableBoxes = []; // Track clickable binding boxes for mouse events
-let canvasTransform = { x: 0, y: 0, scale: 1 }; // Current canvas transform
+
+// View transform
 let zoom = 1.0;
 let pan = { x: 0, y: 0 };
 let isPanning = false;
 let lastPanPosition = { x: 0, y: 0 };
+
+// Filter state
 let currentStick = 'right'; // Currently viewing 'left' or 'right'
 let hideDefaultBindings = false; // Filter to hide default bindings
 let modifierFilter = 'all'; // Current modifier filter: 'all', 'lalt', 'lctrl', etc.
-let drawBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }; // Track drawing bounds for export
+
+// Export bounds tracking
+let drawBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+
+// ========================================
+// Constants
+// ========================================
+
+// Drawing modes
+const DrawMode = {
+    NORMAL: 'normal',
+    EXPORT: 'export',
+    BOUNDS_ONLY: 'bounds_only'
+};
+
+// ========================================
+// Utility Functions
+// ========================================
+
+// Helper to get current joystick number
+function getCurrentJoystickNumber()
+{
+    const currentStickData = currentStick === 'left' ? currentTemplate.leftStick : currentTemplate.rightStick;
+    return (currentStickData && currentStickData.joystickNumber) || currentTemplate.joystickNumber || 1;
+}
+
+// Normalize template data to current format (handles legacy formats)
+function normalizeTemplateData(templateData)
+{
+    // Handle old format: convert buttons array to rightStick
+    if (templateData.buttons && !templateData.rightStick)
+    {
+        templateData.rightStick = { joystickNumber: 2, buttons: templateData.buttons };
+        templateData.leftStick = { joystickNumber: 1, buttons: [] };
+    }
+    // Ensure nested structure has buttons array
+    else if (templateData.leftStick || templateData.rightStick)
+    {
+        if (templateData.leftStick && typeof templateData.leftStick === 'object' &&
+            !Array.isArray(templateData.leftStick) && !templateData.leftStick.buttons)
+        {
+            templateData.leftStick.buttons = [];
+        }
+        if (templateData.rightStick && typeof templateData.rightStick === 'object' &&
+            !Array.isArray(templateData.rightStick) && !templateData.rightStick.buttons)
+        {
+            templateData.rightStick.buttons = [];
+        }
+    }
+
+    // Handle old imageFlipped boolean format
+    if (typeof templateData.imageFlipped === 'boolean')
+    {
+        templateData.imageFlipped = templateData.imageFlipped ? 'left' : 'right';
+    }
+
+    return templateData;
+}
+
+// ========================================
+// Initialization
+// ========================================
 
 // Export initialization function for tab system
 window.initializeVisualView = function ()
@@ -74,7 +162,7 @@ function initializeEventListeners()
             hideDefaultBindings = !hideDefaultBindings;
             updateHideDefaultsButton();
             // Save preference
-            localStorage.setItem('hideDefaultBindings', hideDefaultBindings.toString());
+            ViewerState.saveViewState();
             // Redraw canvas
             if (window.viewerImage)
             {
@@ -90,7 +178,7 @@ function initializeEventListeners()
         {
             modifierFilter = e.target.value;
             // Save preference
-            localStorage.setItem('modifierFilter', modifierFilter);
+            ViewerState.saveViewState();
             // Redraw canvas
             if (window.viewerImage)
             {
@@ -191,38 +279,12 @@ async function onTemplateFileSelected(e)
     try
     {
         const text = await file.text();
-        const templateData = JSON.parse(text);
-
-        // Handle old format: convert buttons array to rightStick
-        if (templateData.buttons && !templateData.rightStick)
-        {
-            templateData.rightStick = { joystickNumber: 2, buttons: templateData.buttons };
-            templateData.leftStick = { joystickNumber: 1, buttons: [] };
-        }
-        // Ensure nested structure has buttons array
-        else if (templateData.leftStick || templateData.rightStick)
-        {
-            if (templateData.leftStick && typeof templateData.leftStick === 'object' && !Array.isArray(templateData.leftStick) && !templateData.leftStick.buttons)
-            {
-                templateData.leftStick.buttons = [];
-            }
-            if (templateData.rightStick && typeof templateData.rightStick === 'object' && !Array.isArray(templateData.rightStick) && !templateData.rightStick.buttons)
-            {
-                templateData.rightStick.buttons = [];
-            }
-        }
-
-        // Handle old imageFlipped boolean format
-        if (typeof templateData.imageFlipped === 'boolean')
-        {
-            templateData.imageFlipped = templateData.imageFlipped ? 'left' : 'right';
-        }
+        const templateData = normalizeTemplateData(JSON.parse(text));
 
         currentTemplate = templateData;
 
         // Persist to localStorage
-        localStorage.setItem('currentTemplate', JSON.stringify(templateData));
-        localStorage.setItem('templateFileName', file.name);
+        ViewerState.saveTemplate(templateData, file.name);
 
         // Update header template name
         console.log('onTemplateFileSelected - templateData.name:', templateData.name);
@@ -283,15 +345,14 @@ function restoreViewState()
             }
         }
 
-        // Restore pan and zoom
-        const savedPan = localStorage.getItem('viewerPan');
+        // Restore pan and zoom using ViewerState helper
+        const savedPan = ViewerState.load('viewerPan');
         const savedZoom = localStorage.getItem('viewerZoom');
 
         if (savedPan)
         {
-            const panData = JSON.parse(savedPan);
-            pan.x = panData.x || 0;
-            pan.y = panData.y || 0;
+            pan.x = savedPan.x || 0;
+            pan.y = savedPan.y || 0;
         }
 
         if (savedZoom)
@@ -331,35 +392,10 @@ function loadPersistedTemplate()
 {
     try
     {
-        const savedTemplate = localStorage.getItem('currentTemplate');
+        const savedTemplate = ViewerState.load('currentTemplate');
         if (savedTemplate)
         {
-            currentTemplate = JSON.parse(savedTemplate);
-
-            // Handle old format: convert buttons array to rightStick
-            if (currentTemplate.buttons && !currentTemplate.rightStick)
-            {
-                currentTemplate.rightStick = { joystickNumber: 2, buttons: currentTemplate.buttons };
-                currentTemplate.leftStick = { joystickNumber: 1, buttons: [] };
-            }
-            // Ensure nested structure has buttons array
-            else if (currentTemplate.leftStick || currentTemplate.rightStick)
-            {
-                if (currentTemplate.leftStick && typeof currentTemplate.leftStick === 'object' && !Array.isArray(currentTemplate.leftStick) && !currentTemplate.leftStick.buttons)
-                {
-                    currentTemplate.leftStick.buttons = [];
-                }
-                if (currentTemplate.rightStick && typeof currentTemplate.rightStick === 'object' && !Array.isArray(currentTemplate.rightStick) && !currentTemplate.rightStick.buttons)
-                {
-                    currentTemplate.rightStick.buttons = [];
-                }
-            }
-
-            // Handle old imageFlipped boolean format
-            if (typeof currentTemplate.imageFlipped === 'boolean')
-            {
-                currentTemplate.imageFlipped = currentTemplate.imageFlipped ? 'left' : 'right';
-            }
+            currentTemplate = normalizeTemplateData(savedTemplate);
 
             // Update header template name
             if (window.updateTemplateIndicator)
@@ -383,7 +419,7 @@ function switchStick(stick)
     currentStick = stick;
 
     // Save to localStorage
-    localStorage.setItem('viewerCurrentStick', stick);
+    ViewerState.saveViewState();
 
     // Update button states
     document.getElementById('viewer-left-stick-btn').classList.toggle('active', stick === 'left');
@@ -533,6 +569,17 @@ function resizeViewerCanvas()
     // Don't track bounds for normal drawing - we need to populate clickable boxes
     drawButtons(window.viewerImage);
 
+    // Draw highlight border around selected box if any
+    if (selectedBox)
+    {
+        ctx.strokeStyle = '#7dd3c0';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([5, 5]);
+        roundRect(ctx, selectedBox.x - 3, selectedBox.y - 3, selectedBox.width + 6, selectedBox.height + 6, 6);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
     ctx.restore();
 }
 
@@ -546,10 +593,14 @@ function updateBounds(x, y, width = 0, height = 0)
 }
 
 
-function drawButtons(img, trackBounds = false)
+// ========================================
+// Button Drawing Functions
+// ========================================
+
+function drawButtons(img, mode = DrawMode.NORMAL)
 {
-    // Clear clickable boxes array (only when not tracking bounds)
-    if (!trackBounds)
+    // Clear clickable boxes array (only in normal mode)
+    if (mode === DrawMode.NORMAL)
     {
         clickableBoxes = [];
     }
@@ -560,366 +611,254 @@ function drawButtons(img, trackBounds = false)
         // Check if this is a 4-way hat
         if (button.buttonType === 'hat4way')
         {
-            drawHat4Way(button, trackBounds);
+            drawHat4Way(button, mode);
         }
         else
         {
-            drawSingleButton(button, trackBounds);
+            drawSingleButton(button, mode);
         }
     });
 }
 
-function drawSingleButton(button, trackBounds = false)
+function drawSingleButton(button, mode = DrawMode.NORMAL)
 {
     // Find ALL bindings for this button
     const bindings = findAllBindingsForButton(button);
+
+    // Only track bounds in bounds mode
+    if (mode === DrawMode.BOUNDS_ONLY)
+    {
+        if (bindings.length > 0)
+        {
+            updateBounds(button.buttonPos.x, button.buttonPos.y, 14, 14);
+        }
+        if (button.labelPos)
+        {
+            updateBounds(button.labelPos.x, button.labelPos.y, ButtonFrameWidth, ButtonFrameHeight);
+        }
+        return;
+    }
 
     // Draw line connecting button to label
     if (button.labelPos)
     {
         const lineColor = bindings.length > 0 ? '#d9534f' : '#666';
-        drawConnectingLine(button.buttonPos, button.labelPos, 140 / 2, lineColor);
+        drawConnectingLine(ctx, button.buttonPos, button.labelPos, ButtonFrameWidth / 2, lineColor, false);
     }
 
     // Draw button position marker
-    ctx.fillStyle = bindings.length > 0 ? '#d9534f' : '#666';
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(button.buttonPos.x, button.buttonPos.y, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    // Track bounds for button marker
-    if (trackBounds)
-    {
-        updateBounds(button.buttonPos.x, button.buttonPos.y, 14, 14);
-    }
+    drawButtonMarker(ctx, button.buttonPos, 1, bindings.length > 0, false);
 
     // Draw label box with binding info
     if (button.labelPos)
     {
-        drawBindingBox(button.labelPos.x, button.labelPos.y, simplifyButtonName(button.name), bindings, false, button, trackBounds);
+        drawBindingBoxLocal(button.labelPos.x, button.labelPos.y, simplifyButtonName(button.name), bindings, false, button, mode);
     }
 }
 
-function drawHat4Way(hat, trackBounds = false)
+function drawHat4Way(hat, mode = DrawMode.NORMAL)
 {
     // Hat has 5 directions: up, down, left, right, push
     const directions = ['up', 'down', 'left', 'right', 'push'];
-    const spacing = 45; // Space between boxes in plus arrangement
 
-    // Draw center point marker
-    ctx.fillStyle = '#666';
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(hat.buttonPos.x, hat.buttonPos.y, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    // Check if push button exists
+    const hasPush = hat.inputs && hat.inputs['push'];
 
-    // Track bounds for center marker
-    if (trackBounds)
+    // Use centralized position calculation for consistency with template editor
+    const positions = getHat4WayPositions(hat.labelPos.x, hat.labelPos.y, hasPush);
+
+    // Only track bounds in bounds mode
+    if (mode === DrawMode.BOUNDS_ONLY)
     {
         updateBounds(hat.buttonPos.x, hat.buttonPos.y, 12, 12);
+        directions.forEach(dir =>
+        {
+            if (hat.inputs && hat.inputs[dir])
+            {
+                const pos = positions[dir];
+                updateBounds(pos.x, pos.y, HatFrameWidth, HatFrameHeight);
+            }
+        });
+
+        // Calculate title position using same logic as drawHat4WayBoxes
+        const boxHalfHeight = HatFrameHeight / 2;
+        const verticalDistanceWithPush = boxHalfHeight + HatSpacing + boxHalfHeight;
+        const verticalDistanceNoPush = (HatFrameHeight + HatSpacing) / 2;
+        const verticalDistance = hasPush ? verticalDistanceWithPush + (HatSpacing + HatSpacing / 2) : verticalDistanceNoPush + HatSpacing;
+        const titleGap = 12;
+        const titleY = hat.labelPos.y - verticalDistance - boxHalfHeight - titleGap;
+
+        const textWidth = 60; // Approximate
+        updateBounds(hat.labelPos.x, titleY, textWidth, 13);
+        return;
     }
+
+    // Draw center point marker
+    drawButtonMarker(ctx, hat.buttonPos, 1, false, true);
 
     // Draw line to label area
     if (hat.labelPos)
     {
         const lineColor = '#666';
-        drawConnectingLine(hat.buttonPos, hat.labelPos, 70 / 2, lineColor);
+        drawConnectingLine(ctx, hat.buttonPos, hat.labelPos, HatFrameWidth / 2, lineColor, true); // true = isHat
     }
 
-    // Calculate positions for each direction in a plus pattern
-    const positions = {
-        'up': { x: hat.labelPos.x, y: hat.labelPos.y - spacing + 8 },
-        'down': { x: hat.labelPos.x, y: hat.labelPos.y + spacing - 8 },
-        'left': { x: hat.labelPos.x - spacing * 1.5, y: hat.labelPos.y },
-        'right': { x: hat.labelPos.x + spacing * 1.5, y: hat.labelPos.y },
-        'push': { x: hat.labelPos.x, y: hat.labelPos.y }
+    // Callback to register clickable boxes
+    const onClickableBox = (box) =>
+    {
+        if (mode === DrawMode.NORMAL)
+        {
+            clickableBoxes.push(box);
+        }
     };
 
-    // Draw each direction's binding box
-    directions.forEach(dir =>
+    // Store bindings by direction for passing to clickable boxes
+    const bindingsByDirection = {};
+    const directionsList = ['up', 'down', 'left', 'right', 'push'];
+    directionsList.forEach(dir =>
     {
         if (hat.inputs && hat.inputs[dir])
         {
-            const bindings = findAllBindingsForHatDirection(hat, dir);
-            const pos = positions[dir];
-            const label = dir === 'push' ? 'Push' : dir.charAt(0).toUpperCase();
-            const buttonData = { ...hat, direction: dir }; // Include direction info
-
-            drawBindingBox(pos.x, pos.y, label, bindings, true, buttonData, trackBounds); // true = compact mode
+            bindingsByDirection[dir] = findAllBindingsForHatDirection(hat, dir);
         }
     });
 
-    // Draw hat name above the plus
-    ctx.fillStyle = '#aaa';
-    ctx.font = '13px "Segoe UI", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(simplifyButtonName(hat.name), hat.labelPos.x, hat.labelPos.y - spacing * 2 + 20);
-
-    // Track bounds for hat name text
-    if (trackBounds)
-    {
-        const textWidth = ctx.measureText(simplifyButtonName(hat.name)).width;
-        updateBounds(hat.labelPos.x, hat.labelPos.y - spacing * 2 + 20, textWidth, 13);
-    }
-}
-
-function drawBindingBox(x, y, label, bindings, compact = false, buttonData = null, trackBounds = false)
-{
-    const width = compact ? 70 : 140;
-    const height = compact ? 50 : 50; // Fixed height for consistent layout
-
-    const boxX = x - width / 2;
-    const boxY = y - height / 2;
-
-    // Track bounds for this box
-    if (trackBounds)
-    {
-        updateBounds(x, y, width, height);
-    }
-
-    // Box background with gradient
-    const hasBinding = bindings && bindings.length > 0;
-    ctx.fillStyle = hasBinding ? 'rgba(15, 18, 21, 0.95)' : 'rgba(30, 30, 30, 0.85)';
-    ctx.strokeStyle = hasBinding ? '#c9c9c9ff' : '#555';
-    ctx.lineWidth = hasBinding ? 1 : 1;
-
-    // Rounded rectangle
-    roundRect(ctx, boxX, boxY, width, height, 4);
-    ctx.fill();
-    ctx.stroke();
-
-    // Track clickable area if there are bindings (only when not tracking bounds)
-    if (hasBinding && buttonData && !trackBounds)
-    {
-        clickableBoxes.push({
-            x: boxX,
-            y: boxY,
-            width: width,
-            height: height,
-            buttonData: buttonData,
-            bindings: bindings
-        });
-    }
-
-    // Button label
-    ctx.fillStyle = '#ccc';
-    ctx.font = compact ? '11px "Segoe UI", sans-serif' : '12px "Segoe UI", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    if (hasBinding)
-    {
-        // Draw label at top
-        ctx.fillText(label, x, y - (compact ? 10 : 14));
-
-        // Find where custom bindings end and defaults begin
-        let customEndIndex = 0;
-        for (let i = 0; i < bindings.length; i++)
+    // Use unified rendering function with joystick viewer styling
+    drawHat4WayBoxes(ctx, hat, {
+        mode: mode,
+        alpha: 1,
+        getContentForDirection: (dir, input) =>
         {
-            if (bindings[i].isDefault)
+            // Get bindings for this direction
+            const bindings = bindingsByDirection[dir] || [];
+
+            // Convert bindings to content lines array
+            return bindings.map(binding =>
             {
-                customEndIndex = i;
-                break;
-            }
-        }
-
-        // Draw binding info
-        const maxWidth = width - 8;
-        let yOffset = 0;
-
-        // Show first binding
-        let actionText = bindings[0].action;
-        if (ctx.measureText(actionText).width > maxWidth)
-        {
-            while (ctx.measureText(actionText + '...').width > maxWidth && actionText.length > 0)
-            {
-                actionText = actionText.slice(0, -1);
-            }
-            actionText += '...';
-        }
-
-        // Color: cyan for custom, gray for default
-        ctx.fillStyle = bindings[0].isDefault ? '#666' : '#4ec9b0';
-        ctx.font = compact ? 'bold 9px "Segoe UI", sans-serif' : 'bold 10px "Segoe UI", sans-serif';
-        ctx.fillText(actionText, x, y);
-        yOffset = compact ? 10 : 12;
-
-        // If there are more bindings, show second one and draw separator if transitioning to defaults
-        if (bindings.length > 1)
-        {
-            let secondText = bindings[1].action;
-            if (ctx.measureText(secondText).width > maxWidth)
-            {
-                while (ctx.measureText(secondText + '...').width > maxWidth && secondText.length > 0)
+                // Apply styling based on binding type
+                if (binding.isDefault)
                 {
-                    secondText = secondText.slice(0, -1);
+                    return `[muted]${binding.actionLabel || binding.action}`;
                 }
-                secondText += '...';
-            }
+                // Use [action] prefix for bound actions to apply green color
+                return `[action]${binding.actionLabel || binding.action}`;
+            });
+        },
+        colors: {
+            titleColor: '#aaa',
+            contentColor: '#ddd',
+            subtleColor: '#999',
+            mutedColor: '#888',
+            actionColor: '#7dd3c0'
+        },
+        onClickableBox: onClickableBox,
+        bindingsByDirection: bindingsByDirection,
+        buttonDataForDirection: (dir) => ({ ...hat, direction: dir })
+    });
+}
 
-            // If first is custom and second is default, draw a separator line
-            // if (customEndIndex === 1 && bindings[0].isDefault === false && bindings[1].isDefault === true)
-            // {
-            //     ctx.strokeStyle = '#555';
-            //     ctx.lineWidth = 1;
-            //     ctx.setLineDash([2, 2]);
-            //     ctx.beginPath();
-            //     ctx.moveTo(boxX + 4, y + (compact ? 3 : 4));
-            //     ctx.lineTo(boxX + width - 4, y + (compact ? 3 : 4));
-            //     ctx.stroke();
-            //     ctx.setLineDash([]);
-            //     yOffset = compact ? 18 : 22;
-            // }
+// Local wrapper for shared drawBindingBox to handle clickable tracking and bounds
+function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData = null, mode = DrawMode.NORMAL)
+{
+    // Always update bounds in export mode
+    if (mode === DrawMode.EXPORT)
+    {
+        const width = compact ? HatFrameWidth : ButtonFrameWidth;
+        updateBounds(x, y, width, ButtonFrameHeight);
+    }
 
-            // Color: cyan for custom, gray for default
-            ctx.fillStyle = bindings[1].isDefault ? '#666' : '#4ec9b0';
-            ctx.font = compact ? 'bold 9px "Segoe UI", sans-serif' : 'bold 10px "Segoe UI", sans-serif';
-            ctx.fillText(secondText, x, y + yOffset);
-
-            // Show count if there are more than 2
-            if (bindings.length > 2)
-            {
-                ctx.fillStyle = '#888';
-                ctx.font = compact ? 'italic 8px "Segoe UI", sans-serif' : 'italic 9px "Segoe UI", sans-serif';
-                ctx.fillText(`(+${bindings.length - 2} more)`, x, y + (compact ? 26 : 30));
-            }
+    // Callback to register clickable boxes
+    const onClickableBox = (box) =>
+    {
+        if (mode === DrawMode.NORMAL)
+        {
+            clickableBoxes.push(box);
         }
-    }
-    else
+    };
+
+    // Convert bindings to content lines array for improved rendering
+    const contentLines = bindings.map(binding =>
     {
-        // Unbound - just show label
-        ctx.fillText(label, x, y - 6);
-        ctx.fillStyle = '#666';
-        ctx.font = compact ? 'italic 9px "Segoe UI", sans-serif' : 'italic 10px "Segoe UI", sans-serif';
-        ctx.fillText('(unbound)', x, y + 8);
-    }
+        // Apply styling based on binding type
+        if (binding.isDefault)
+        {
+            return `[muted]${binding.actionLabel || binding.action}`;
+        }
+        // Use [action] prefix for bound actions to apply green color
+        return `[action]${binding.actionLabel || binding.action}`;
+    });
+
+    // Use improved rendering function from button-renderer.js
+    drawButtonBox(ctx, x, y, label, contentLines, compact, {
+        hasBinding: bindings.length > 0,
+        buttonData: buttonData,
+        mode: mode,
+        onClickableBox: onClickableBox,
+        titleColor: '#ccc',
+        contentColor: '#ddd',
+        subtleColor: '#999',
+        mutedColor: '#888',
+        actionColor: '#7dd3c0',
+        bindingsData: bindings
+    });
 }
 
-// Helper function to draw connecting lines with smart positioning
-function drawConnectingLine(buttonPos, boxPos, boxHalfWidth, lineColor)
+// Helper functions now imported from button-renderer.js
+
+// ========================================
+// Binding Search Functions
+// ========================================
+
+// Helper to extract button ID or input string from button data
+function extractButtonIdentifier(button, direction = null)
 {
-    // Determine if box is to the left or right of button
-    const isBoxToRight = boxPos.x > buttonPos.x;
-
-    // Calculate connection point on the box edge
-    let connectionX, connectionY;
-    if (isBoxToRight)
-    {
-        // Box is to the right, connect to left edge
-        connectionX = boxPos.x - boxHalfWidth;
-    }
-    else
-    {
-        // Box is to the left, connect to right edge
-        connectionX = boxPos.x + boxHalfWidth;
-    }
-    connectionY = boxPos.y;
-
-    // Draw dashed line from button to box edge
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(buttonPos.x, buttonPos.y);
-    ctx.lineTo(connectionX, connectionY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Draw circle at connection point
-    ctx.fillStyle = '#aaaaaaff';
-    ctx.strokeStyle = '#aaaaaaff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(connectionX, connectionY, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-}
-
-// Helper function to draw rounded rectangles
-function roundRect(ctx, x, y, width, height, radius)
-{
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + width - radius, y);
-    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-    ctx.lineTo(x + width, y + height - radius);
-    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-    ctx.lineTo(x + radius, y + height);
-    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.closePath();
-}
-
-// Simplify button names for display
-function simplifyButtonName(name)
-{
-    // Remove "Joystick 1 - " or "Button Button" prefixes
-    name = name.replace(/^Joystick \d+ - /, '');
-    name = name.replace(/^Button /, '');
-
-    // Simplify common patterns
-    name = name.replace(/Button\((\d+)\)/, 'Btn $1');
-    name = name.replace(/^(\d+)$/, 'Btn $1');
-
-    return name;
-}
-
-function findAllBindingsForButton(button)
-{
-    if (!currentBindings) return [];
-
-    const allBindings = [];
-
-    // Get joystick number from current stick object
-    const currentStickData = currentStick === 'left' ? currentTemplate.leftStick : currentTemplate.rightStick;
-    const jsNum = (currentStickData && currentStickData.joystickNumber) || currentTemplate.joystickNumber || 1;
+    const jsNum = getCurrentJoystickNumber();
     const jsPrefix = `js${jsNum}_`;
 
-    // Determine button ID using priority system:
+    let buttonNum = null;
+    let inputString = null;
+
+    // For hat direction, get the specific input for that direction
+    if (direction && button.inputs && button.inputs[direction])
+    {
+        const dirInput = button.inputs[direction];
+
+        if (typeof dirInput === 'string')
+        {
+            inputString = dirInput.toLowerCase().replace(/^js[12]_/, jsPrefix);
+        }
+        else if (typeof dirInput === 'object' && dirInput.id !== undefined)
+        {
+            buttonNum = dirInput.id;
+        }
+
+        return { buttonNum, inputString, jsNum, jsPrefix };
+    }
+
+    // For regular buttons, use priority system:
     // 1. buttonId field (new simple format)
     // 2. inputs.main (legacy format with full SC string)
     // 3. Parse from button name (fallback)
 
-    let buttonNum = null;
-    let buttonInputString = null;
-
-    // First priority: Check for buttonId field (new simple format)
     if (button.buttonId !== undefined && button.buttonId !== null)
     {
         buttonNum = button.buttonId;
     }
-    // Second priority: Check for inputs.main (legacy or new format)
     else if (button.inputs && button.inputs.main)
     {
         const main = button.inputs.main;
-        // Handle both new format (object with id) and legacy format (string)
         if (typeof main === 'object' && main.id !== undefined)
         {
             buttonNum = main.id;
         }
         else if (typeof main === 'string')
         {
-            // Store the input string but replace its joystick number with the current stick's number
-            buttonInputString = main.toLowerCase().replace(/^js[12]_/, jsPrefix);
+            inputString = main.toLowerCase().replace(/^js[12]_/, jsPrefix);
         }
     }
-    // Third priority: Parse button number from name (last resort fallback)
     else
     {
         const buttonName = button.name.toLowerCase();
-
-        // Try to extract button number from name with multiple patterns
-        // 1. "Button(X)" or "button(X)" - from auto-detected names
-        // 2. "Button X" or "button X" - from manual names
-        // 3. Last number in the string - as final fallback
-
         let match = buttonName.match(/button\((\d+)\)/);
         if (match)
         {
@@ -934,7 +873,6 @@ function findAllBindingsForButton(button)
             }
             else
             {
-                // Extract the last number in the string as fallback
                 const allNumbers = buttonName.match(/\d+/g);
                 if (allNumbers && allNumbers.length > 0)
                 {
@@ -944,12 +882,22 @@ function findAllBindingsForButton(button)
         }
     }
 
+    return { buttonNum, inputString, jsNum, jsPrefix };
+}
+
+// Unified function to search for all bindings matching a button identifier
+function searchBindings(buttonIdentifier)
+{
+    if (!currentBindings) return [];
+
+    const { buttonNum, inputString, jsNum, jsPrefix } = buttonIdentifier;
+    const allBindings = [];
+
     // Search through all action maps for ALL bindings that use this button
     for (const actionMap of currentBindings.action_maps)
     {
         for (const action of actionMap.actions)
         {
-            // Skip if action has no bindings
             if (!action.bindings || action.bindings.length === 0) continue;
 
             for (const binding of action.bindings)
@@ -959,41 +907,29 @@ function findAllBindingsForButton(button)
                     let input = binding.input.toLowerCase();
                     let modifiers = [];
 
-                    // Extract modifier prefixes (e.g., "lalt+rctrl+js1_button3" -> ["lalt", "rctrl"])
+                    // Extract modifier prefixes
                     if (input.includes('+'))
                     {
                         const parts = input.split('+');
-                        modifiers = parts.slice(0, -1); // All parts except the last are modifiers
-                        input = parts[parts.length - 1]; // Get the last part after all modifiers
+                        modifiers = parts.slice(0, -1);
+                        input = parts[parts.length - 1];
                     }
 
-                    // Skip invalid/empty joystick bindings (like "js1_" with nothing after)
+                    // Skip invalid/empty joystick bindings
                     if (!input || input.match(/^js\d+_\s*$/) || input.endsWith('_')) continue;
 
                     let isMatch = false;
 
-                    // First priority: exact match with the stored input string
-                    if (buttonInputString && input === buttonInputString)
+                    // Exact match with input string
+                    if (inputString && (input === inputString || input.startsWith(inputString + '_')))
                     {
                         isMatch = true;
                     }
-                    // Second priority: match by button number with correct joystick
+                    // Match by button number
                     else if (buttonNum !== null)
                     {
-                        // Match exact button number - must be followed by underscore or end of string
-                        // This prevents js1_button1 from matching js1_button10/js1_button11
                         const buttonPattern = new RegExp(`^${jsPrefix}button${buttonNum}(?:_|$)`);
                         if (buttonPattern.test(input))
-                        {
-                            isMatch = true;
-                        }
-                    }
-                    // Third priority: match hat switches
-                    else if (buttonInputString)
-                    {
-                        const buttonPart = buttonInputString.replace(/^js[12]_/, '');
-                        const inputPart = input.replace(/^js[12]_/, '');
-                        if (buttonPart === inputPart && input.startsWith(jsPrefix))
                         {
                             isMatch = true;
                         }
@@ -1001,16 +937,13 @@ function findAllBindingsForButton(button)
 
                     if (isMatch)
                     {
-                        // Use ui_label if available, otherwise display_name as fallback
                         let actionLabel = action.ui_label || action.display_name || action.name;
 
-                        // Add modifier prefix to action label if present
                         if (modifiers.length > 0)
                         {
                             actionLabel = modifiers.join('+') + ' + ' + actionLabel;
                         }
 
-                        // Add (Hold) suffix if this action requires holding
                         if (action.on_hold)
                         {
                             actionLabel += ' (Hold)';
@@ -1031,23 +964,20 @@ function findAllBindingsForButton(button)
         }
     }
 
-    // Sort: custom bindings first (is_default: false), then defaults (is_default: true)
+    // Sort and filter
     allBindings.sort((a, b) =>
     {
         if (a.isDefault === b.isDefault) return 0;
-        return a.isDefault ? 1 : -1;  // Custom (false) comes before default (true)
+        return a.isDefault ? 1 : -1;
     });
 
-    // Filter bindings based on current filters
     let filteredBindings = allBindings;
 
-    // Filter out default bindings if hideDefaultBindings is enabled
     if (hideDefaultBindings)
     {
         filteredBindings = filteredBindings.filter(b => !b.isDefault);
     }
 
-    // Filter by modifier if not "all"
     if (modifierFilter !== 'all')
     {
         filteredBindings = filteredBindings.filter(b =>
@@ -1056,130 +986,22 @@ function findAllBindingsForButton(button)
     }
 
     return filteredBindings;
+}
+
+function findAllBindingsForButton(button)
+{
+    return searchBindings(extractButtonIdentifier(button));
 }
 
 function findAllBindingsForHatDirection(hat, direction)
 {
-    if (!currentBindings || !hat.inputs || !hat.inputs[direction]) return [];
-
-    const allBindings = [];
-
-    // Get joystick number from current stick object
-    const currentStickData = currentStick === 'left' ? currentTemplate.leftStick : currentTemplate.rightStick;
-    const jsNum = (currentStickData && currentStickData.joystickNumber) || currentTemplate.joystickNumber || 1;
-    const dirInput = hat.inputs[direction];
-
-    // Handle both formats:
-    // 1. String format: "js1_hat1_left"
-    // 2. Object format: { type: "button", id: 14 }
-    let patterns = [];
-    let inputString = null;
-
-    if (typeof dirInput === 'string')
-    {
-        // String format - replace joystick number with current stick's number
-        inputString = dirInput.toLowerCase().replace(/^js[12]_/, `js${jsNum}_`);
-        patterns.push(inputString);
-    }
-    else if (typeof dirInput === 'object' && dirInput.id !== undefined)
-    {
-        // Object format with button ID
-        const buttonId = dirInput.id;
-        patterns.push(`js${jsNum}_button${buttonId}`);
-    }
-
-    if (patterns.length === 0) return [];
-
-    // Search through all action maps
-    for (const actionMap of currentBindings.action_maps)
-    {
-        for (const action of actionMap.actions)
-        {
-            // Skip if action has no bindings
-            if (!action.bindings || action.bindings.length === 0) continue;
-
-            for (const binding of action.bindings)
-            {
-                if (binding.input_type === 'Joystick')
-                {
-                    let input = binding.input.toLowerCase();
-                    let modifiers = [];
-
-                    // Extract modifier prefixes (e.g., "lalt+rctrl+js1_button3" -> ["lalt", "rctrl"])
-                    if (input.includes('+'))
-                    {
-                        const parts = input.split('+');
-                        modifiers = parts.slice(0, -1); // All parts except the last are modifiers
-                        input = parts[parts.length - 1]; // Get the last part after all modifiers
-                    }
-
-                    // Skip invalid/empty joystick bindings (like "js1_" with nothing after)
-                    if (!input || input.match(/^js\d+_\s*$/) || input.endsWith('_')) continue;
-
-                    for (const pattern of patterns)
-                    {
-                        if (input === pattern || input.startsWith(pattern + '_'))
-                        {
-                            // Use ui_label if available, otherwise display_name as fallback
-                            let actionLabel = action.ui_label || action.display_name || action.name;
-
-                            // Add modifier prefix to action label if present
-                            if (modifiers.length > 0)
-                            {
-                                actionLabel = modifiers.join('+') + ' + ' + actionLabel;
-                            }
-
-                            // Add (Hold) suffix if this action requires holding
-                            if (action.on_hold)
-                            {
-                                actionLabel += ' (Hold)';
-                            }
-
-                            const mapLabel = actionMap.ui_label || actionMap.display_name || actionMap.name;
-
-                            allBindings.push({
-                                action: actionLabel,
-                                input: binding.display_name,
-                                actionMap: mapLabel,
-                                isDefault: binding.is_default,
-                                modifiers: modifiers
-                            });
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Sort: custom bindings first (is_default: false), then defaults (is_default: true)
-    allBindings.sort((a, b) =>
-    {
-        if (a.isDefault === b.isDefault) return 0;
-        return a.isDefault ? 1 : -1;  // Custom (false) comes before default (true)
-    });
-
-    // Filter bindings based on current filters
-    let filteredBindings = allBindings;
-
-    // Filter out default bindings if hideDefaultBindings is enabled
-    if (hideDefaultBindings)
-    {
-        filteredBindings = filteredBindings.filter(b => !b.isDefault);
-    }
-
-    // Filter by modifier if not "all"
-    if (modifierFilter !== 'all')
-    {
-        filteredBindings = filteredBindings.filter(b =>
-            b.modifiers && b.modifiers.includes(modifierFilter)
-        );
-    }
-
-    return filteredBindings;
+    return searchBindings(extractButtonIdentifier(hat, direction));
 }
 
-// Canvas mouse handlers
+// ========================================
+// Canvas Mouse & Keyboard Interaction
+// ========================================
+
 function getCanvasCoords(event)
 {
     const rect = canvas.getBoundingClientRect();
@@ -1220,7 +1042,7 @@ function onCanvasMouseUp(event)
         canvas.style.cursor = 'default';
 
         // Save pan state to localStorage
-        localStorage.setItem('viewerPan', JSON.stringify({ x: pan.x, y: pan.y }));
+        ViewerState.saveViewState();
     }
 }
 
@@ -1248,8 +1070,7 @@ function zoomBy(delta, event = null)
     }
 
     // Save zoom and pan state to localStorage
-    localStorage.setItem('viewerZoom', zoom.toString());
-    localStorage.setItem('viewerPan', JSON.stringify({ x: pan.x, y: pan.y }));
+    ViewerState.saveViewState();
 
     resizeViewerCanvas();
 }
@@ -1267,13 +1088,17 @@ function onCanvasClick(event)
         if (imgX >= box.x && imgX <= box.x + box.width &&
             imgY >= box.y && imgY <= box.y + box.height)
         {
+            selectedBox = box;
             showBindingInfo(box.buttonData, box.bindings);
+            resizeViewerCanvas();
             return;
         }
     }
 
-    // Click outside any box - hide info panel
+    // Click outside any box - hide info panel and deselect
+    selectedBox = null;
     hideBindingInfo();
+    resizeViewerCanvas();
 } function onCanvasMouseMove(event)
 {
     if (isPanning)
@@ -1381,104 +1206,80 @@ window.hideBindingInfo = function ()
 
 function getButtonIdString(buttonData)
 {
-    // Get joystick number from current stick object
-    const currentStickData = currentStick === 'left' ? currentTemplate.leftStick : currentTemplate.rightStick;
-    const jsNum = (currentStickData && currentStickData.joystickNumber) || currentTemplate.joystickNumber || 1;
+    const identifier = extractButtonIdentifier(
+        buttonData,
+        buttonData.direction || null
+    );
 
-    // For hat with direction
-    if (buttonData.direction && buttonData.inputs && buttonData.inputs[buttonData.direction])
+    if (identifier.inputString)
     {
-        const dirInput = buttonData.inputs[buttonData.direction];
-
-        // Handle object format: { type: "button", id: 14 }
-        if (typeof dirInput === 'object' && dirInput.id !== undefined)
-        {
-            return `js${jsNum}_button${dirInput.id}`;
-        }
-        // Handle string format: "js1_hat1_left"
-        else if (typeof dirInput === 'string')
-        {
-            return dirInput.replace(/^js\d+_/, `js${jsNum}_`);
-        }
+        return identifier.inputString;
     }
-
-    // For regular button
-    // Priority 1: buttonId field
-    if (buttonData.buttonId !== undefined && buttonData.buttonId !== null)
+    else if (identifier.buttonNum !== null)
     {
-        return `js${jsNum}_button${buttonData.buttonId}`;
-    }
-
-    // Priority 2: inputs.main
-    if (buttonData.inputs && buttonData.inputs.main)
-    {
-        const main = buttonData.inputs.main;
-        if (typeof main === 'object' && main.id !== undefined)
-        {
-            return `js${jsNum}_button${main.id}`;
-        }
-        else if (typeof main === 'string')
-        {
-            return main.replace(/^js\d+_/, `js${jsNum}_`);
-        }
-    }
-
-    // Priority 3: Parse from name
-    const buttonName = buttonData.name.toLowerCase();
-    let match = buttonName.match(/button\((\d+)\)/);
-    if (match)
-    {
-        return `js${jsNum}_button${match[1]}`;
-    }
-
-    match = buttonName.match(/button\s+(\d+)/);
-    if (match)
-    {
-        return `js${jsNum}_button${match[1]}`;
-    }
-
-    // Fallback: extract last number
-    const allNumbers = buttonName.match(/\d+/g);
-    if (allNumbers && allNumbers.length > 0)
-    {
-        return `js${jsNum}_button${allNumbers[allNumbers.length - 1]}`;
+        return `js${identifier.jsNum}_button${identifier.buttonNum}`;
     }
 
     return 'Unknown';
 }
 
-function updateFileIndicator()
-{
-    const indicator = document.getElementById('loaded-file-indicator');
-    const fileNameEl = document.getElementById('loaded-file-name');
-    const savedPath = localStorage.getItem('keybindingsFilePath');
-
-    if (indicator && fileNameEl && savedPath)
+// LocalStorage helpers for cleaner state management
+const ViewerState = {
+    save(key, value)
     {
-        // Extract just the filename from the path
-        const fileName = savedPath.split(/[\\\\/]/).pop();
-        fileNameEl.textContent = fileName;
-        indicator.style.display = 'flex';
+        try
+        {
+            localStorage.setItem(key, JSON.stringify(value));
+        } catch (error)
+        {
+            console.error('Error saving to localStorage:', error);
+        }
+    },
+
+    load(key, defaultValue = null)
+    {
+        try
+        {
+            const value = localStorage.getItem(key);
+            return value ? JSON.parse(value) : defaultValue;
+        } catch (error)
+        {
+            console.error('Error loading from localStorage:', error);
+            return defaultValue;
+        }
+    },
+
+    saveTemplate(template, fileName)
+    {
+        this.save('currentTemplate', template);
+        if (fileName)
+        {
+            localStorage.setItem('templateFileName', fileName);
+        }
+    },
+
+    saveViewState()
+    {
+        this.save('viewerPan', pan);
+        localStorage.setItem('viewerZoom', zoom.toString());
+        localStorage.setItem('viewerCurrentStick', currentStick);
+        localStorage.setItem('hideDefaultBindings', hideDefaultBindings.toString());
+        localStorage.setItem('modifierFilter', modifierFilter);
     }
-}
+};
+
+// ========================================
+// Drawing Bounds Tracking (for export)
+// ========================================
 
 function resetDrawBounds()
 {
     drawBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
 }
 
-function updateDrawBounds(x, y, width = 0, height = 0)
-{
-    const left = x - width / 2;
-    const right = x + width / 2;
-    const top = y - height / 2;
-    const bottom = y + height / 2;
-
-    drawBounds.minX = Math.min(drawBounds.minX, left);
-    drawBounds.minY = Math.min(drawBounds.minY, top);
-    drawBounds.maxX = Math.max(drawBounds.maxX, right);
-    drawBounds.maxY = Math.max(drawBounds.maxY, bottom);
-}
+// ========================================
+// Image Export
+// ========================================
 
 async function exportToImage()
 {
@@ -1501,8 +1302,11 @@ async function exportToImage()
         const tempCanvas = document.createElement('canvas');
         const tempCtx = tempCanvas.getContext('2d');
 
-        // Run drawButtonsForExport with bounds tracking
-        drawButtonsForExportWithBounds(tempCtx, window.viewerImage);
+        // Save old ctx and swap to temp for bounds tracking
+        let savedCtx = ctx;
+        ctx = tempCtx;
+        drawButtons(window.viewerImage, DrawMode.BOUNDS_ONLY);
+        ctx = savedCtx;
 
         // Create export canvas
         const padding = 20;
@@ -1556,7 +1360,10 @@ async function exportToImage()
         exportCtx.translate(imgX, imgY);
 
         // Draw all buttons and bindings
-        drawButtonsForExport(exportCtx, window.viewerImage);
+        savedCtx = ctx;
+        ctx = exportCtx;
+        drawButtons(window.viewerImage, DrawMode.EXPORT);
+        ctx = savedCtx;
 
         exportCtx.restore();
 
@@ -1633,310 +1440,3 @@ async function exportToImage()
         btn.disabled = false;
     }
 }
-
-function drawButtonsForExport(exportCtx, img)
-{
-    const buttons = getCurrentButtons();
-    buttons.forEach(button =>
-    {
-        if (button.buttonType === 'hat4way')
-        {
-            drawHat4WayExport(exportCtx, button);
-        }
-        else
-        {
-            drawSingleButtonExport(exportCtx, button);
-        }
-    });
-}
-
-function drawButtonsForExportWithBounds(exportCtx, img)
-{
-    const buttons = getCurrentButtons();
-    buttons.forEach(button =>
-    {
-        if (button.buttonType === 'hat4way')
-        {
-            drawHat4WayExportWithBounds(exportCtx, button);
-        }
-        else
-        {
-            drawSingleButtonExportWithBounds(exportCtx, button);
-        }
-    });
-}
-
-function drawSingleButtonExport(ctx, button)
-{
-    // Find ALL bindings for this button
-    const bindings = findAllBindingsForButton(button);
-
-    // Draw line connecting button to label
-    if (button.labelPos)
-    {
-        const lineColor = bindings.length > 0 ? '#d9534f' : '#666';
-        drawConnectingLineExport(ctx, button.buttonPos, button.labelPos, 140 / 2, lineColor);
-    }
-
-    // Draw button position marker
-    ctx.fillStyle = bindings.length > 0 ? '#d9534f' : '#666';
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(button.buttonPos.x, button.buttonPos.y, 7, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    // Draw label box with binding info
-    if (button.labelPos)
-    {
-        drawBindingBoxExport(ctx, button.labelPos.x, button.labelPos.y, simplifyButtonName(button.name), bindings, false, button);
-    }
-}
-
-function drawHat4WayExport(ctx, hat)
-{
-    // Hat has 5 directions: up, down, left, right, push
-    const directions = ['up', 'down', 'left', 'right', 'push'];
-    const spacing = 45; // Space between boxes in plus arrangement
-
-    // Draw center point marker
-    ctx.fillStyle = '#666';
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(hat.buttonPos.x, hat.buttonPos.y, 6, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-
-    // Draw line to label area
-    if (hat.labelPos)
-    {
-        const lineColor = '#666';
-        drawConnectingLineExport(ctx, hat.buttonPos, hat.labelPos, 70 / 2, lineColor);
-    }
-
-    // Calculate positions for each direction in a plus pattern
-    const positions = {
-        'up': { x: hat.labelPos.x, y: hat.labelPos.y - spacing + 8 },
-        'down': { x: hat.labelPos.x, y: hat.labelPos.y + spacing - 8 },
-        'left': { x: hat.labelPos.x - spacing * 1.5, y: hat.labelPos.y },
-        'right': { x: hat.labelPos.x + spacing * 1.5, y: hat.labelPos.y },
-        'push': { x: hat.labelPos.x, y: hat.labelPos.y }
-    };
-
-    // Draw each direction's binding box
-    directions.forEach(dir =>
-    {
-        if (hat.inputs && hat.inputs[dir])
-        {
-            const bindings = findAllBindingsForHatDirection(hat, dir);
-            const pos = positions[dir];
-            const label = dir === 'push' ? 'Push' : dir.charAt(0).toUpperCase();
-            const buttonData = { ...hat, direction: dir }; // Include direction info
-
-            drawBindingBoxExport(ctx, pos.x, pos.y, label, bindings, true, buttonData); // true = compact mode
-        }
-    });
-
-    // Draw hat name above the plus
-    ctx.fillStyle = '#aaa';
-    ctx.font = '13px "Segoe UI", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(simplifyButtonName(hat.name), hat.labelPos.x, hat.labelPos.y - spacing * 2 + 20);
-}
-
-function drawConnectingLineExport(ctx, buttonPos, boxPos, boxHalfWidth, lineColor)
-{
-    // Determine if box is to the left or right of button
-    const isBoxToRight = boxPos.x > buttonPos.x;
-
-    // Calculate connection point on the box edge
-    let connectionX, connectionY;
-    if (isBoxToRight)
-    {
-        // Box is to the right, connect to left edge
-        connectionX = boxPos.x - boxHalfWidth;
-    }
-    else
-    {
-        // Box is to the left, connect to right edge
-        connectionX = boxPos.x + boxHalfWidth;
-    }
-    connectionY = boxPos.y;
-
-    // Draw dashed line from button to box edge
-    ctx.strokeStyle = lineColor;
-    ctx.lineWidth = 1.5;
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(buttonPos.x, buttonPos.y);
-    ctx.lineTo(connectionX, connectionY);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // Draw circle at connection point
-    ctx.fillStyle = '#aaaaaaff';
-    ctx.strokeStyle = '#aaaaaaff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.arc(connectionX, connectionY, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
-}
-
-function drawBindingBoxExport(ctx, x, y, label, bindings, compact = false, buttonData = null)
-{
-    const width = compact ? 70 : 140;
-    const height = compact ? 50 : 50; // Fixed height for consistent layout
-
-    const boxX = x - width / 2;
-    const boxY = y - height / 2;
-
-    // Update draw bounds
-    updateDrawBounds(x, y, width, height);
-
-    // Box background with gradient
-    const hasBinding = bindings && bindings.length > 0;
-    ctx.fillStyle = hasBinding ? 'rgba(15, 18, 21, 0.95)' : 'rgba(30, 30, 30, 0.85)';
-    ctx.strokeStyle = hasBinding ? '#c9c9c9ff' : '#555';
-    ctx.lineWidth = hasBinding ? 1 : 1;
-
-    // Rounded rectangle
-    roundRect(ctx, boxX, boxY, width, height, 4);
-    ctx.fill();
-    ctx.stroke();
-
-    // Button label
-    ctx.fillStyle = '#ccc';
-    ctx.font = compact ? '11px "Segoe UI", sans-serif' : '12px "Segoe UI", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-
-    if (hasBinding)
-    {
-        // Draw label at top
-        ctx.fillText(label, x, y - (compact ? 10 : 14));
-
-        // Find where custom bindings end and defaults begin
-        let customEndIndex = 0;
-        for (let i = 0; i < bindings.length; i++)
-        {
-            if (bindings[i].isDefault)
-            {
-                customEndIndex = i;
-                break;
-            }
-        }
-
-        // Draw binding info
-        const maxWidth = width - 8;
-        let yOffset = 0;
-
-        // Show first binding
-        let actionText = bindings[0].action;
-        if (ctx.measureText(actionText).width > maxWidth)
-        {
-            while (ctx.measureText(actionText + '...').width > maxWidth && actionText.length > 0)
-            {
-                actionText = actionText.slice(0, -1);
-            }
-            actionText += '...';
-        }
-
-        // Color: cyan for custom, gray for default
-        ctx.fillStyle = bindings[0].isDefault ? '#666' : '#4ec9b0';
-        ctx.font = compact ? 'bold 9px "Segoe UI", sans-serif' : 'bold 10px "Segoe UI", sans-serif';
-        ctx.fillText(actionText, x, y);
-        yOffset = compact ? 10 : 12;
-
-        // If there are more bindings, show second one and draw separator if transitioning to defaults
-        if (bindings.length > 1)
-        {
-            let secondText = bindings[1].action;
-            if (ctx.measureText(secondText).width > maxWidth)
-            {
-                while (ctx.measureText(secondText + '...').width > maxWidth && secondText.length > 0)
-                {
-                    secondText = secondText.slice(0, -1);
-                }
-                secondText += '...';
-            }
-
-            // Color: cyan for custom, gray for default
-            ctx.fillStyle = bindings[1].isDefault ? '#666' : '#4ec9b0';
-            ctx.font = compact ? 'bold 9px "Segoe UI", sans-serif' : 'bold 10px "Segoe UI", sans-serif';
-            ctx.fillText(secondText, x, y + yOffset);
-
-            // Show count if there are more than 2
-            if (bindings.length > 2)
-            {
-                ctx.fillStyle = '#888';
-                ctx.font = compact ? 'italic 8px "Segoe UI", sans-serif' : 'italic 9px "Segoe UI", sans-serif';
-                ctx.fillText(`(+${bindings.length - 2} more)`, x, y + (compact ? 26 : 30));
-            }
-        }
-    }
-    else
-    {
-        // Unbound - just show label
-        ctx.fillText(label, x, y - 6);
-        ctx.fillStyle = '#666';
-        ctx.font = compact ? 'italic 9px "Segoe UI", sans-serif' : 'italic 10px "Segoe UI", sans-serif';
-        ctx.fillText('(unbound)', x, y + 8);
-    }
-}
-
-function drawSingleButtonExportWithBounds(ctx, button)
-{
-    // Find ALL bindings for this button
-    const bindings = findAllBindingsForButton(button);
-
-    // Update bounds for button marker
-    if (bindings.length > 0)
-    {
-        updateDrawBounds(button.buttonPos.x, button.buttonPos.y, 14, 14);
-    }
-
-    // Update bounds for label box with binding info
-    if (button.labelPos)
-    {
-        updateDrawBounds(button.labelPos.x, button.labelPos.y, 140, 50);
-    }
-}
-
-function drawHat4WayExportWithBounds(ctx, hat)
-{
-    // Hat has 5 directions: up, down, left, right, push
-    const directions = ['up', 'down', 'left', 'right', 'push'];
-    const spacing = 45; // Space between boxes in plus arrangement
-
-    // Update bounds for center marker
-    updateDrawBounds(hat.buttonPos.x, hat.buttonPos.y, 12, 12);
-
-    // Calculate positions for each direction in a plus pattern
-    const positions = {
-        'up': { x: hat.labelPos.x, y: hat.labelPos.y - spacing + 8 },
-        'down': { x: hat.labelPos.x, y: hat.labelPos.y + spacing - 8 },
-        'left': { x: hat.labelPos.x - spacing * 1.5, y: hat.labelPos.y },
-        'right': { x: hat.labelPos.x + spacing * 1.5, y: hat.labelPos.y },
-        'push': { x: hat.labelPos.x, y: hat.labelPos.y }
-    };
-
-    // Update bounds for each direction's binding box
-    directions.forEach(dir =>
-    {
-        if (hat.inputs && hat.inputs[dir])
-        {
-            const pos = positions[dir];
-            updateDrawBounds(pos.x, pos.y, 70, 50); // compact mode uses 70x50
-        }
-    });
-
-    // Update bounds for hat name text
-    const textWidth = 60; // Approximate
-    updateDrawBounds(hat.labelPos.x, hat.labelPos.y - spacing * 2 + 20, textWidth, 13);
-}
-
-

@@ -7,6 +7,25 @@ if (window.__TAURI__)
     ({ open, save } = window.__TAURI__.dialog);
 }
 
+// Import shared rendering utilities
+import
+{
+    ButtonFrameWidth,
+    ButtonFrameHeight,
+    roundRect,
+    simplifyButtonName,
+    drawConnectingLine,
+    drawButtonMarker,
+    drawSingleButtonLabel,
+    drawHat4WayFrames,
+    drawButtonBox,
+    RenderFrameText,
+    getHat4WayPositions,
+    getHat4WayBoxBounds,
+    HatFrameWidth,
+    HatFrameHeight
+} from './button-renderer.js';
+
 // Lazy imports - will be loaded when needed
 let parseInputDisplayName, parseInputShortName, getInputType;
 
@@ -44,6 +63,10 @@ let canvas, ctx;
 let loadedImage = null;
 let zoom = 1.0;
 let pan = { x: 0, y: 0 };
+
+// Camera positions for each stick (persisted separately)
+let leftStickCamera = { zoom: 1.0, pan: { x: 0, y: 0 } };
+let rightStickCamera = { zoom: 1.0, pan: { x: 0, y: 0 } };
 let selectedButtonId = null;
 let mode = 'view'; // 'view', 'placing-button', 'placing-label'
 let tempButton = null;
@@ -117,6 +140,7 @@ function initializeEventListeners()
     document.getElementById('right-stick-btn').addEventListener('click', () => switchStick('right'));
 
     document.getElementById('save-template-btn').addEventListener('click', saveTemplate);
+    document.getElementById('save-template-as-btn').addEventListener('click', saveTemplateAs);
     document.getElementById('load-template-btn').addEventListener('click', loadTemplate);
 
     // Sidebar controls
@@ -179,6 +203,22 @@ function initializeEventListeners()
     // Global mouseup to catch releases outside canvas (fixes panning stuck bug)
     document.addEventListener('mouseup', onCanvasMouseUp);
 
+    // Keyboard shortcuts
+    document.addEventListener('keydown', (e) =>
+    {
+        // Don't trigger shortcuts when modals are open
+        const buttonModal = document.getElementById('button-modal');
+        if (buttonModal && buttonModal.style.display === 'flex')
+        {
+            return; // Modal is open, don't handle shortcuts
+        }
+
+        if (e.key.toLowerCase() === 'f' && loadedImage)
+        {
+            fitToScreen();
+        }
+    });
+
     // Modal
     document.getElementById('button-modal-cancel').addEventListener('click', closeButtonModal);
     document.getElementById('button-modal-save').addEventListener('click', saveButtonDetails);
@@ -239,6 +279,18 @@ function switchStick(stick)
 {
     if (currentStick === stick) return;
 
+    // Save current camera position before switching
+    if (currentStick === 'left')
+    {
+        leftStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
+        saveCameraPosition(); // Persist to localStorage
+    }
+    else
+    {
+        rightStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
+        saveCameraPosition(); // Persist to localStorage
+    }
+
     currentStick = stick;
 
     console.log('Switching to stick:', stick);
@@ -248,6 +300,54 @@ function switchStick(stick)
     // Update button states
     document.getElementById('left-stick-btn').classList.toggle('active', stick === 'left');
     document.getElementById('right-stick-btn').classList.toggle('active', stick === 'right');
+
+    // In dual image mode, load the correct image for the current stick
+    if (templateData.imageType === 'dual')
+    {
+        if (stick === 'left' && templateData.leftImageDataUrl)
+        {
+            const img = new Image();
+            img.onload = () =>
+            {
+                loadedImage = img;
+                // Restore saved camera position
+                zoom = leftStickCamera.zoom;
+                pan = { x: leftStickCamera.pan.x, y: leftStickCamera.pan.y };
+                updateZoomDisplay();
+                redraw();
+            };
+            img.src = templateData.leftImageDataUrl;
+        }
+        else if (stick === 'right' && templateData.rightImageDataUrl)
+        {
+            const img = new Image();
+            img.onload = () =>
+            {
+                loadedImage = img;
+                // Restore saved camera position
+                zoom = rightStickCamera.zoom;
+                pan = { x: rightStickCamera.pan.x, y: rightStickCamera.pan.y };
+                updateZoomDisplay();
+                redraw();
+            };
+            img.src = templateData.rightImageDataUrl;
+        }
+    }
+    else
+    {
+        // In single image mode, just restore the camera position for this stick
+        if (stick === 'left')
+        {
+            zoom = leftStickCamera.zoom;
+            pan = { x: leftStickCamera.pan.x, y: leftStickCamera.pan.y };
+        }
+        else
+        {
+            zoom = rightStickCamera.zoom;
+            pan = { x: rightStickCamera.pan.x, y: rightStickCamera.pan.y };
+        }
+        updateZoomDisplay();
+    }
 
     // Clear selection
     selectButton(null);
@@ -374,6 +474,10 @@ async function newTemplate()
     zoom = 1.0;
     pan = { x: 0, y: 0 };
 
+    // Reset camera positions for both sticks
+    leftStickCamera = { zoom: 1.0, pan: { x: 0, y: 0 } };
+    rightStickCamera = { zoom: 1.0, pan: { x: 0, y: 0 } };
+
     // Update UI
     switchStick('right');
     resizeCanvas();
@@ -381,6 +485,8 @@ async function newTemplate()
     // Clear localStorage
     localStorage.removeItem('currentTemplate');
     localStorage.removeItem('templateFileName');
+    localStorage.removeItem('leftStickCamera');
+    localStorage.removeItem('rightStickCamera');
     hasUnsavedChanges = false;
     updateUnsavedIndicator();
 
@@ -418,22 +524,8 @@ function onImageTypeChange()
 // Image loading
 async function loadImage()
 {
-    // If dual image mode, ask which stick to load for
-    if (templateData.imageType === 'dual')
-    {
-        const stickChoice = await confirm('Load image for LEFT stick? (OK=Left, Cancel=Right)');
-        if (stickChoice)
-        {
-            currentStick = 'left';
-            document.getElementById('left-stick-btn').click();
-        }
-        else
-        {
-            currentStick = 'right';
-            document.getElementById('right-stick-btn').click();
-        }
-    }
-
+    // In dual image mode, the image will be loaded for the current stick
+    // No need for a dialog - just open the file picker
     document.getElementById('image-file-input').click();
 }
 
@@ -462,12 +554,12 @@ function onImageFileSelected(e)
                 }
                 else
                 {
-                    // For right stick in dual mode, we'll use a separate canvas setup
+                    // For right stick in dual mode
+                    loadedImage = img;
                     templateData.rightImagePath = file.name;
                     templateData.rightImageDataUrl = event.target.result;
                     document.getElementById('image-info').textContent =
                         `Right: ${file.name} (${img.width}×${img.height})`;
-                    // Keep loadedImage as the left image, but we'll handle rendering both
                 }
             }
             else
@@ -483,11 +575,23 @@ function onImageFileSelected(e)
             // Hide overlay
             document.getElementById('canvas-overlay').classList.add('hidden');
 
+            // Mark as changed to persist data
+            markAsChanged();
+
             // Ensure canvas is properly sized, then fit image to screen
             resizeCanvas();
             requestAnimationFrame(() =>
             {
                 fitToScreen();
+                // Save the initial camera position after centering
+                if (currentStick === 'left')
+                {
+                    leftStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
+                }
+                else
+                {
+                    rightStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
+                }
             });
         };
         img.src = event.target.result;
@@ -517,24 +621,10 @@ function redraw()
         // In dual mode, load the appropriate image for current stick
         if (currentStick === 'left' && templateData.leftImageDataUrl)
         {
-            if (!loadedImage || templateData.leftImagePath !== templateData.imagePath)
-            {
-                const img = new Image();
-                img.onload = () => { loadedImage = img; redraw(); };
-                img.src = templateData.leftImageDataUrl;
-                return;
-            }
             displayImage = loadedImage;
         }
         else if (currentStick === 'right' && templateData.rightImageDataUrl)
         {
-            if (!loadedImage || templateData.rightImagePath !== templateData.imagePath)
-            {
-                const img = new Image();
-                img.onload = () => { loadedImage = img; redraw(); };
-                img.src = templateData.rightImageDataUrl;
-                return;
-            }
             displayImage = loadedImage;
         }
     }
@@ -601,40 +691,30 @@ function drawButton(button, isTemp = false)
     {
         ctx.save();
         ctx.globalAlpha = alpha;
-        ctx.strokeStyle = isHat ? '#666' : '#d9534f';
-        ctx.lineWidth = 1.5 / zoom;
-        ctx.setLineDash([4 / zoom, 4 / zoom]);
-        ctx.beginPath();
-        ctx.moveTo(button.buttonPos.x, button.buttonPos.y);
-        ctx.lineTo(button.labelPos.x, button.labelPos.y);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        const lineColor = isHat ? '#666' : '#d9534f';
+        // Use shared drawConnectingLine function
+        // Note: Need to scale offset for zoom level in template editor
+        const labelWidth = isHat ? 0 : 140;
+        drawConnectingLine(ctx, button.buttonPos, button.labelPos, labelWidth / 2, lineColor, isHat);
         ctx.restore();
     }
 
-    // Draw button position marker
+    // Draw button position marker using shared function
     ctx.save();
     ctx.globalAlpha = alpha;
-    const handleSize = (7 / zoom);
-    ctx.fillStyle = isHat ? '#666' : '#d9534f';
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2 / zoom;
-    ctx.beginPath();
-    ctx.arc(button.buttonPos.x, button.buttonPos.y, handleSize, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    drawButtonMarker(ctx, button.buttonPos, zoom, !isHat, isHat);
     ctx.restore();
 
-    // Draw label box(es)
+    // Draw label box(es) using shared functions
     if (button.labelPos)
     {
         if (isHat)
         {
-            drawHat4WayLabels(button, alpha, handleSize);
+            drawHat4WayFrames(ctx, button, alpha, (7 / zoom), zoom);
         }
         else
         {
-            drawSingleButtonLabel(button, alpha, handleSize);
+            drawSingleButtonLabel(ctx, button, alpha, (7 / zoom), zoom);
         }
     }
 
@@ -645,6 +725,12 @@ function drawButton(button, isTemp = false)
         ctx.strokeStyle = '#e67e72';
         ctx.lineWidth = 3;
 
+        // Highlight the connecting line with brighter color
+        if (button.labelPos)
+        {
+            drawConnectingLine(ctx, button.buttonPos, button.labelPos, isHat ? 0 : ButtonFrameWidth / 2, '#9ae764ff', isHat);
+        }
+
         // Highlight the label box border
         if (button.labelPos)
         {
@@ -653,8 +739,8 @@ function drawButton(button, isTemp = false)
             if (isHat)
             {
                 // For hats, highlight the center push box
-                const boxWidth = 70;
-                const boxHeight = 50;
+                const boxWidth = HatFrameWidth;
+                const boxHeight = HatFrameHeight;
                 const x = button.labelPos.x - boxWidth / 2;
                 const y = button.labelPos.y - boxHeight / 2;
 
@@ -664,8 +750,8 @@ function drawButton(button, isTemp = false)
             else
             {
                 // For simple buttons, highlight the label box
-                const labelWidth = 140;
-                const labelHeight = 50;
+                const labelWidth = ButtonFrameWidth;
+                const labelHeight = ButtonFrameHeight;
                 const x = button.labelPos.x - labelWidth / 2;
                 const y = button.labelPos.y - labelHeight / 2;
 
@@ -678,132 +764,8 @@ function drawButton(button, isTemp = false)
     }
 }
 
-function drawSingleButtonLabel(button, alpha, handleSize)
-{
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    const labelWidth = 140;
-    const labelHeight = 50;
-    const x = button.labelPos.x - labelWidth / 2;
-    const y = button.labelPos.y - labelHeight / 2;
-    const radius = 4;
-
-    // Box background with rounded corners
-    ctx.fillStyle = 'rgba(30, 30, 30, 0.85)';
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 1.5;
-
-    roundRect(ctx, x, y, labelWidth, labelHeight, radius);
-    ctx.fill();
-    ctx.stroke();
-
-    // Button name
-    const simplifiedName = simplifyButtonName(button.name || 'Button');
-    ctx.fillStyle = '#ccc';
-    ctx.font = '12px "Segoe UI", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(simplifiedName, button.labelPos.x, button.labelPos.y - 8);
-
-    // "(unbound)" text
-    ctx.fillStyle = '#666';
-    ctx.font = 'italic 10px "Segoe UI", sans-serif';
-    ctx.fillText('(unbound)', button.labelPos.x, button.labelPos.y + 10);
-
-    ctx.restore();
-}
-
-function drawHat4WayLabels(button, alpha, handleSize)
-{
-    ctx.save();
-    ctx.globalAlpha = alpha;
-
-    const spacing = 45;
-    const boxWidth = 70;
-    const boxHeight = 50;
-    const radius = 4;
-
-    // Draw hat name above
-    ctx.fillStyle = '#aaa';
-    ctx.font = '13px "Segoe UI", sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const simplifiedName = simplifyButtonName(button.name || 'Hat');
-    ctx.fillText(simplifiedName, button.labelPos.x, button.labelPos.y - spacing * 2 + 10);
-
-    // Calculate positions for each direction in a plus pattern
-    const positions = {
-        'up': { x: button.labelPos.x, y: button.labelPos.y - spacing + 8, label: 'U' },
-        'down': { x: button.labelPos.x, y: button.labelPos.y + spacing - 8, label: 'D' },
-        'left': { x: button.labelPos.x - spacing * 1.5, y: button.labelPos.y, label: 'L' },
-        'right': { x: button.labelPos.x + spacing * 1.5, y: button.labelPos.y, label: 'R' },
-        'push': { x: button.labelPos.x, y: button.labelPos.y, label: 'Push' }
-    };
-
-    // Draw each direction box
-    Object.keys(positions).forEach(dir =>
-    {
-        const pos = positions[dir];
-        const x = pos.x - boxWidth / 2;
-        const y = pos.y - boxHeight / 2;
-
-        // Box background
-        ctx.fillStyle = 'rgba(30, 30, 30, 0.85)';
-        ctx.strokeStyle = '#555';
-        ctx.lineWidth = 1.5 / zoom;
-
-        roundRect(ctx, x, y, boxWidth, boxHeight, radius);
-        ctx.fill();
-        ctx.stroke();
-
-        // Direction label
-        ctx.fillStyle = '#ccc';
-        ctx.font = `${11 / zoom}px 'Segoe UI', sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(pos.label, pos.x, pos.y - 6 / zoom);
-
-        // "(unbound)" text
-        ctx.fillStyle = '#666';
-        ctx.font = `italic ${9 / zoom}px 'Segoe UI', sans-serif`;
-        ctx.fillText('(unbound)', pos.x, pos.y + 8 / zoom);
-    });
-
-    ctx.restore();
-}
-
-// Helper function to draw rounded rectangles
-function roundRect(ctx, x, y, width, height, radius)
-{
-    ctx.beginPath();
-    ctx.moveTo(x + radius, y);
-    ctx.lineTo(x + width - radius, y);
-    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-    ctx.lineTo(x + width, y + height - radius);
-    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-    ctx.lineTo(x + radius, y + height);
-    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-    ctx.lineTo(x, y + radius);
-    ctx.quadraticCurveTo(x, y, x + radius, y);
-    ctx.closePath();
-}
-
-// Simplify button names for display
-function simplifyButtonName(name)
-{
-    if (!name) return 'Button';
-
-    // Remove "Joystick 1 - " or "Button Button" prefixes
-    name = name.replace(/^Joystick \d+ - /, '');
-    name = name.replace(/^Button /, '');
-
-    // Simplify common patterns
-    name = name.replace(/Button\((\d+)\)/, 'Btn $1');
-    name = name.replace(/^(\d+)$/, 'Btn $1');
-
-    return name;
-}
+// Note: drawSingleButtonLabel and drawHat4WayLabels are now imported from button-renderer.js
+// Note: roundRect and simplifyButtonName are now imported from button-renderer.js
 
 // Canvas interaction
 function getCanvasCoords(event)
@@ -942,9 +904,26 @@ function onCanvasMouseUp(event)
     {
         isPanning = false;
         canvas.style.cursor = 'default';
+        // Save camera position after panning
+        saveCameraPosition();
     }
 
     draggingHandle = null;
+}
+
+// Helper function to save current camera position
+function saveCameraPosition()
+{
+    if (currentStick === 'left')
+    {
+        leftStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
+        localStorage.setItem('leftStickCamera', JSON.stringify(leftStickCamera));
+    }
+    else
+    {
+        rightStickCamera = { zoom, pan: { x: pan.x, y: pan.y } };
+        localStorage.setItem('rightStickCamera', JSON.stringify(rightStickCamera));
+    }
 }
 
 function onCanvasWheel(event)
@@ -993,27 +972,22 @@ function findHandleAtPosition(pos)
 
             if (isHat)
             {
-                // For hats, check the entire plus arrangement area
-                const spacing = 45;
-                const boxWidth = 70;
-                const boxHeight = 50;
+                // Use centralized hat position calculation
+                const hasPush = button.inputs && button.inputs['push'];
+                const directions = ['up', 'down', 'left', 'right', 'push'];
 
-                // Check each box in the plus pattern
-                const positions = [
-                    { x: button.labelPos.x, y: button.labelPos.y - spacing }, // up
-                    { x: button.labelPos.x, y: button.labelPos.y + spacing }, // down
-                    { x: button.labelPos.x - spacing, y: button.labelPos.y }, // left
-                    { x: button.labelPos.x + spacing, y: button.labelPos.y }, // right
-                    { x: button.labelPos.x, y: button.labelPos.y } // push
-                ];
-
-                for (const boxPos of positions)
+                for (const dir of directions)
                 {
-                    const x = boxPos.x - boxWidth / 2;
-                    const y = boxPos.y - boxHeight / 2;
+                    // Only check directions that have inputs
+                    if (!button.inputs || !button.inputs[dir])
+                    {
+                        continue;
+                    }
 
-                    if (pos.x >= x && pos.x <= x + boxWidth &&
-                        pos.y >= y && pos.y <= y + boxHeight)
+                    const bounds = getHat4WayBoxBounds(dir, button.labelPos.x, button.labelPos.y, hasPush);
+                    if (bounds &&
+                        pos.x >= bounds.x && pos.x <= bounds.x + bounds.width &&
+                        pos.y >= bounds.y && pos.y <= bounds.y + bounds.height)
                     {
                         return { buttonId: button.id, type: 'label' };
                     }
@@ -1022,8 +996,8 @@ function findHandleAtPosition(pos)
             else
             {
                 // For simple buttons, check the single label box
-                const labelWidth = 140 / zoom;
-                const labelHeight = 40 / zoom;
+                const labelWidth = ButtonFrameWidth / zoom;
+                const labelHeight = ButtonFrameHeight / zoom;
                 const x = button.labelPos.x - labelWidth / 2;
                 const y = button.labelPos.y - labelHeight / 2;
 
@@ -1059,8 +1033,8 @@ function findButtonAtPosition(pos)
         // Check if clicking on label box
         if (button.labelPos)
         {
-            const labelWidth = 80;
-            const labelHeight = 30;
+            const labelWidth = HatFrameWidth;
+            const labelHeight = HatFrameHeight;
             const x = button.labelPos.x - labelWidth / 2;
             const y = button.labelPos.y - labelHeight / 2;
 
@@ -1093,6 +1067,7 @@ function zoomBy(delta, event = null)
     }
 
     updateZoomDisplay();
+    saveCameraPosition();
     redraw();
 }
 
@@ -1110,6 +1085,7 @@ function resetZoom()
     pan.y = (canvas.height - scaledHeight) / 2;
 
     updateZoomDisplay();
+    saveCameraPosition();
     redraw();
 }
 
@@ -1136,6 +1112,7 @@ function fitToScreen()
     pan.y = (canvas.height - scaledHeight) / 2;
 
     updateZoomDisplay();
+    saveCameraPosition();
     redraw();
 }
 
@@ -1795,11 +1772,9 @@ async function saveButtonDetails()
         }
         else
         {
-            // Editing existing button - copy all properties from tempButton to originalButton
-            if (originalButton)
-            {
-                Object.assign(originalButton, tempButton);
-            }
+            // Editing existing button - update the button in the array directly
+            buttons[existingIndex] = tempButton;
+            setCurrentButtons(buttons);
         }
 
         markAsChanged();
@@ -1832,9 +1807,6 @@ async function deleteCurrentButton(event)
     const buttonsBeforeConfirm = getCurrentButtons();
     const indexBeforeConfirm = buttonsBeforeConfirm.findIndex(b => b.id === tempButton.id);
 
-    console.log('Delete button clicked. Button exists:', indexBeforeConfirm !== -1);
-    console.log('Buttons count before confirm:', buttonsBeforeConfirm.length);
-
     if (indexBeforeConfirm === -1)
     {
         await alert('Error: This button has already been deleted!');
@@ -1860,22 +1832,16 @@ async function deleteCurrentButton(event)
         'Cancel'
     );
 
-    console.log('Confirm dialog returned:', confirmDelete);
-
     if (!confirmDelete)
     {
         // User cancelled the deletion - do nothing and keep modal open
-        console.log('User CANCELLED deletion - button should NOT be deleted');
         return;
     }
 
-    console.log('User CONFIRMED deletion - proceeding with delete');
 
     // Proceed with deletion - verify button still exists (check again in case something changed)
     const buttons = getCurrentButtons();
     const index = buttons.findIndex(b => b.id === tempButton.id);
-
-    console.log('After confirm - Button exists:', index !== -1);
 
     if (index !== -1)
     {
@@ -2155,14 +2121,22 @@ async function startInputDetection()
             // Use shared utility for friendly name (use adjusted string)
             const inputName = parseInputDisplayName(adjustedInputString);
 
-            // Update the input field with a friendly name
-            document.getElementById('button-name-input').value = inputName;
+            // Update the input field with a friendly name only if empty
+            const buttonNameInput = document.getElementById('button-name-input');
+            if (!buttonNameInput.value)
+            {
+                buttonNameInput.value = inputName;
+            }
 
             // Store the adjusted Star Citizen format string in tempButton
             if (tempButton)
             {
                 tempButton.buttonType = 'simple';
-                tempButton.name = inputName;
+                // Only set name if it's currently empty
+                if (!tempButton.name)
+                {
+                    tempButton.name = inputName;
+                }
 
                 // Extract button ID if it's a button
                 const match = adjustedInputString.match(/button(\d+)/);
@@ -2419,6 +2393,145 @@ async function saveTemplate()
                     buttonType: b.buttonType || 'simple',
                     inputs: b.inputs || {},
                     // Legacy support
+                    inputType: b.inputType,
+                    inputId: b.inputId
+                }))
+            }
+        };
+
+        await invoke('save_template', {
+            filePath,
+            templateJson: JSON.stringify(saveData, null, 2)
+        });
+
+        // Persist to localStorage
+        localStorage.setItem('currentTemplate', JSON.stringify(saveData));
+        localStorage.setItem('templateFileName', filePath.split(/[\\\/]/).pop());
+
+        // Clear unsaved changes
+        hasUnsavedChanges = false;
+        updateUnsavedIndicator();
+
+        // Update header template name
+        if (window.updateTemplateIndicator)
+        {
+            window.updateTemplateIndicator(templateData.name);
+        }
+
+        await alert('Template saved successfully!');
+    } catch (error)
+    {
+        console.error('Error saving template:', error);
+        await alert(`Failed to save template: ${error}`);
+    }
+}
+
+async function saveTemplateAs()
+{
+    if (!templateData.name)
+    {
+        await alert('Please enter a template name');
+        document.getElementById('template-name').focus();
+        return;
+    }
+
+    if (!loadedImage)
+    {
+        await alert('Please load a joystick image');
+        return;
+    }
+
+    // For dual image mode, require both images
+    if (templateData.imageType === 'dual')
+    {
+        if (!templateData.leftImageDataUrl || !templateData.rightImageDataUrl)
+        {
+            await alert('Please load images for both left and right sticks');
+            return;
+        }
+    }
+
+    // Count buttons from nested structure
+    const leftButtons = getCurrentButtons();
+    const rightButtons = currentStick === 'left' ?
+        (templateData.rightStick.buttons || templateData.rightStick || []) :
+        (templateData.leftStick.buttons || templateData.leftStick || []);
+    const totalButtons = leftButtons.length + (Array.isArray(rightButtons) ? rightButtons.length : 0);
+
+    if (totalButtons === 0)
+    {
+        await alert('Please add at least one button to either stick');
+        return;
+    }
+
+    try
+    {
+        let resourceDir;
+        try
+        {
+            resourceDir = await invoke('get_resource_dir');
+        }
+        catch (e)
+        {
+            console.warn('Could not get resource directory:', e);
+            resourceDir = undefined;
+        }
+
+        // Always show file picker for Save As
+        const filePath = await save({
+            filters: [{
+                name: 'Joystick Template',
+                extensions: ['json']
+            }],
+            defaultPath: resourceDir ? `${resourceDir}/${templateData.name.replace(/[^a-z0-9]/gi, '_')}.json` : `${templateData.name.replace(/[^a-z0-9]/gi, '_')}.json`
+        });
+
+        if (!filePath) return; // User cancelled
+
+        // Helper to extract buttons array from stick (handles nested or flat structure)
+        const getStickButtons = (stick) =>
+        {
+            if (Array.isArray(stick)) return stick;
+            if (stick && stick.buttons && Array.isArray(stick.buttons)) return stick.buttons;
+            return [];
+        };
+
+        // Prepare data for saving with nested structure
+        const saveData = {
+            name: templateData.name,
+            joystickModel: templateData.joystickModel,
+            imagePath: templateData.imagePath,
+            imageDataUrl: templateData.imageDataUrl,
+            imageFlipped: templateData.imageFlipped,
+            imageType: templateData.imageType,
+            leftImagePath: templateData.leftImagePath,
+            leftImageDataUrl: templateData.leftImageDataUrl,
+            rightImagePath: templateData.rightImagePath,
+            rightImageDataUrl: templateData.rightImageDataUrl,
+            imageWidth: loadedImage.width,
+            imageHeight: loadedImage.height,
+            leftStick: {
+                joystickNumber: templateData.leftStick.joystickNumber || 1,
+                buttons: getStickButtons(templateData.leftStick).map(b => ({
+                    id: b.id,
+                    name: b.name,
+                    buttonPos: b.buttonPos,
+                    labelPos: b.labelPos,
+                    buttonType: b.buttonType || 'simple',
+                    inputs: b.inputs || {},
+                    inputType: b.inputType,
+                    inputId: b.inputId
+                }))
+            },
+            rightStick: {
+                joystickNumber: templateData.rightStick.joystickNumber || 2,
+                buttons: getStickButtons(templateData.rightStick).map(b => ({
+                    id: b.id,
+                    name: b.name,
+                    buttonPos: b.buttonPos,
+                    labelPos: b.labelPos,
+                    buttonType: b.buttonType || 'simple',
+                    inputs: b.inputs || {},
                     inputType: b.inputType,
                     inputId: b.inputId
                 }))
@@ -2737,6 +2850,19 @@ function loadPersistedTemplate()
         {
             const data = JSON.parse(savedTemplate);
 
+            // Restore camera positions if available
+            const savedLeftCamera = localStorage.getItem('leftStickCamera');
+            const savedRightCamera = localStorage.getItem('rightStickCamera');
+
+            if (savedLeftCamera)
+            {
+                leftStickCamera = JSON.parse(savedLeftCamera);
+            }
+            if (savedRightCamera)
+            {
+                rightStickCamera = JSON.parse(savedRightCamera);
+            }
+
             // Load the data
             templateData.name = data.name || '';
             templateData.joystickModel = data.joystickModel || '';
@@ -2875,6 +3001,9 @@ function markAsChanged()
     try
     {
         localStorage.setItem('currentTemplate', JSON.stringify(templateData));
+        // Also persist camera positions for each stick
+        localStorage.setItem('leftStickCamera', JSON.stringify(leftStickCamera));
+        localStorage.setItem('rightStickCamera', JSON.stringify(rightStickCamera));
     } catch (error)
     {
         console.error('Error persisting template changes:', error);

@@ -91,10 +91,13 @@ function showUpdateIndicator(latestVersion)
     const badge = document.createElement('span');
     badge.className = 'update-badge';
     badge.title = `Update available: v${latestVersion}`;
-    badge.innerHTML = '⬆️ Update Available';
+    // top of file
+
+    // inside showUpdateIndicator
+    badge.innerHTML = `✨ v${latestVersion} Available`;
     badge.style.cursor = 'pointer';
-    badge.style.animation = 'pulse 2s infinite';
-    badge.style.width = '160px';
+    // badge.style.animation = 'pulse 2s infinite';
+    badge.style.width = '180px';
 
     // Click to open releases page
     badge.addEventListener('click', async (e) =>
