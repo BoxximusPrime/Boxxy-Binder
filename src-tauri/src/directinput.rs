@@ -1,16 +1,10 @@
-use gilrs::{EventType, Gilrs};
-use once_cell::sync::Lazy;
 use rusty_xinput::XInputHandle;
 use serde::Serialize;
-use std::sync::Mutex;
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::Emitter;
 
-// Global Gilrs instance for axis detection to avoid recreating it on every poll
-static GILRS_INSTANCE: Lazy<Mutex<Option<Gilrs>>> = Lazy::new(|| Mutex::new(None));
-
-fn is_gamepad(name: &str, _gamepad: &gilrs::Gamepad) -> bool {
+fn is_gamepad(name: &str) -> bool {
     let name_lower = name.to_lowercase();
 
     eprintln!("is_gamepad: Checking device: '{}'", name);
@@ -130,16 +124,10 @@ pub struct DetectedInput {
     pub session_id: String, // Session ID to track which detection session this input belongs to
     pub device_uuid: Option<String>, // Unique device identifier for persistent mapping
 
-    // Extended debug information from gilrs
-    pub raw_axis_code: Option<String>, // Raw axis code from gilrs (e.g., "Axis::LeftStickX")
-    pub raw_button_code: Option<String>, // Raw button code from gilrs
-    pub raw_code_index: Option<u32>,   // Raw index from the Code debug representation
-    pub device_name: Option<String>,   // Full device name
-    pub device_gilrs_id: Option<usize>, // Internal gilrs device ID
-    pub device_power_info: Option<String>, // Battery/power information if available
-    pub device_is_ff_supported: Option<bool>, // Force feedback support
-    pub all_device_axes: Option<Vec<String>>, // All available axes on this device
-    pub all_device_buttons: Option<Vec<String>>, // All available buttons (estimated)
+    // Extended debug information
+    pub raw_button_code: Option<String>, // Raw button code
+    pub raw_code_index: Option<u32>,     // Raw index from the code
+    pub device_name: Option<String>,     // Full device name
 
     // HID-specific axis information (from device descriptor)
     pub hid_usage_id: Option<u32>, // HID usage ID for this axis (e.g., 48 for X, 53 for Rz)
@@ -173,33 +161,9 @@ pub struct DeviceInfo {
     pub is_connected: bool,
 }
 
-fn resolve_device_uuid(gamepad: &gilrs::Gamepad, fallback_id: usize) -> String {
-    let raw = gamepad.uuid();
-    if raw.iter().all(|b| *b == 0) {
-        return format!("{}_{}", gamepad.name(), fallback_id);
-    }
-
-    let mut encoded = String::with_capacity(32);
-    for byte in raw.iter() {
-        encoded.push_str(&format!("{:02x}", byte));
-    }
-    encoded
-}
-
 fn resolve_xinput_uuid(controller_id: u32) -> String {
     // Create a consistent UUID for XInput controllers based on their slot
     format!("xinput_{}", controller_id)
-}
-
-fn extract_index_from_code(code: &gilrs::ev::Code) -> Option<u32> {
-    let code_str = format!("{:?}", code);
-    if let Some(start) = code_str.find("index: ") {
-        let rest = &code_str[start + 7..];
-        if let Some(end) = rest.find(' ') {
-            return rest[..end].parse::<u32>().ok().map(|n| n + 1);
-        }
-    }
-    None
 }
 
 use std::collections::HashMap;
@@ -336,18 +300,12 @@ pub fn wait_for_input(
                                 is_modifier: false,
                                 session_id: session_id.clone(),
                                 device_uuid: Some(resolve_xinput_uuid(controller_id)),
-                                raw_axis_code: None,
                                 raw_button_code: Some(format!("XInput 0x{:04X}", buttons_pressed)),
                                 raw_code_index: Some(btn),
                                 device_name: Some(format!(
                                     "Xbox Controller (XInput {})",
                                     controller_id
                                 )),
-                                device_gilrs_id: None,
-                                device_power_info: None,
-                                device_is_ff_supported: None,
-                                all_device_axes: None,
-                                all_device_buttons: None,
                                 hid_usage_id: None,
                                 hid_axis_name: None,
                             }));
@@ -435,18 +393,12 @@ pub fn wait_for_input(
                                 is_modifier: false,
                                 session_id: session_id.clone(),
                                 device_uuid: Some(resolve_xinput_uuid(controller_id)),
-                                raw_axis_code: Some(format!("XInput {}", axis_name)),
                                 raw_button_code: None,
                                 raw_code_index: Some(*axis_index),
                                 device_name: Some(format!(
                                     "Xbox Controller (XInput {})",
                                     controller_id
                                 )),
-                                device_gilrs_id: None,
-                                device_power_info: None,
-                                device_is_ff_supported: None,
-                                all_device_axes: None,
-                                all_device_buttons: None,
                                 hid_usage_id: None,
                                 hid_axis_name: None,
                             }));
@@ -492,15 +444,9 @@ pub fn wait_for_input(
                         "{:04x}:{:04x}",
                         device.vendor_id, device.product_id
                     )),
-                    raw_axis_code: None,
                     raw_button_code: Some(format!("HID Button {}", button_num)),
                     raw_code_index: Some(button_num),
                     device_name: Some(device_name.to_string()),
-                    device_gilrs_id: None,
-                    device_power_info: None,
-                    device_is_ff_supported: None,
-                    all_device_axes: None,
-                    all_device_buttons: None,
                     hid_usage_id: None,
                     hid_axis_name: None,
                 }));
@@ -529,6 +475,97 @@ pub fn wait_for_input(
 
                     // Only process if change is significant (5% of range)
                     if change_percent >= HID_AXIS_CHANGE_PERCENT {
+                        // Check if this is a hat switch FIRST (HID Usage ID 0x39 = 57)
+                        // Hat switches must be checked before normalized threshold because they use discrete values
+                        if axis_id == 57 || axis_id == 0x39 {
+                            let axis_name = current_report
+                                .axis_names
+                                .get(&axis_id)
+                                .map(|s| s.as_str())
+                                .unwrap_or("Unknown");
+                            let device_name = device.product.as_deref().unwrap_or("Unknown Device");
+
+                            // Get axis index for display purposes
+                            let axis_index = device_hid_to_axis_maps
+                                .get(&device.path)
+                                .and_then(|map| map.get(&axis_id).copied())
+                                .unwrap_or_else(|| {
+                                    let mut sorted_axes: Vec<_> =
+                                        current_report.axis_values.keys().copied().collect();
+                                    sorted_axes.sort();
+                                    sorted_axes
+                                        .iter()
+                                        .position(|&id| id == axis_id)
+                                        .map(|pos| pos as u32 + 1)
+                                        .unwrap_or(1)
+                                });
+
+                            eprintln!("[HID Detection] HAT SWITCH AXIS DETECTED! Usage ID: {}, current_value: {}, prev_value: {}, logical_min: {}, logical_max: {}",
+                                axis_id, current_value, prev_value, logical_min, logical_max);
+
+                            // This is a hat switch! Convert to hat format
+                            // Hat switches use discrete values 0-7 for directions (0=up, 2=right, 4=down, 6=left)
+                            // 8 or 15 means centered
+                            let hat_direction = match current_value {
+                                0 => "up",
+                                1 => "up", // diagonal up-right
+                                2 => "right",
+                                3 => "right", // diagonal down-right
+                                4 => "down",
+                                5 => "down", // diagonal down-left
+                                6 => "left",
+                                7 => "left", // diagonal up-left
+                                8 | 15 => {
+                                    // Centered - skip this detection
+                                    eprintln!(
+                                        "[HID Detection] Hat switch centered (value: {}), skipping",
+                                        current_value
+                                    );
+                                    continue;
+                                }
+                                _ => {
+                                    // Unknown value - skip
+                                    eprintln!(
+                                        "[HID Detection] Unknown hat switch value: {}, skipping",
+                                        current_value
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            eprintln!("[HID Detection] Hat switch direction determined: {} -> js{}_hat1_{}", hat_direction, device_instance, hat_direction);
+
+                            let normalized =
+                                ((current_value as i32 - logical_min) as f32 / range * 2.0) - 1.0;
+
+                            return Ok(Some(DetectedInput {
+                                input_string: format!(
+                                    "js{}_hat1_{}",
+                                    device_instance, hat_direction
+                                ),
+                                display_name: format!(
+                                    "Joystick {} - Hat 1 {}",
+                                    device_instance,
+                                    hat_direction.to_uppercase()
+                                ),
+                                device_type: "Joystick".to_string(),
+                                axis_value: Some(normalized),
+                                modifiers: get_active_modifiers(),
+                                is_modifier: false,
+                                session_id: session_id.clone(),
+                                device_uuid: Some(format!(
+                                    "{:04x}:{:04x}",
+                                    device.vendor_id, device.product_id
+                                )),
+                                raw_button_code: None,
+                                raw_code_index: Some(axis_index),
+                                device_name: Some(device_name.to_string()),
+                                hid_usage_id: Some(axis_id),
+                                hid_axis_name: Some(axis_name.to_string()),
+                            }));
+                        }
+
+                        // Regular axis handling
                         let normalized =
                             ((current_value as i32 - logical_min) as f32 / range * 2.0) - 1.0;
 
@@ -564,73 +601,8 @@ pub fn wait_for_input(
                                         .unwrap_or(1)
                                 });
 
-                            eprintln!("[HID Detection] Axis movement detected - axis_id: {}, axis_name: {}, axis_index: {}, normalized: {}", 
+                            eprintln!("[HID Detection] Axis movement detected - axis_id: {}, axis_name: {}, axis_index: {}, normalized: {}",
                                 axis_id, axis_name, axis_index, normalized);
-
-                            // Check if this is a hat switch FIRST (HID Usage ID 0x39 = 57)
-                            if axis_id == 57 || axis_id == 0x39 {
-                                eprintln!("[HID Detection] HAT SWITCH AXIS DETECTED! Usage ID: {}, current_value: {}, normalized: {}, logical_min: {}, logical_max: {}", 
-                                    axis_id, current_value, normalized, logical_min, logical_max);
-
-                                // This is a hat switch! Convert to hat format
-                                // Hat switches use discrete values 0-7 for directions (0=up, 2=right, 4=down, 6=left)
-                                // 8 or 15 means centered
-                                let hat_direction = match current_value {
-                                    0 => "up",
-                                    1 => "up", // diagonal up-right
-                                    2 => "right",
-                                    3 => "right", // diagonal down-right
-                                    4 => "down",
-                                    5 => "down", // diagonal down-left
-                                    6 => "left",
-                                    7 => "left", // diagonal up-left
-                                    8 | 15 => {
-                                        // Centered - skip this detection
-                                        continue;
-                                    }
-                                    _ => {
-                                        // Unknown value - skip
-                                        continue;
-                                    }
-                                };
-
-                                eprintln!("[HID Detection] Hat switch direction determined: {} -> js{}_hat1_{}", hat_direction, device_instance, hat_direction);
-
-                                return Ok(Some(DetectedInput {
-                                    input_string: format!(
-                                        "js{}_hat1_{}",
-                                        device_instance, hat_direction
-                                    ),
-                                    display_name: format!(
-                                        "Joystick {} - Hat 1 {}",
-                                        device_instance,
-                                        hat_direction.to_uppercase()
-                                    ),
-                                    device_type: "Joystick".to_string(),
-                                    axis_value: Some(normalized),
-                                    modifiers: get_active_modifiers(),
-                                    is_modifier: false,
-                                    session_id: session_id.clone(),
-                                    device_uuid: Some(format!(
-                                        "{:04x}:{:04x}",
-                                        device.vendor_id, device.product_id
-                                    )),
-                                    raw_axis_code: Some(format!(
-                                        "HID Usage ID: {} (Hat Switch)",
-                                        axis_id
-                                    )),
-                                    raw_button_code: None,
-                                    raw_code_index: Some(axis_index),
-                                    device_name: Some(device_name.to_string()),
-                                    device_gilrs_id: None,
-                                    device_power_info: None,
-                                    device_is_ff_supported: None,
-                                    all_device_axes: None,
-                                    all_device_buttons: None,
-                                    hid_usage_id: Some(axis_id),
-                                    hid_axis_name: Some(axis_name.to_string()),
-                                }));
-                            }
 
                             eprintln!("[HID Detection] Regular axis moved: HID usage ID {} ({}) -> DirectInput axis {} -> Display: {} {} (Axis {})",
                                 axis_id, axis_name, axis_index, axis_name, direction_symbol, axis_index);
@@ -653,15 +625,9 @@ pub fn wait_for_input(
                                     "{:04x}:{:04x}",
                                     device.vendor_id, device.product_id
                                 )),
-                                raw_axis_code: Some(format!("HID Usage ID: {}", axis_id)),
                                 raw_button_code: None,
                                 raw_code_index: Some(axis_index),
                                 device_name: Some(device_name.to_string()),
-                                device_gilrs_id: None,
-                                device_power_info: None,
-                                device_is_ff_supported: None,
-                                all_device_axes: None,
-                                all_device_buttons: None,
                                 hid_usage_id: Some(axis_id),
                                 hid_axis_name: Some(axis_name.to_string()),
                             }));
@@ -836,18 +802,12 @@ pub fn wait_for_inputs_with_events(
                                 is_modifier: false,
                                 session_id: session_id.clone(),
                                 device_uuid: Some(resolve_xinput_uuid(controller_id)),
-                                raw_axis_code: None,
                                 raw_button_code: Some(format!("XInput 0x{:04X}", buttons_pressed)),
                                 raw_code_index: Some(btn),
                                 device_name: Some(format!(
                                     "Xbox Controller (XInput {})",
                                     controller_id
                                 )),
-                                device_gilrs_id: None,
-                                device_power_info: None,
-                                device_is_ff_supported: None,
-                                all_device_axes: None,
-                                all_device_buttons: None,
                                 hid_usage_id: None,
                                 hid_axis_name: None,
                             };
@@ -939,18 +899,12 @@ pub fn wait_for_inputs_with_events(
                                 is_modifier: false,
                                 session_id: session_id.clone(),
                                 device_uuid: Some(resolve_xinput_uuid(controller_id)),
-                                raw_axis_code: Some(format!("XInput {}", axis_name)),
                                 raw_button_code: None,
                                 raw_code_index: Some(*axis_index),
                                 device_name: Some(format!(
                                     "Xbox Controller (XInput {})",
                                     controller_id
                                 )),
-                                device_gilrs_id: None,
-                                device_power_info: None,
-                                device_is_ff_supported: None,
-                                all_device_axes: None,
-                                all_device_buttons: None,
                                 hid_usage_id: None,
                                 hid_axis_name: None,
                             };
@@ -1000,15 +954,9 @@ pub fn wait_for_inputs_with_events(
                         "{:04x}:{:04x}",
                         device.vendor_id, device.product_id
                     )),
-                    raw_axis_code: None,
                     raw_button_code: Some(format!("HID Button {}", button_num)),
                     raw_code_index: Some(button_num),
                     device_name: Some(device_name.to_string()),
-                    device_gilrs_id: None,
-                    device_power_info: None,
-                    device_is_ff_supported: None,
-                    all_device_axes: None,
-                    all_device_buttons: None,
                     hid_usage_id: None,
                     hid_axis_name: None,
                 };
@@ -1041,6 +989,103 @@ pub fn wait_for_inputs_with_events(
 
                     // Only process if change is significant (5% of range)
                     if change_percent >= HID_AXIS_CHANGE_PERCENT {
+                        // Check if this is a hat switch FIRST (HID Usage ID 0x39 = 57)
+                        // Hat switches must be checked before normalized threshold because they use discrete values
+                        if axis_id == 57 || axis_id == 0x39 {
+                            let axis_name = current_report
+                                .axis_names
+                                .get(&axis_id)
+                                .map(|s| s.as_str())
+                                .unwrap_or("Unknown");
+                            let device_name = device.product.as_deref().unwrap_or("Unknown Device");
+
+                            // Get axis index for display purposes
+                            let axis_index = device_hid_to_axis_maps
+                                .get(&device.path)
+                                .and_then(|map| map.get(&axis_id).copied())
+                                .unwrap_or_else(|| {
+                                    let mut sorted_axes: Vec<_> =
+                                        current_report.axis_values.keys().copied().collect();
+                                    sorted_axes.sort();
+                                    sorted_axes
+                                        .iter()
+                                        .position(|&id| id == axis_id)
+                                        .map(|pos| pos as u32 + 1)
+                                        .unwrap_or(1)
+                                });
+
+                            eprintln!("[HID Detection] HAT SWITCH detected! axis_id: {}, axis_index: {}, current_value: {}, prev_value: {}, logical_min: {}, logical_max: {}",
+                                axis_id, axis_index, current_value, prev_value, logical_min, logical_max);
+
+                            // Hat switches report discrete direction values
+                            // Common encoding: 0=up, 2=right, 4=down, 6=left, 8/15=centered
+                            // Some use: 0=up, 1=up-right, 2=right, 3=down-right, 4=down, 5=down-left, 6=left, 7=up-left
+                            let hat_direction = match current_value {
+                                0 => "up",
+                                1 => "up", // up-right, use just up
+                                2 => "right",
+                                3 => "right", // down-right, use just right
+                                4 => "down",
+                                5 => "down", // down-left, use just down
+                                6 => "left",
+                                7 => "left", // up-left, use just left
+                                8 | 15 => {
+                                    eprintln!(
+                                        "[HID Detection] Hat switch centered (value: {}), skipping",
+                                        current_value
+                                    );
+                                    continue; // Centered position
+                                }
+                                _ => {
+                                    eprintln!(
+                                        "[HID Detection] Unknown hat switch value: {}, skipping",
+                                        current_value
+                                    );
+                                    continue;
+                                }
+                            };
+
+                            eprintln!(
+                                "[HID Detection] Hat direction: {} -> js{}_hat1_{}",
+                                hat_direction, device_instance, hat_direction
+                            );
+
+                            let normalized =
+                                ((current_value as i32 - logical_min) as f32 / range * 2.0) - 1.0;
+
+                            let input = DetectedInput {
+                                input_string: format!(
+                                    "js{}_hat1_{}",
+                                    device_instance, hat_direction
+                                ),
+                                display_name: format!(
+                                    "Joystick {} - Hat 1 {}",
+                                    device_instance,
+                                    hat_direction.to_uppercase()
+                                ),
+                                device_type: "Joystick".to_string(),
+                                axis_value: Some(normalized),
+                                modifiers: get_active_modifiers(),
+                                is_modifier: false,
+                                session_id: session_id.clone(),
+                                device_uuid: Some(format!(
+                                    "{:04x}:{:04x}",
+                                    device.vendor_id, device.product_id
+                                )),
+                                raw_button_code: None,
+                                raw_code_index: Some(axis_index),
+                                device_name: Some(device_name.to_string()),
+                                hid_usage_id: Some(axis_id),
+                                hid_axis_name: Some(axis_name.to_string()),
+                            };
+                            let _ = window.emit("input-detected", &input);
+                            if first_input_time.is_none() {
+                                first_input_time = Some(Instant::now());
+                            }
+                            continue; // Skip the regular axis handling
+                        }
+
+                        // Regular axis handling
                         let normalized =
                             ((current_value as i32 - logical_min) as f32 / range * 2.0) - 1.0;
 
@@ -1075,79 +1120,6 @@ pub fn wait_for_inputs_with_events(
                             eprintln!("[HID Detection] Axis moved: HID usage ID {} ({}) -> DirectInput axis {} -> Display: {} {} (Axis {})",
                                 axis_id, axis_name, axis_index, axis_name, direction_symbol, axis_index);
 
-                            // Check if this is a hat switch (HID Usage ID 0x39 = 57)
-                            if axis_id == 57 || axis_id == 0x39 {
-                                eprintln!("[HID Detection] HAT SWITCH detected! axis_id: {}, axis_index: {}, current_value: {}, logical_min: {}, logical_max: {}", 
-                                    axis_id, axis_index, current_value, logical_min, logical_max);
-
-                                // Hat switches report discrete direction values
-                                // Common encoding: 0=up, 2=right, 4=down, 6=left, 8/15=centered
-                                // Some use: 0=up, 1=up-right, 2=right, 3=down-right, 4=down, 5=down-left, 6=left, 7=up-left
-                                let hat_direction = match current_value {
-                                    0 => "up",
-                                    1 => "up", // up-right, use just up
-                                    2 => "right",
-                                    3 => "right", // down-right, use just right
-                                    4 => "down",
-                                    5 => "down", // down-left, use just down
-                                    6 => "left",
-                                    7 => "left", // up-left, use just left
-                                    8 | 15 => {
-                                        eprintln!("[HID Detection] Hat switch centered (value: {}), skipping", current_value);
-                                        continue; // Centered position
-                                    }
-                                    _ => {
-                                        eprintln!("[HID Detection] Unknown hat switch value: {}, skipping", current_value);
-                                        continue;
-                                    }
-                                };
-
-                                eprintln!(
-                                    "[HID Detection] Hat direction: {} -> js{}_hat1_{}",
-                                    hat_direction, device_instance, hat_direction
-                                );
-
-                                let input = DetectedInput {
-                                    input_string: format!(
-                                        "js{}_hat1_{}",
-                                        device_instance, hat_direction
-                                    ),
-                                    display_name: format!(
-                                        "Joystick {} - Hat 1 {}",
-                                        device_instance,
-                                        hat_direction.to_uppercase()
-                                    ),
-                                    device_type: "Joystick".to_string(),
-                                    axis_value: Some(normalized),
-                                    modifiers: get_active_modifiers(),
-                                    is_modifier: false,
-                                    session_id: session_id.clone(),
-                                    device_uuid: Some(format!(
-                                        "{:04x}:{:04x}",
-                                        device.vendor_id, device.product_id
-                                    )),
-                                    raw_axis_code: Some(format!(
-                                        "HID Usage ID: {} (Hat Switch)",
-                                        axis_id
-                                    )),
-                                    raw_button_code: None,
-                                    raw_code_index: Some(axis_index),
-                                    device_name: Some(device_name.to_string()),
-                                    device_gilrs_id: None,
-                                    device_power_info: None,
-                                    device_is_ff_supported: None,
-                                    all_device_axes: None,
-                                    all_device_buttons: None,
-                                    hid_usage_id: Some(axis_id),
-                                    hid_axis_name: Some(axis_name.to_string()),
-                                };
-                                let _ = window.emit("input-detected", &input);
-                                if first_input_time.is_none() {
-                                    first_input_time = Some(Instant::now());
-                                }
-                                continue; // Skip the regular axis handling
-                            }
-
                             let input = DetectedInput {
                                 input_string: format!(
                                     "js{}_axis{}_{}",
@@ -1166,15 +1138,9 @@ pub fn wait_for_inputs_with_events(
                                     "{:04x}:{:04x}",
                                     device.vendor_id, device.product_id
                                 )),
-                                raw_axis_code: Some(format!("HID Usage ID: {}", axis_id)),
                                 raw_button_code: None,
                                 raw_code_index: Some(axis_index),
                                 device_name: Some(device_name.to_string()),
-                                device_gilrs_id: None,
-                                device_power_info: None,
-                                device_is_ff_supported: None,
-                                all_device_axes: None,
-                                all_device_buttons: None,
                                 hid_usage_id: Some(axis_id),
                                 hid_axis_name: Some(axis_name.to_string()),
                             };
@@ -1283,44 +1249,36 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
 
 /// Returns detailed information for all connected devices.
 pub fn list_connected_devices() -> Result<Vec<DeviceInfo>, String> {
-    let mut gilrs = Gilrs::new().map_err(|e| e.to_string())?;
-
-    // Drain events so gilrs updates its internal cache
-    while let Some(_event) = gilrs.next_event() {
-        // no-op
-    }
+    use crate::hid_reader;
 
     let mut devices = Vec::new();
 
-    for (_id, gamepad) in gilrs.gamepads() {
-        // Use gamepad name directly (no device database lookup)
-        let name = gamepad.name().to_string();
+    // List HID game controllers (joysticks/HOTAS)
+    let hid_devices = hid_reader::list_hid_game_controllers().unwrap_or_default();
 
-        // Skip Xbox controllers in Gilrs if we're on Windows, as we'll add them via XInput
-        // This prevents duplicates and ensures we use the XInput UUIDs that match our input detection
+    for device in hid_devices {
+        let name = device
+            .product
+            .as_deref()
+            .unwrap_or("Unknown Device")
+            .to_string();
+
+        // Skip Xbox controllers as they'll be added via XInput
         if cfg!(windows)
             && (name.to_lowercase().contains("xbox") || name.to_lowercase().contains("xinput"))
         {
             continue;
         }
 
-        let is_connected = gamepad.is_connected();
-        let id = usize::from(gamepad.id());
+        let uuid = format!("{:04x}:{:04x}", device.vendor_id, device.product_id);
+        let is_gamepad_device = is_gamepad(&name);
 
-        // Use VID:PID format for UUID to match the format used in input detection
-        // This ensures device UUID consistency across detection and listing
-        let uuid = if let (Some(vid), Some(pid)) = (gamepad.vendor_id(), gamepad.product_id()) {
-            format!("{:04x}:{:04x}", vid, pid)
-        } else {
-            resolve_device_uuid(&gamepad, id) // Fallback to old method
-        };
-
-        let is_gamepad_device = is_gamepad(&name, &gamepad);
-
+        // Estimate counts - HID devices will vary widely
+        // For joysticks, use conservative estimates
         let (button_count, axis_count, hat_count) = if is_gamepad_device {
             (15, 6, 1)
         } else {
-            (32, 7, 1)
+            (32, 7, 1) // Conservative defaults for joysticks
         };
 
         devices.push(DeviceInfo {
@@ -1335,18 +1293,17 @@ pub fn list_connected_devices() -> Result<Vec<DeviceInfo>, String> {
                 "joystick"
             }
             .to_string(),
-            is_connected,
+            is_connected: true, // If it's in the HID list, it's connected
         });
     }
 
     // Add XInput devices explicitly
-    // This ensures that if wait_for_input detects via XInput fallback, we have a matching device in the list
     if let Ok(xinput) = XInputHandle::load_default() {
         for i in 0..4 {
             if xinput.get_state(i).is_ok() {
                 let uuid = resolve_xinput_uuid(i);
 
-                // Only add if not already present (though UUIDs will likely differ from Gilrs)
+                // Only add if not already present
                 if !devices.iter().any(|d| d.uuid == uuid) {
                     devices.push(DeviceInfo {
                         uuid,
@@ -1366,56 +1323,166 @@ pub fn list_connected_devices() -> Result<Vec<DeviceInfo>, String> {
 }
 
 /// Waits for the user to move an axis on the specified device and returns the raw axis index.
+/// Uses HID-based detection for joysticks and XInput for Xbox controllers.
 pub fn detect_axis_movement_for_device(
     target_uuid: &str,
     timeout_millis: u64,
 ) -> Result<Option<AxisMovement>, String> {
+    use crate::hid_reader;
+
     let timeout = Duration::from_millis(timeout_millis);
     let start = Instant::now();
 
-    // Process any pending events within the timeout window
-    while start.elapsed() < timeout {
-        // Get or create the shared Gilrs instance in each iteration
-        let mut gilrs_lock = GILRS_INSTANCE.lock().map_err(|e| e.to_string())?;
-        if gilrs_lock.is_none() {
-            *gilrs_lock = Some(Gilrs::new().map_err(|e| e.to_string())?);
-        }
+    // Check if this is an XInput device
+    if target_uuid.starts_with("xinput_") {
+        let controller_id: u32 = target_uuid
+            .strip_prefix("xinput_")
+            .and_then(|s| s.parse().ok())
+            .ok_or("Invalid XInput UUID")?;
 
-        // Drain all pending events and track the most recent axis movement
-        let mut latest_movement: Option<AxisMovement> = None;
+        let xinput =
+            XInputHandle::load_default().map_err(|e| format!("Failed to load XInput: {:?}", e))?;
 
-        if let Some(gilrs) = gilrs_lock.as_mut() {
-            // Process ALL pending events to clear the queue
-            while let Some(event) = gilrs.next_event() {
-                if let EventType::AxisChanged(_axis, value, code) = event.event {
-                    let gamepad = gilrs.gamepad(event.id);
-                    let uuid = resolve_device_uuid(&gamepad, usize::from(event.id));
+        let initial_state = xinput
+            .get_state(controller_id)
+            .map_err(|e| format!("XInput error: {:?}", e))?;
 
-                    if uuid != target_uuid {
-                        continue;
+        while start.elapsed() < timeout {
+            if let Ok(state) = xinput.get_state(controller_id) {
+                // Check each axis for significant change
+                let axes = [
+                    (
+                        1,
+                        (state.raw.Gamepad.sThumbLX as f32) / 32768.0,
+                        (initial_state.raw.Gamepad.sThumbLX as f32) / 32768.0,
+                    ),
+                    (
+                        2,
+                        (state.raw.Gamepad.sThumbLY as f32) / 32768.0,
+                        (initial_state.raw.Gamepad.sThumbLY as f32) / 32768.0,
+                    ),
+                    (
+                        3,
+                        (state.raw.Gamepad.sThumbRX as f32) / 32768.0,
+                        (initial_state.raw.Gamepad.sThumbRX as f32) / 32768.0,
+                    ),
+                    (
+                        4,
+                        (state.raw.Gamepad.sThumbRY as f32) / 32768.0,
+                        (initial_state.raw.Gamepad.sThumbRY as f32) / 32768.0,
+                    ),
+                    (
+                        5,
+                        (state.raw.Gamepad.bLeftTrigger as f32) / 255.0 * 2.0 - 1.0,
+                        (initial_state.raw.Gamepad.bLeftTrigger as f32) / 255.0 * 2.0 - 1.0,
+                    ),
+                    (
+                        6,
+                        (state.raw.Gamepad.bRightTrigger as f32) / 255.0 * 2.0 - 1.0,
+                        (initial_state.raw.Gamepad.bRightTrigger as f32) / 255.0 * 2.0 - 1.0,
+                    ),
+                ];
+
+                for (axis_id, value, initial_value) in axes {
+                    let delta = (value - initial_value).abs();
+                    if delta > 0.15 && value.abs() > 0.15 {
+                        return Ok(Some(AxisMovement { axis_id, value }));
                     }
+                }
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        return Ok(None);
+    }
 
-                    // Only track axis movement outside deadzone (±0.15) to filter noise/drift
-                    if value.abs() > 0.15 {
-                        if let Some(index) = extract_index_from_code(&code) {
-                            // Keep updating to get the most recent value
-                            latest_movement = Some(AxisMovement {
-                                axis_id: index,
-                                value,
-                            });
+    // Handle HID devices (joysticks/HOTAS)
+    let hid_devices = hid_reader::list_hid_game_controllers().unwrap_or_default();
+
+    // Find the matching device by UUID
+    let target_device = hid_devices.iter().find(|d| {
+        let uuid = format!("{:04x}:{:04x}", d.vendor_id, d.product_id);
+        uuid == target_uuid
+    });
+
+    let Some(device) = target_device else {
+        return Err(format!("Device not found: {}", target_uuid));
+    };
+
+    // Get descriptor for parsing
+    let descriptor = hid_reader::get_hid_descriptor_bytes(&device.path)
+        .map_err(|e| format!("Failed to get descriptor: {}", e))?;
+
+    // Get initial report
+    let initial_bytes = hid_reader::read_hid_report(&device.path, 10)
+        .map_err(|e| format!("Failed to read initial report: {}", e))?;
+
+    let initial_report = hid_reader::parse_hid_full_report(&initial_bytes, &descriptor)
+        .map_err(|e| format!("Failed to parse initial report: {}", e))?;
+
+    // Poll for axis movement
+    while start.elapsed() < timeout {
+        let report_bytes = match hid_reader::read_hid_report(&device.path, 10) {
+            Ok(bytes) if !bytes.is_empty() => bytes,
+            _ => {
+                thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+        };
+
+        let current_report = match hid_reader::parse_hid_full_report(&report_bytes, &descriptor) {
+            Ok(report) => report,
+            Err(_) => {
+                thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+        };
+
+        // Check each axis for significant change
+        for (&axis_id, &current_value) in &current_report.axis_values {
+            let initial_value = initial_report
+                .axis_values
+                .get(&axis_id)
+                .copied()
+                .unwrap_or(0);
+
+            let (logical_min, logical_max) = current_report
+                .axis_ranges
+                .get(&axis_id)
+                .copied()
+                .unwrap_or((0, 65535));
+
+            let range = (logical_max - logical_min) as f32;
+            if range <= 0.0 {
+                continue;
+            }
+
+            // Calculate percentage change
+            let change_abs = (current_value as i32 - initial_value as i32).abs() as f32;
+            let change_percent = change_abs / range;
+
+            // Significant change detected (5% of range)
+            if change_percent >= 0.05 {
+                let normalized = ((current_value as i32 - logical_min) as f32 / range * 2.0) - 1.0;
+
+                if normalized.abs() > 0.15 {
+                    // Get the DirectInput axis mapping
+                    if let Ok(di_to_hid) =
+                        hid_reader::get_directinput_to_hid_axis_mapping(&device.path)
+                    {
+                        // Find the DirectInput axis index for this HID usage ID
+                        for (axis_index, hid_usage_id) in di_to_hid {
+                            if hid_usage_id == axis_id {
+                                return Ok(Some(AxisMovement {
+                                    axis_id: axis_index,
+                                    value: normalized,
+                                }));
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Return the most recent movement if we found one
-        if latest_movement.is_some() {
-            return Ok(latest_movement);
-        }
-
-        // Release lock before sleeping
-        drop(gilrs_lock);
         thread::sleep(Duration::from_millis(5));
     }
 

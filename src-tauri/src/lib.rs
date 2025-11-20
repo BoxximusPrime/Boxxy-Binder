@@ -1,10 +1,8 @@
 use log::{error, info};
-use std::collections::HashMap;
 use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
-mod device_profiles;
 mod directinput;
 mod hid_reader;
 mod keybindings;
@@ -80,32 +78,12 @@ fn get_connected_devices() -> Result<Vec<directinput::DeviceInfo>, String> {
 }
 
 #[tauri::command]
-fn get_device_axis_mapping(device_uuid: String) -> Result<HashMap<u32, String>, String> {
-    let devices = directinput::list_connected_devices()?;
-    let device = devices
-        .into_iter()
-        .find(|d| d.uuid == device_uuid)
-        .ok_or_else(|| format!("Device with UUID {} not found", device_uuid))?;
-
-    let (_profile_name, profile) = device_profiles::profile_for_device(&device.name);
-    Ok(device_profiles::invert_profile(&profile))
-}
-
-#[tauri::command]
 fn detect_axis_movement(
     device_uuid: String,
     timeout_millis: Option<u64>,
 ) -> Result<Option<directinput::AxisMovement>, String> {
     let timeout = timeout_millis.unwrap_or(100); // Default 100ms for polling
     directinput::detect_axis_movement_for_device(&device_uuid, timeout)
-}
-
-#[tauri::command]
-/// DEPRECATED: Use get_axis_names_for_device() instead
-/// This function returns hardcoded axis profiles from device-database.json
-/// For accurate axis detection, use the HID descriptor parsing functions
-fn get_axis_profiles() -> HashMap<String, HashMap<String, u32>> {
-    device_profiles::profiles_snapshot()
 }
 
 #[tauri::command]
@@ -1580,9 +1558,7 @@ pub fn run() {
             greet,
             detect_joysticks,
             get_connected_devices,
-            get_device_axis_mapping,
             detect_axis_movement,
-            get_axis_profiles,
             wait_for_input_binding,
             wait_for_inputs_with_events,
             load_keybindings,

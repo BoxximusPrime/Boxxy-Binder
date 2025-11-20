@@ -24,13 +24,11 @@ tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 quick-xml = { version = "0.36", features = ["serialize"] }
-gilrs = { version = "0.11", features = ["wgi"] }
 rusty-xinput = "1.3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 env_logger = "0.11"
 log = "0.4"
 chrono = "0.4"
-once_cell = "1"
 hidapi = "2.6"
 hut = "0.4"
 hidreport = "0.5"
