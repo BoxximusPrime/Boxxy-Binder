@@ -4,7 +4,6 @@ use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
-mod device_database;
 mod device_profiles;
 mod directinput;
 mod hid_reader;
@@ -121,24 +120,6 @@ async fn wait_for_input_binding(
 }
 
 #[tauri::command]
-async fn wait_for_multiple_inputs(
-    session_id: String,
-    initial_timeout_secs: u64,
-    collect_duration_secs: u64,
-) -> Result<Vec<directinput::DetectedInput>, String> {
-    // Run the blocking operation in a separate thread to avoid freezing the UI
-    tokio::task::spawn_blocking(move || {
-        directinput::wait_for_multiple_inputs(
-            session_id,
-            initial_timeout_secs,
-            collect_duration_secs,
-        )
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
-}
-
-#[tauri::command]
 async fn wait_for_inputs_with_events(
     window: tauri::Window,
     session_id: String,
@@ -249,8 +230,6 @@ fn update_binding(
                     "New rebind: input='{}', multi_tap={:?}, activation_mode='{}'",
                     new_rebind.input, new_rebind.multi_tap, new_rebind.activation_mode
                 );
-
-                let new_input_type = new_rebind.get_input_type();
 
                 // Extract device instance from the new input (e.g., "js1" from "js1_button3")
                 let new_device_instance = if let Some(underscore_pos) = new_input.find('_') {
@@ -1592,7 +1571,7 @@ fn delete_character_from_installation(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(AppState::new()))
@@ -1605,7 +1584,6 @@ pub fn run() {
             detect_axis_movement,
             get_axis_profiles,
             wait_for_input_binding,
-            wait_for_multiple_inputs,
             wait_for_inputs_with_events,
             load_keybindings,
             update_binding,
@@ -1651,44 +1629,6 @@ pub fn run() {
             // Set up logging
             if let Err(e) = setup_logging(app.handle()) {
                 eprintln!("Failed to set up logging: {}", e);
-            }
-
-            // Initialize device database
-            let db_path = if cfg!(debug_assertions) {
-                // Development: look in src-tauri directory
-                let exe_path = std::env::current_exe()
-                    .map_err(|e| format!("Failed to get exe path: {}", e))?;
-                let exe_dir = exe_path
-                    .parent()
-                    .ok_or_else(|| "Failed to get exe directory".to_string())?;
-                exe_dir
-                    .parent()
-                    .and_then(|p| p.parent())
-                    .and_then(|p| p.parent())
-                    .ok_or_else(|| "Failed to find project root".to_string())?
-                    .join("src-tauri")
-                    .join("device-database.json")
-            } else {
-                // Production: look in resources
-                let resource_dir = app
-                    .path()
-                    .resource_dir()
-                    .map_err(|e| format!("Failed to get resource dir: {}", e))?;
-                resource_dir
-                    .join(RESOURCES_SUBFOLDER)
-                    .join("device-database.json")
-            };
-
-            eprintln!("Attempting to load device database from: {:?}", db_path);
-            eprintln!("Database exists: {}", db_path.exists());
-
-            if let Err(e) = device_database::DeviceDatabase::init(&db_path) {
-                eprintln!("Warning: Failed to initialize device database: {}", e);
-                eprintln!("Device lookup will fall back to OS device names");
-                // Don't fail startup if database fails to load
-            } else {
-                info!("Device database initialized successfully");
-                eprintln!("Device database loaded successfully!");
             }
 
             Ok(())
