@@ -2432,6 +2432,20 @@ async function startHatInputDetection(direction)
                 console.log('Adjusted input string for', direction, '(remapped to template js number):', adjustedInputString);
             }
 
+            // Convert to Star Citizen axis format using HID axis name from backend if it's an axis
+            if (result.hid_axis_name && adjustedInputString.includes('_axis'))
+            {
+                // Convert HID axis name to lowercase SC format (Rz -> rotz, X -> x, etc.)
+                const hidName = result.hid_axis_name.toLowerCase();
+                const scAxisName = hidName === 'rx' ? 'rotx' : 
+                                   hidName === 'ry' ? 'roty' : 
+                                   hidName === 'rz' ? 'rotz' : hidName;
+                
+                // Replace axis number format with axis name format
+                adjustedInputString = adjustedInputString.replace(/axis\d+(?:_(positive|negative))?/, scAxisName);
+                console.log(`Hat ${direction}: Converted to SC format using HID axis name "${result.hid_axis_name}":`, adjustedInputString);
+            }
+
             // Store the adjusted Star Citizen input string in tempButton
             if (tempButton)
             {
@@ -2590,12 +2604,29 @@ async function startInputDetection()
                 console.log('Adjusted input string (remapped to template js number):', adjustedInputString);
             }
 
-            // Convert to Star Citizen axis format if it's an axis (e.g., js1_axis2 -> js1_y)
-            const scFormatString = toStarCitizenFormat(adjustedInputString);
-            if (scFormatString)
+            // Convert to Star Citizen axis format using HID axis name from backend (e.g., js1_axis2 -> js1_rz)
+            // This ensures we use the actual axis name from the HID descriptor, not hardcoded mappings
+            if (result.hid_axis_name && adjustedInputString.includes('_axis'))
             {
-                adjustedInputString = scFormatString;
-                console.log('Converted to Star Citizen format:', adjustedInputString);
+                // Convert HID axis name to lowercase SC format (Rz -> rotz, X -> x, etc.)
+                const hidName = result.hid_axis_name.toLowerCase();
+                const scAxisName = hidName === 'rx' ? 'rotx' : 
+                                   hidName === 'ry' ? 'roty' : 
+                                   hidName === 'rz' ? 'rotz' : hidName;
+                
+                // Replace axis number format with axis name format
+                adjustedInputString = adjustedInputString.replace(/axis\d+(?:_(positive|negative))?/, scAxisName);
+                console.log(`Converted to Star Citizen format using HID axis name "${result.hid_axis_name}":`, adjustedInputString);
+            }
+            else if (adjustedInputString.includes('_axis'))
+            {
+                // Fallback: use hardcoded mapping if no HID axis name available (for XInput gamepads)
+                const scFormatString = toStarCitizenFormat(adjustedInputString);
+                if (scFormatString)
+                {
+                    adjustedInputString = scFormatString;
+                    console.log('Converted to Star Citizen format using default mapping:', adjustedInputString);
+                }
             }
 
             // Use shared utility for friendly name (use adjusted string)

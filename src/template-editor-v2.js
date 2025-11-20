@@ -31,7 +31,8 @@ const state = {
     lastAxisUpdateTime: {},
     axisBitDepths: new Map(), // Track bit depths per axis
     // HID axis names from descriptor
-    detectedAxisNames: {} // Map of axis_index -> axis_name from HID descriptor
+    detectedAxisNames: {}, // Map of axis_index -> axis_name from HID descriptor
+    cachedDescriptor: null // Cached HID descriptor bytes for axis detection
 };
 
 const dom = {
@@ -1152,6 +1153,8 @@ async function startAxisDetection()
     state.isDetectingAxis = true;
     state.lastAxisValues = {};
     state.hidDevicePath = null;
+    state.cachedDescriptor = null;
+    state.isFirstAxisPoll = true; // Track first poll to initialize baselines
 
     dom.startAxisDetectionBtn.style.display = 'none';
     dom.stopAxisDetectionBtn.style.display = 'inline-flex';
@@ -1196,6 +1199,17 @@ async function startAxisDetection()
             if (state.hidDevicePath)
             {
                 console.log('[Axis Detection] ✓ Using HID polling with path:', state.hidDevicePath);
+
+                // Cache the descriptor for efficient parsing
+                try
+                {
+                    state.cachedDescriptor = await invoke('get_hid_descriptor_bytes', { devicePath: state.hidDevicePath });
+                    console.log(`[Axis Detection] Cached descriptor (${state.cachedDescriptor.length} bytes)`);
+                } catch (e)
+                {
+                    console.warn('[Axis Detection] Could not cache descriptor:', e);
+                }
+
                 pollHidAxisMovement();
                 return;
             } else
@@ -1286,46 +1300,89 @@ async function pollHidAxisMovement()
 
         if (report && report.length > 0)
         {
-            // Parse the report
-            const axisReport = await invoke('parse_hid_report', {
-                report: report
-            });
+            // Parse the report using cached descriptor if available
+            const axisReport = state.cachedDescriptor
+                ? await invoke('parse_hid_report_with_descriptor', {
+                    report: report,
+                    descriptor: state.cachedDescriptor
+                })
+                : await invoke('parse_hid_report', {
+                    report: report,
+                    devicePath: state.hidDevicePath
+                });
 
             if (axisReport && axisReport.axis_values)
             {
+                // Build a mapping from usage IDs to raw indices (0-based sequential)
+                // This matches the custom axis table where rows are 0-7
+                const usageIds = Object.keys(axisReport.axis_values).map(k => parseInt(k)).sort((a, b) => a - b);
+                const usageToRawIndex = {};
+                usageIds.forEach((usageId, index) =>
+                {
+                    usageToRawIndex[usageId] = index;
+                });
+
                 // Process each axis
                 for (const [axisIdStr, value] of Object.entries(axisReport.axis_values))
                 {
-                    const axisId = parseInt(axisIdStr);
+                    const usageId = parseInt(axisIdStr);
+                    const rawIndex = usageToRawIndex[usageId];
 
-                    // Get bit depth for this axis
-                    const bitDepth = axisReport.axis_bit_depths ? axisReport.axis_bit_depths[axisIdStr] : null;
+                    // Get bit depth and range for this axis
+                    const bitDepth = axisReport.axis_bit_depths ? axisReport.axis_bit_depths[axisIdStr] : 16;
+                    const axisRange = axisReport.axis_ranges ? axisReport.axis_ranges[axisIdStr] : null;
 
                     // Track max bit depth
                     if (bitDepth)
                     {
-                        const currentMax = state.axisBitDepths.get(axisId) || 0;
+                        const currentMax = state.axisBitDepths.get(rawIndex) || 0;
                         if (bitDepth > currentMax)
                         {
-                            state.axisBitDepths.set(axisId, bitDepth);
+                            state.axisBitDepths.set(rawIndex, bitDepth);
                         }
                     }
 
-                    const maxObservedBitDepth = state.axisBitDepths.get(axisId) || bitDepth;
-                    const is16Bit = maxObservedBitDepth > 8 || axisReport.is_16bit;
+                    // Calculate the actual max value from logical range if available
+                    const maxValue = axisRange ? axisRange[1] : (1 << bitDepth) - 1; // Use logical_max or calculate from bit depth
+
+                    // On first poll, just initialize the baseline values without triggering detection
+                    if (state.isFirstAxisPoll)
+                    {
+                        state.lastAxisValues[rawIndex] = value;
+                        continue; // Skip detection on first poll
+                    }
+
+                    // Use percentage-based threshold: 2% of the axis range
+                    // This adapts to different bit depths automatically
+                    // For 12-bit (4095): threshold = 82, for 11-bit (2047): threshold = 41
+                    // For 10-bit (1023): threshold = 20, for 16-bit (65535): threshold = 1311
+                    const thresholdPercent = 0.02; // 2%
+                    const threshold = Math.max(2, Math.round(maxValue * thresholdPercent));
 
                     // Check for change
-                    const lastValue = state.lastAxisValues[axisId] || 0;
-                    // Use a small threshold like hid-debugger (basically any change)
-                    // For 8-bit (255), 1 is ~0.4%. For 16-bit (65535), 1 is ~0.0015%
-                    // We use 2 to filter out minimal noise
-                    const changed = Math.abs(value - lastValue) > 2;
+                    const lastValue = state.lastAxisValues[rawIndex];
+                    if (lastValue === undefined)
+                    {
+                        // If we somehow don't have a baseline, set it now
+                        state.lastAxisValues[rawIndex] = value;
+                        continue;
+                    }
+
+                    const changed = Math.abs(value - lastValue) > threshold;
 
                     if (changed)
                     {
-                        state.lastAxisValues[axisId] = value;
-                        highlightAxis(axisId, value, is16Bit);
+                        state.lastAxisValues[rawIndex] = value;
+                        // Pass rawIndex (0-based), value, bit depth, and max value
+                        highlightAxis(rawIndex, value, bitDepth, maxValue);
                     }
+                }
+
+                // After first poll, clear the flag
+                if (state.isFirstAxisPoll)
+                {
+                    state.isFirstAxisPoll = false;
+                    console.log('[Axis Detection] Baseline values initialized, ready to detect movement');
                 }
             }
         }
@@ -1369,11 +1426,9 @@ function stopAxisDetection()
     });
 }
 
-function highlightAxis(axisId, value, is16Bit = false)
+function highlightAxis(rawIndex, value, bitDepth = 16, maxValue = 65535)
 {
-    // Convert 1-based axis ID from backend to 0-based raw index for UI
-    const rawIndex = axisId - 1;
-
+    // rawIndex is 0-based (0-7) matching the custom-axis-row data-raw-index
     // Find the row for this axis
     const row = document.querySelector(`.custom-axis-row[data-raw-index="${rawIndex}"]`);
     if (!row) return;
@@ -1413,9 +1468,8 @@ function highlightAxis(axisId, value, is16Bit = false)
         if (Number.isInteger(value))
         {
             // Integer (HID raw value)
-            const maxVal = is16Bit ? 65535 : 255;
-            const pct = Math.round((value / maxVal) * 100);
-            displayText = `Value: ${value} (${pct}%)`;
+            const pct = Math.round((value / maxValue) * 100);
+            displayText = `Value: ${value} (${pct}%, ${bitDepth}-bit)`;
         } else
         {
             // Float (DirectInput value -1.0 to 1.0)
@@ -1429,8 +1483,8 @@ function highlightAxis(axisId, value, is16Bit = false)
     valueDisplay.textContent = displayText;
     valueDisplay.classList.add('active');
 
-    // Update status
-    dom.axisDetectionStatus.textContent = `🎯 Detected movement on Axis ${axisId}! Assign it using the dropdown.`;
+    // Update status - show raw index + 1 for user-friendly display (Axis 1-8)
+    dom.axisDetectionStatus.textContent = `🎯 Detected movement on Raw Axis ${rawIndex} (${bitDepth}-bit)! Assign it using the dropdown.`;
 }
 
 function onDeviceSelectChange()

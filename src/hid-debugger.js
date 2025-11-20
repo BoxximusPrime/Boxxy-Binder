@@ -11,6 +11,7 @@ let hidAxes = new Set();
 let is16BitDevice = false; // Track if device uses 16-bit axes
 let maxAxisValue = 255; // Max value detected (255 for 8-bit, 65535 for 16-bit)
 let deviceAxisNames = {}; // Cached axis names from HID descriptor
+let cachedDescriptor = null; // Cached HID descriptor bytes for parsing
 
 // DOM elements
 let startBtn, stopBtn, clearBtn, selectDeviceBtn, statusIndicator;
@@ -171,9 +172,9 @@ async function selectDevice(device)
 
     closeDeviceModal();
 
-    // Load axis names from the HID descriptor using the new library-based parser
-    // This gives us proper names like "X", "Y", "Rz", "Slider", etc.
-    await loadAxisNames(device.path);
+    // Load HID descriptor bytes and axis names
+    // Cache the descriptor so we don't have to reopen the device on every parse
+    await loadDeviceDescriptor(device.path);
 
     // Show how many axis names were successfully loaded
     const axisCount = Object.keys(deviceAxisNames).length;
@@ -188,17 +189,22 @@ function closeDeviceModal()
     deviceModal.classList.remove('show');
 }
 
-async function loadAxisNames(devicePath)
+async function loadDeviceDescriptor(devicePath)
 {
     try
     {
-        // Load axis names using the hidreport + hut libraries for proper HID parsing
+        // Load the HID descriptor bytes - cache for parsing reports
+        cachedDescriptor = await invoke('get_hid_descriptor_bytes', { devicePath });
+        console.log(`[HID] Cached descriptor (${cachedDescriptor.length} bytes)`);
+
+        // Also load axis names using the hidreport + hut libraries for proper HID parsing
         // This provides accurate names like "X", "Y", "Rz", "Slider", etc.
         deviceAxisNames = await invoke('get_hid_axis_names', { devicePath });
         console.log('[HID] Loaded axis names from descriptor:', deviceAxisNames);
     } catch (error)
     {
-        console.warn('[HID] Could not load axis names from descriptor:', error);
+        console.warn('[HID] Could not load descriptor:', error);
+        cachedDescriptor = null;
         deviceAxisNames = {};
     }
 }
@@ -259,6 +265,7 @@ function clearData()
     hidAxes.clear();
     is16BitDevice = false;
     maxAxisValue = 255;
+    cachedDescriptor = null; // Clear cached descriptor
 
     // Clear live axis grid
     liveAxisGrid.innerHTML = '<div class="axis-placeholder">Start polling to see live axis data...</div>';
@@ -283,10 +290,16 @@ async function pollDevice()
 
         if (report && report.length > 0)
         {
-            // Parse the report to extract axis data
-            const axisReport = await invoke('parse_hid_report', {
-                report: report
-            });
+            // Parse the report to extract axis data using cached descriptor
+            const axisReport = cachedDescriptor
+                ? await invoke('parse_hid_report_with_descriptor', {
+                    report: report,
+                    descriptor: cachedDescriptor
+                })
+                : await invoke('parse_hid_report', {
+                    report: report,
+                    devicePath: selectedDevice.path
+                });
 
             if (axisReport && axisReport.axis_values)
             {
@@ -309,6 +322,7 @@ async function pollDevice()
                 {
                     const axis_id = parseInt(axisId);
                     const bitDepth = axisReport.axis_bit_depths ? axisReport.axis_bit_depths[axisId] : null;
+                    const axisRange = axisReport.axis_ranges ? axisReport.axis_ranges[axisId] : null;
                     // Use cached axis names from descriptor (loaded once at device selection)
                     const axisName = deviceAxisNames[axisId] || null;
 
@@ -316,7 +330,8 @@ async function pollDevice()
                         axis_id: axis_id,
                         value: value,
                         bit_depth: bitDepth,
-                        axis_name: axisName
+                        axis_name: axisName,
+                        axis_range: axisRange
                     });
                 }
             }
@@ -343,7 +358,7 @@ async function pollDevice()
 
 function handleAxisMovement(axisData)
 {
-    const { axis_id, value, bit_depth, axis_name } = axisData;
+    const { axis_id, value, bit_depth, axis_name, axis_range } = axisData;
 
     // Track this axis for HID comparison
     hidAxes.add(`Axis ${axis_id}`);
@@ -363,7 +378,9 @@ function handleAxisMovement(axisData)
 
     // Check if value changed significantly
     const lastValue = lastAxisValues.get(axis_id) || 0;
-    const changed = Math.abs(value - lastValue) > 0.01; // 1% threshold
+    // Use small absolute threshold (2) to catch all meaningful movement
+    // This works for all bit depths: 10-bit (2/1023), 11-bit (2/2047), 12-bit (2/4095), 16-bit (2/65535)
+    const changed = Math.abs(value - lastValue) > 2;
 
     const showUnchanged = showUnchangedCheckbox.checked;
 
@@ -371,8 +388,8 @@ function handleAxisMovement(axisData)
     {
         lastAxisValues.set(axis_id, value);
 
-        // Update live axis display with max observed bit depth and axis name
-        updateAxisCard(axis_id, value, maxObservedBitDepth, axis_name, changed);
+        // Update live axis display with max observed bit depth, axis name, and range
+        updateAxisCard(axis_id, value, maxObservedBitDepth, axis_name, axis_range, changed);
 
         // Add to event stream
         if (changed)
@@ -387,7 +404,7 @@ function handleAxisMovement(axisData)
     }
 }
 
-function updateAxisCard(axisId, value, bitDepth, axisName, changed)
+function updateAxisCard(axisId, value, bitDepth, axisName, axisRange, changed)
 {
     let card = document.getElementById(`axis-card-${axisId}`);
 
@@ -400,7 +417,9 @@ function updateAxisCard(axisId, value, bitDepth, axisName, changed)
         // Use axis name from HID descriptor if available, otherwise use friendly name
         const displayName = axisName || getAxisName(axisId);
 
-        const rangeText = bitDepth ? `0 - ${(1 << bitDepth) - 1} (${bitDepth}-bit)` :
+        // Use actual logical range from descriptor
+        const [minVal, maxVal] = axisRange || [0, bitDepth ? (1 << bitDepth) - 1 : (is16BitDevice ? 65535 : 255)];
+        const rangeText = bitDepth ? `${minVal} - ${maxVal} (${bitDepth}-bit)` :
             (is16BitDevice ? '0 - 65535 (16-bit)' : '0 - 255 (8-bit)');
 
         card.innerHTML = `
@@ -415,7 +434,25 @@ function updateAxisCard(axisId, value, bitDepth, axisName, changed)
             <div class="axis-range">${rangeText}</div>
         `;
 
-        liveAxisGrid.appendChild(card);
+        // Insert card in sorted order by axis ID
+        const existingCards = Array.from(liveAxisGrid.children);
+        let inserted = false;
+
+        for (let i = 0; i < existingCards.length; i++)
+        {
+            const existingId = parseInt(existingCards[i].id.replace('axis-card-', ''));
+            if (axisId < existingId)
+            {
+                liveAxisGrid.insertBefore(card, existingCards[i]);
+                inserted = true;
+                break;
+            }
+        }
+
+        if (!inserted)
+        {
+            liveAxisGrid.appendChild(card);
+        }
     }
 
     // Update values
@@ -423,17 +460,17 @@ function updateAxisCard(axisId, value, bitDepth, axisName, changed)
     const bar = card.querySelector('.axis-bar');
     const rangeDisplay = card.querySelector('.axis-range');
 
-    // Calculate max value based on bit depth
-    const maxValue = bitDepth ? (1 << bitDepth) - 1 : maxAxisValue;
+    // Calculate max value from axis_range if available, otherwise from bit depth
+    const [minVal, maxVal] = axisRange || [0, bitDepth ? (1 << bitDepth) - 1 : maxAxisValue];
 
-    // Normalize to percentage based on detected max value
-    const normalized = (value / maxValue) * 100;
+    // Normalize to percentage based on actual range
+    const normalized = ((value - minVal) / (maxVal - minVal)) * 100;
 
     valueDisplay.textContent = Math.round(value);
-    bar.style.width = `${normalized}%`;
+    bar.style.width = `${Math.max(0, Math.min(100, normalized))}%`;
 
-    // Update range display with detected bit depth
-    const rangeText = bitDepth ? `0 - ${maxValue} (${bitDepth}-bit)` :
+    // Update range display with detected bit depth and actual range
+    const rangeText = bitDepth ? `${minVal} - ${maxVal} (${bitDepth}-bit)` :
         (is16BitDevice ? '0 - 65535 (16-bit)' : '0 - 255 (8-bit)');
     if (rangeDisplay.textContent !== rangeText)
     {

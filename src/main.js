@@ -76,6 +76,8 @@ let categoryFriendlyNames = {};
 let currentFilename = null; // Track the current file name for the copy command
 const SECONDARY_WINDOW_MS = 1000; // One-second window for multi-input capture
 let deviceAxisNames = {}; // Cache of device_name -> { axis_id -> axis_name } from HID descriptors
+let deviceAxisMappings = {}; // Cache of device_name -> { directinput_index -> hid_usage_id }
+let deviceSCAxisMappings = {}; // Cache of device_name -> { directinput_index -> sc_axis_name }
 
 function setBindingSaveEnabled(enabled)
 {
@@ -116,10 +118,33 @@ async function loadDeviceAxisNames()
           const axisNames = await invoke('get_axis_names_for_device', { deviceName });
           deviceAxisNames[deviceName] = axisNames || {};
           console.log(`[Axis Names] Loaded ${Object.keys(axisNames || {}).length} axes for device: ${deviceName}`);
+
+          // Also load the DirectInput-to-HID mapping
+          try
+          {
+            const axisMapping = await invoke('get_directinput_to_hid_mapping', { deviceName });
+            deviceAxisMappings[deviceName] = axisMapping || {};
+            console.log(`[Axis Mapping] Loaded ${Object.keys(axisMapping || {}).length} DirectInput mappings for device: ${deviceName}`);
+
+            // Build SC axis mapping from HID data
+            if (Object.keys(axisMapping || {}).length > 0 && Object.keys(axisNames || {}).length > 0)
+            {
+              const scAxisMapping = buildAxisMappingFromHID(axisMapping, axisNames);
+              deviceSCAxisMappings[deviceName] = scAxisMapping;
+              console.log(`[SC Axis Mapping] Built mapping for ${deviceName}:`, scAxisMapping);
+            }
+          } catch (mappingError)
+          {
+            console.warn(`[Axis Mapping] Failed to load DirectInput mapping for ${deviceName}:`, mappingError);
+            deviceAxisMappings[deviceName] = {};
+            deviceSCAxisMappings[deviceName] = {};
+          }
         } catch (error)
         {
           console.warn(`[Axis Names] Failed to load axis names for ${deviceName}:`, error);
           deviceAxisNames[deviceName] = {}; // Cache empty result to avoid repeated attempts
+          deviceAxisMappings[deviceName] = {};
+          deviceSCAxisMappings[deviceName] = {};
         }
       }
     }
@@ -165,24 +190,35 @@ function getHidAxisNameForBinding(binding)
 
   if (!device || !device.device_name) return null;
 
-  // Get axis names for this device
-  const axisMap = deviceAxisNames[device.device_name];
-  if (!axisMap) return null;
+  // Get axis names and SC axis mapping for this device
+  const axisNameMap = deviceAxisNames[device.device_name];
+  const scAxisMapping = deviceSCAxisMappings[device.device_name];
+  const directInputMapping = deviceAxisMappings[device.device_name];
 
-  // Map the axis letter to axis index
-  // Common mappings: x=1, y=2, z=3, rx=4, ry=5, rz=6, slider=7, slider2=8, hat=9
-  const axisIndexMap = {
-    'x': 1, 'y': 2, 'z': 3,
-    'rx': 4, 'ry': 5, 'rz': 6,
-    'rotx': 4, 'roty': 5, 'rotz': 6,
-    'slider': 7, 'slider1': 7, 'slider2': 8,
-    'hat': 9, 'hat_switch': 9
-  };
+  if (!axisNameMap || !scAxisMapping || !directInputMapping) return null;
 
-  const axisIndex = axisIndexMap[axisName.toLowerCase()];
-  if (axisIndex === undefined) return null;
+  // Find which DirectInput index maps to this SC axis name using device-specific mapping
+  // For example, VKB "rotz" maps to DirectInput index 3 (not 6!)
+  const normalizedAxisName = axisName.toLowerCase();
+  let directInputIndex = null;
 
-  return axisMap[axisIndex] || null;
+  for (const [idx, scName] of Object.entries(scAxisMapping))
+  {
+    if (scName === normalizedAxisName)
+    {
+      directInputIndex = parseInt(idx);
+      break;
+    }
+  }
+
+  if (directInputIndex === null) return null;
+
+  // Convert DirectInput index to HID usage ID using device-specific mapping
+  const hidUsageId = directInputMapping[directInputIndex];
+  if (hidUsageId === undefined) return null;
+
+  // Look up the actual axis name from HID descriptor
+  return axisNameMap[hidUsageId] || null;
 }
 
 // Convert JavaScript KeyboardEvent.code to Star Citizen keyboard format
@@ -517,7 +553,7 @@ window.showAlert = showAlert;
 
 function initializeWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.8.0';
+  const CURRENT_VERSION = '0.8.2';
   const WHATS_NEW_KEY = 'whatsNew';
 
   // Check if the stored version matches the current version
@@ -532,7 +568,7 @@ function initializeWhatsNewModal()
 
 function showWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.8.0';
+  const CURRENT_VERSION = '0.8.2';
   const WHATS_NEW_KEY = 'whatsNew';
 
   const modal = document.getElementById('whats-new-modal');
@@ -2707,8 +2743,26 @@ async function startBinding(actionMapName, actionName, actionDisplayName)
         return null; // Skip disabled joysticks
       }
 
-      // Convert to Star Citizen format (handles axis naming)
-      let scFormattedInput = toStarCitizenFormat(mappedInput);
+      // Convert to Star Citizen format using HID axis name from backend if available
+      let scFormattedInput;
+      if (result.hid_axis_name && mappedInput.includes('_axis'))
+      {
+        // Use the actual HID axis name from the device descriptor
+        // Convert HID axis name to lowercase SC format (Rz -> rotz, X -> x, etc.)
+        const hidName = result.hid_axis_name.toLowerCase();
+        const scAxisName = hidName === 'rx' ? 'rotx' : 
+                           hidName === 'ry' ? 'roty' : 
+                           hidName === 'rz' ? 'rotz' : hidName;
+        
+        // Replace axis number format with axis name format
+        scFormattedInput = mappedInput.replace(/axis\d+(?:_(positive|negative))?/, scAxisName);
+        console.log(`Converted to SC format using HID axis name "${result.hid_axis_name}":`, scFormattedInput);
+      }
+      else
+      {
+        // Fallback: use hardcoded mapping for XInput gamepads or if no HID axis name available
+        scFormattedInput = toStarCitizenFormat(mappedInput);
+      }
 
       // Add modifier prefixes if any (lowercase to match AllBinds.xml format)
       if (result.modifiers && result.modifiers.length > 0)

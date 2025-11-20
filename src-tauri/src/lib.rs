@@ -7,8 +7,8 @@ use tauri_plugin_opener::OpenerExt;
 mod device_database;
 mod device_profiles;
 mod directinput;
-mod keybindings;
 mod hid_reader;
+mod keybindings;
 
 use keybindings::{Action, ActionMap, ActionMaps, AllBinds, MergedBindings, OrganizedKeybindings};
 
@@ -1224,8 +1224,7 @@ fn scan_character_files(directory_path: String) -> Result<Vec<CharacterFile>, St
     let mut characters = Vec::new();
 
     // Read directory entries
-    let entries = fs::read_dir(dir_path)
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    let entries = fs::read_dir(dir_path).map_err(|e| format!("Failed to read directory: {}", e))?;
 
     for entry in entries {
         let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
@@ -1356,78 +1355,117 @@ fn read_hid_device_report(device_path: String, timeout_ms: Option<i32>) -> Resul
 }
 
 #[tauri::command]
-fn parse_hid_report(report: Vec<u8>) -> Result<hid_reader::HidAxisReport, String> {
-    // Don't read descriptor on every report - that causes device conflicts
-    // Axis names should be fetched once at startup via get_hid_axis_names
-    let empty_names = std::collections::HashMap::new();
-    hid_reader::parse_hid_axes(&report, &empty_names)
+fn parse_hid_report(
+    report: Vec<u8>,
+    device_path: String,
+) -> Result<hid_reader::HidAxisReport, String> {
+    // Use descriptor-based parsing for accuracy
+    // Get descriptor once and parse
+    let descriptor = hid_reader::get_hid_descriptor_bytes(&device_path)?;
+    hid_reader::parse_hid_axes_from_descriptor_bytes(&report, &descriptor)
 }
 
 #[tauri::command]
-fn get_hid_axis_names(device_path: String) -> Result<std::collections::HashMap<u32, String>, String> {
+fn parse_hid_report_with_descriptor(
+    report: Vec<u8>,
+    descriptor: Vec<u8>,
+) -> Result<hid_reader::HidAxisReport, String> {
+    hid_reader::parse_hid_axes_from_descriptor_bytes(&report, &descriptor)
+}
+
+#[tauri::command]
+fn get_hid_descriptor_bytes(device_path: String) -> Result<Vec<u8>, String> {
+    hid_reader::get_hid_descriptor_bytes(&device_path)
+}
+
+#[tauri::command]
+fn get_hid_axis_names(
+    device_path: String,
+) -> Result<std::collections::HashMap<u32, String>, String> {
     hid_reader::get_axis_names_from_descriptor(&device_path)
 }
 
-fn find_matching_hid_device(device_name: &str, hid_devices: &[hid_reader::HidDeviceListItem]) -> Option<hid_reader::HidDeviceListItem> {
-    hid_devices.iter().find(|dev| {
-        let product = dev.product.as_deref().unwrap_or("").to_lowercase();
-        let manufacturer = dev.manufacturer.as_deref().unwrap_or("").to_lowercase();
-        let combined = format!("{} {}", manufacturer, product).trim().to_string();
-        let search_name = device_name.to_lowercase();
-        
-        // Clean search name: remove (...) at the end which might be added by Gilrs/OS
-        // e.g. "VKB Gladiator NXT (Left)" -> "vkb gladiator nxt"
-        let clean_search_name = if let Some(idx) = search_name.find('(') {
-            search_name[..idx].trim().to_string()
-        } else {
-            search_name.clone()
-        };
-        
-        // 1. Product contains search name OR Search name contains product
-        if !product.is_empty() && (product.contains(&search_name) || search_name.contains(&product)) {
-            return true;
-        }
-        
-        // 2. Combined (Manuf + Prod) contains search name OR Search name contains Combined
-        if !combined.is_empty() && (combined.contains(&search_name) || search_name.contains(&combined)) {
-            return true;
-        }
+fn find_matching_hid_device(
+    device_name: &str,
+    hid_devices: &[hid_reader::HidDeviceListItem],
+) -> Option<hid_reader::HidDeviceListItem> {
+    hid_devices
+        .iter()
+        .find(|dev| {
+            let product = dev.product.as_deref().unwrap_or("").to_lowercase();
+            let manufacturer = dev.manufacturer.as_deref().unwrap_or("").to_lowercase();
+            let combined = format!("{} {}", manufacturer, product).trim().to_string();
+            let search_name = device_name.to_lowercase();
 
-        // 3. Try with cleaned search name (removed parentheses)
-        if !clean_search_name.is_empty() {
-            if !product.is_empty() && (product.contains(&clean_search_name) || clean_search_name.contains(&product)) {
-                return true;
-            }
-            if !combined.is_empty() && (combined.contains(&clean_search_name) || clean_search_name.contains(&combined)) {
-                return true;
-            }
-        }
+            // Clean search name: remove (...) at the end which might be added by Gilrs/OS
+            // e.g. "VKB Gladiator NXT (Left)" -> "vkb gladiator nxt"
+            let clean_search_name = if let Some(idx) = search_name.find('(') {
+                search_name[..idx].trim().to_string()
+            } else {
+                search_name.clone()
+            };
 
-        // 4. Token based matching (fuzzy)
-        // Split cleaned search name into tokens and check if they exist in the product/combined name
-        let search_tokens: Vec<&str> = clean_search_name.split_whitespace().collect();
-        if search_tokens.len() >= 2 {
-            let matches = search_tokens.iter().filter(|&t| {
-                // Skip very short words
-                if t.len() < 2 { return false; }
-                combined.contains(t)
-            }).count();
-            
-            // If most tokens match, assume it's the same device
-            if matches >= search_tokens.len() - 1 {
+            // 1. Product contains search name OR Search name contains product
+            if !product.is_empty()
+                && (product.contains(&search_name) || search_name.contains(&product))
+            {
                 return true;
             }
-        }
-        
-        false
-    }).cloned()
+
+            // 2. Combined (Manuf + Prod) contains search name OR Search name contains Combined
+            if !combined.is_empty()
+                && (combined.contains(&search_name) || search_name.contains(&combined))
+            {
+                return true;
+            }
+
+            // 3. Try with cleaned search name (removed parentheses)
+            if !clean_search_name.is_empty() {
+                if !product.is_empty()
+                    && (product.contains(&clean_search_name)
+                        || clean_search_name.contains(&product))
+                {
+                    return true;
+                }
+                if !combined.is_empty()
+                    && (combined.contains(&clean_search_name)
+                        || clean_search_name.contains(&combined))
+                {
+                    return true;
+                }
+            }
+
+            // 4. Token based matching (fuzzy)
+            // Split cleaned search name into tokens and check if they exist in the product/combined name
+            let search_tokens: Vec<&str> = clean_search_name.split_whitespace().collect();
+            if search_tokens.len() >= 2 {
+                let matches = search_tokens
+                    .iter()
+                    .filter(|&t| {
+                        // Skip very short words
+                        if t.len() < 2 {
+                            return false;
+                        }
+                        combined.contains(t)
+                    })
+                    .count();
+
+                // If most tokens match, assume it's the same device
+                if matches >= search_tokens.len() - 1 {
+                    return true;
+                }
+            }
+
+            false
+        })
+        .cloned()
 }
 
 #[tauri::command]
 fn get_hid_device_path(device_name: String) -> Result<Option<String>, String> {
     let hid_devices = hid_reader::list_hid_game_controllers()
         .map_err(|e| format!("Failed to list HID devices: {}", e))?;
-    
+
     if let Some(device) = find_matching_hid_device(&device_name, &hid_devices) {
         Ok(Some(device.path))
     } else {
@@ -1436,26 +1474,73 @@ fn get_hid_device_path(device_name: String) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn get_axis_names_for_device(device_name: String) -> Result<std::collections::HashMap<u32, String>, String> {
+fn get_axis_names_for_device(
+    device_name: String,
+) -> Result<std::collections::HashMap<u32, String>, String> {
     // Try to find a matching HID device by name
     // This helps bridge the gap between DirectInput devices and HID devices
-    
+
     let hid_devices = hid_reader::list_hid_game_controllers()
         .map_err(|e| format!("Failed to list HID devices: {}", e))?;
-    
-    eprintln!("[Axis Names] Looking for device matching: '{}'", device_name);
+
+    eprintln!(
+        "[Axis Names] Looking for device matching: '{}'",
+        device_name
+    );
     eprintln!("[Axis Names] Available HID devices:");
     for dev in &hid_devices {
-        eprintln!("  - Product: {:?}, Manufacturer: {:?}, Path: {:?}", dev.product, dev.manufacturer, dev.path);
+        eprintln!(
+            "  - Product: {:?}, Manufacturer: {:?}, Path: {:?}",
+            dev.product, dev.manufacturer, dev.path
+        );
     }
 
     // Try to find a device with a matching name
     if let Some(device) = find_matching_hid_device(&device_name, &hid_devices) {
-        eprintln!("[Axis Names] Found HID device for '{}': {:?}", device_name, device.product);
+        eprintln!(
+            "[Axis Names] Found HID device for '{}': {:?}",
+            device_name, device.product
+        );
         hid_reader::get_axis_names_from_descriptor(&device.path)
     } else {
-        eprintln!("[Axis Names] No matching HID device found for '{}'", device_name);
-        Err(format!("No HID device found matching name: {}", device_name))
+        eprintln!(
+            "[Axis Names] No matching HID device found for '{}'",
+            device_name
+        );
+        Err(format!(
+            "No HID device found matching name: {}",
+            device_name
+        ))
+    }
+}
+
+#[tauri::command]
+fn get_directinput_to_hid_mapping(
+    device_name: String,
+) -> Result<std::collections::HashMap<u32, u32>, String> {
+    let hid_devices = hid_reader::list_hid_game_controllers()
+        .map_err(|e| format!("Failed to list HID devices: {}", e))?;
+
+    eprintln!(
+        "[Axis Mapping] Looking for device matching: '{}'",
+        device_name
+    );
+
+    if let Some(device) = find_matching_hid_device(&device_name, &hid_devices) {
+        eprintln!(
+            "[Axis Mapping] Found HID device for '{}': {:?}",
+            device_name, device.product
+        );
+        hid_reader::get_directinput_to_hid_axis_mapping(&device.path)
+    } else {
+        eprintln!(
+            "[Axis Mapping] No matching HID device found for '{}'",
+            device_name
+        );
+        Err(format!(
+            "No HID device found matching name: {}",
+            device_name
+        ))
     }
 }
 
@@ -1497,7 +1582,8 @@ fn delete_character_from_installation(
         .join(&character_name);
 
     // Delete the file
-    fs::remove_file(&char_file_path).map_err(|e| format!("Failed to delete character file: {}", e))?;
+    fs::remove_file(&char_file_path)
+        .map_err(|e| format!("Failed to delete character file: {}", e))?;
 
     info!("Deleted character {} from installation", character_name);
 
@@ -1554,8 +1640,11 @@ pub fn run() {
             list_hid_devices,
             read_hid_device_report,
             parse_hid_report,
+            parse_hid_report_with_descriptor,
+            get_hid_descriptor_bytes,
             get_hid_axis_names,
             get_axis_names_for_device,
+            get_directinput_to_hid_mapping,
             get_hid_device_path
         ])
         .setup(|app| {
@@ -1567,8 +1656,8 @@ pub fn run() {
             // Initialize device database
             let db_path = if cfg!(debug_assertions) {
                 // Development: look in src-tauri directory
-                let exe_path =
-                    std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
+                let exe_path = std::env::current_exe()
+                    .map_err(|e| format!("Failed to get exe path: {}", e))?;
                 let exe_dir = exe_path
                     .parent()
                     .ok_or_else(|| "Failed to get exe directory".to_string())?;
@@ -1592,7 +1681,7 @@ pub fn run() {
 
             eprintln!("Attempting to load device database from: {:?}", db_path);
             eprintln!("Database exists: {}", db_path.exists());
-            
+
             if let Err(e) = device_database::DeviceDatabase::init(&db_path) {
                 eprintln!("Warning: Failed to initialize device database: {}", e);
                 eprintln!("Device lookup will fall back to OS device names");

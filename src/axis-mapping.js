@@ -8,6 +8,7 @@
 
 // Default mapping from physical axis numbers to Star Citizen axis names
 // Based on common joystick conventions (DirectInput standard)
+// NOTE: This is a FALLBACK only - actual mappings should come from HID descriptors
 const DEFAULT_AXIS_MAPPING = {
     1: 'x',       // Usually horizontal stick movement
     2: 'y',       // Usually vertical stick movement  
@@ -19,8 +20,51 @@ const DEFAULT_AXIS_MAPPING = {
     8: 'slider2'  // Usually slider 2
 };
 
+// Mapping from HID usage names to Star Citizen axis names
+const HID_TO_SC_AXIS_MAP = {
+    'X': 'x',
+    'Y': 'y',
+    'Z': 'z',
+    'Rx': 'rotx',
+    'Ry': 'roty',
+    'Rz': 'rotz',
+    'RotationX': 'rotx',
+    'RotationY': 'roty',
+    'RotationZ': 'rotz',
+    'Slider': 'slider1',
+    'Dial': 'slider2',
+    'Wheel': 'slider2'
+};
+
 // Valid Star Citizen axis names
 const SC_AXIS_NAMES = ['x', 'y', 'z', 'rotx', 'roty', 'rotz', 'slider1', 'slider2'];
+
+/**
+ * Build a device-specific axis mapping from HID descriptor data
+ * Converts DirectInput axis indices to Star Citizen axis names using actual HID data
+ * @param {Object} directInputToHidMap - Map of DirectInput index -> HID usage ID
+ * @param {Object} hidAxisNames - Map of HID usage ID -> HID axis name (e.g., "X", "Rz")
+ * @returns {Object} - Axis mapping (DirectInput index -> SC axis name)
+ */
+export function buildAxisMappingFromHID(directInputToHidMap, hidAxisNames)
+{
+    const mapping = {};
+
+    for (const [directInputIndex, hidUsageId] of Object.entries(directInputToHidMap))
+    {
+        const hidAxisName = hidAxisNames[hidUsageId];
+        if (hidAxisName)
+        {
+            // Convert HID name to SC axis name
+            const scAxisName = HID_TO_SC_AXIS_MAP[hidAxisName] || `axis${directInputIndex}`;
+            mapping[parseInt(directInputIndex)] = scAxisName;
+
+            console.log(`[Axis Mapping] DirectInput ${directInputIndex} -> HID "${hidAxisName}" -> SC "${scAxisName}"`);
+        }
+    }
+
+    return mapping;
+}
 
 /**
  * Get the default Star Citizen axis name for a physical axis number
