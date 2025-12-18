@@ -42,12 +42,22 @@ pub struct AllBindsAction {
     pub default_joystick: String,
 }
 
+/// A point on a nonlinearity curve
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CurvePointData {
+    pub in_val: String,
+    pub out_val: String,
+}
+
 /// A single control option (child of <options> element)
-/// e.g., <flight_move_pitch invert="1"/>
+/// e.g., <flight_move_pitch invert="1"/> or with nested curve
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ControlOption {
     pub name: String,
     pub attributes: Vec<(String, String)>,
+    /// Nested curve points for nonlinearity_curve
+    #[serde(default)]
+    pub curve_points: Vec<CurvePointData>,
 }
 
 /// Device options entry that preserves control settings
@@ -372,6 +382,8 @@ impl ActionMaps {
         let mut current_action_map: Option<ActionMap> = None;
         let mut current_action: Option<Action> = None;
         let mut current_device_options: Option<DeviceOptions> = None;
+        // Track if we're inside a control option that has a nested curve
+        let mut in_control_option_with_curve = false;
 
         loop {
             match reader.read_event_into(&mut buf) {
@@ -453,28 +465,68 @@ impl ActionMaps {
                                 rebinds: Vec::new(),
                             });
                         }
+                        b"nonlinearity_curve" => {
+                            // Start of a nonlinearity_curve - we're now parsing curve points
+                            // The points will be added to the last control option
+                            in_control_option_with_curve = true;
+                        }
                         _ => {
                             // If we're inside an <options> element, capture child elements as control options
-                            if let Some(ref mut device_opts) = current_device_options {
-                                let name = String::from_utf8(e.name().as_ref().to_vec())
-                                    .unwrap_or_default();
-                                let mut attributes = Vec::new();
-                                for attr in e.attributes().flatten() {
-                                    let key = String::from_utf8(attr.key.as_ref().to_vec())
+                            // But skip if we're inside a nonlinearity_curve (those are handled separately)
+                            if !in_control_option_with_curve {
+                                if let Some(ref mut device_opts) = current_device_options {
+                                    let name = String::from_utf8(e.name().as_ref().to_vec())
                                         .unwrap_or_default();
-                                    let value =
-                                        String::from_utf8(attr.value.to_vec()).unwrap_or_default();
-                                    attributes.push((key, value));
+                                    let mut attributes = Vec::new();
+                                    for attr in e.attributes().flatten() {
+                                        let key = String::from_utf8(attr.key.as_ref().to_vec())
+                                            .unwrap_or_default();
+                                        let value = String::from_utf8(attr.value.to_vec())
+                                            .unwrap_or_default();
+                                        attributes.push((key, value));
+                                    }
+                                    device_opts.control_options.push(ControlOption {
+                                        name,
+                                        attributes,
+                                        curve_points: Vec::new(),
+                                    });
                                 }
-                                device_opts
-                                    .control_options
-                                    .push(ControlOption { name, attributes });
                             }
                         }
                     }
                 }
                 Ok(quick_xml::events::Event::Empty(ref e)) => {
                     match e.name().as_ref() {
+                        b"point" => {
+                            // A point inside nonlinearity_curve
+                            if in_control_option_with_curve {
+                                if let Some(ref mut device_opts) = current_device_options {
+                                    // Add point to the last control option
+                                    if let Some(ref mut last_opt) =
+                                        device_opts.control_options.last_mut()
+                                    {
+                                        let mut in_val = String::new();
+                                        let mut out_val = String::new();
+                                        for attr in e.attributes().flatten() {
+                                            match attr.key.as_ref() {
+                                                b"in" => {
+                                                    in_val = String::from_utf8(attr.value.to_vec())
+                                                        .unwrap_or_default()
+                                                }
+                                                b"out" => {
+                                                    out_val = String::from_utf8(attr.value.to_vec())
+                                                        .unwrap_or_default()
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                        last_opt
+                                            .curve_points
+                                            .push(CurvePointData { in_val, out_val });
+                                    }
+                                }
+                            }
+                        }
                         b"category" => {
                             // Get category label
                             for attr in e.attributes().flatten() {
@@ -583,14 +635,20 @@ impl ActionMaps {
                                         String::from_utf8(attr.value.to_vec()).unwrap_or_default();
                                     attributes.push((key, value));
                                 }
-                                device_opts
-                                    .control_options
-                                    .push(ControlOption { name, attributes });
+                                device_opts.control_options.push(ControlOption {
+                                    name,
+                                    attributes,
+                                    curve_points: Vec::new(),
+                                });
                             }
                         }
                     }
                 }
                 Ok(quick_xml::events::Event::End(ref e)) => match e.name().as_ref() {
+                    b"nonlinearity_curve" => {
+                        // End of the nonlinearity_curve - reset the flag
+                        in_control_option_with_curve = false;
+                    }
                     b"options" => {
                         // Finalize the current device options when we hit </options>
                         if let Some(device_opts) = current_device_options.take() {
@@ -754,7 +812,24 @@ impl ActionMaps {
                             for (key, value) in &ctrl_opt.attributes {
                                 xml.push_str(&format!(" {}=\"{}\"", key, value));
                             }
-                            xml.push_str("/>\n");
+
+                            // Check if this control option has curve points
+                            if ctrl_opt.curve_points.is_empty() {
+                                // Self-closing tag if no curve points
+                                xml.push_str("/>\n");
+                            } else {
+                                // Open tag with nested nonlinearity_curve
+                                xml.push_str(">\n");
+                                xml.push_str("   <nonlinearity_curve>\n");
+                                for point in &ctrl_opt.curve_points {
+                                    xml.push_str(&format!(
+                                        "    <point in=\"{}\" out=\"{}\"/>\n",
+                                        point.in_val, point.out_val
+                                    ));
+                                }
+                                xml.push_str("   </nonlinearity_curve>\n");
+                                xml.push_str(&format!("  </{}>\n", ctrl_opt.name));
+                            }
                         }
                         xml.push_str(" </options>\n");
                     }
@@ -1236,6 +1311,9 @@ impl AllBinds {
 #[derive(Debug, Serialize, Clone)]
 pub struct MergedBindings {
     pub action_maps: Vec<MergedActionMap>,
+    /// Device options including control settings (invert, exponent, curves)
+    #[serde(default)]
+    pub device_options: Vec<DeviceOptions>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -1729,8 +1807,14 @@ impl AllBinds {
             })
             .collect();
 
+        // Get device options from user bindings if available
+        let device_options = user_bindings
+            .map(|ub| ub.devices.device_options.clone())
+            .unwrap_or_default();
+
         MergedBindings {
             action_maps: merged_maps,
+            device_options,
         }
     }
 }
@@ -1741,8 +1825,62 @@ pub struct DeviceSelection {
     pub keyboard: bool,
     pub mouse: bool,
     pub gamepad: bool,
-    pub joystick1: bool,
-    pub joystick2: bool,
+    /// Vector of booleans for each joystick (index 0 = js1, index 1 = js2, etc.)
+    #[serde(default)]
+    pub joysticks: Vec<bool>,
+    /// Legacy fields for backwards compatibility
+    #[serde(default)]
+    pub joystick1: Option<bool>,
+    #[serde(default)]
+    pub joystick2: Option<bool>,
+}
+
+impl DeviceSelection {
+    /// Get whether a specific joystick is selected (1-indexed)
+    pub fn is_joystick_selected(&self, instance: usize) -> bool {
+        if instance == 0 {
+            return false;
+        }
+        // Check the new joysticks vector first
+        if !self.joysticks.is_empty() {
+            return self.joysticks.get(instance - 1).copied().unwrap_or(false);
+        }
+        // Fall back to legacy fields
+        match instance {
+            1 => self.joystick1.unwrap_or(false),
+            2 => self.joystick2.unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    /// Get the maximum joystick instance that is selected
+    #[allow(dead_code)]
+    pub fn max_selected_joystick(&self) -> usize {
+        if !self.joysticks.is_empty() {
+            for (i, &selected) in self.joysticks.iter().enumerate().rev() {
+                if selected {
+                    return i + 1;
+                }
+            }
+            return 0;
+        }
+        // Fall back to legacy fields
+        if self.joystick2.unwrap_or(false) {
+            return 2;
+        }
+        if self.joystick1.unwrap_or(false) {
+            return 1;
+        }
+        0
+    }
+
+    /// Check if any joystick is selected
+    pub fn has_any_joystick(&self) -> bool {
+        if !self.joysticks.is_empty() {
+            return self.joysticks.iter().any(|&v| v);
+        }
+        self.joystick1.unwrap_or(false) || self.joystick2.unwrap_or(false)
+    }
 }
 
 /// Generate an unbind profile XML that clears all bindings for selected devices
@@ -1782,11 +1920,11 @@ pub fn generate_unbind_xml(
     if devices.mouse {
         xml.push_str("   <mouse instance=\"1\"/>\n");
     }
-    if devices.joystick1 {
-        xml.push_str("   <joystick instance=\"1\"/>\n");
-    }
-    if devices.joystick2 {
-        xml.push_str("   <joystick instance=\"2\"/>\n");
+    // Add all selected joysticks dynamically
+    for i in 1..=16 {
+        if devices.is_joystick_selected(i) {
+            xml.push_str(&format!("   <joystick instance=\"{}\"/>\n", i));
+        }
     }
     xml.push_str("  </devices>\n");
 
@@ -1810,11 +1948,14 @@ pub fn generate_unbind_xml(
     if devices.mouse {
         xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"Mouse  {6F1D2B62-D5A0-11CF-BFC7-444553540000}\"/>\n");
     }
-    if devices.joystick1 {
-        xml.push_str(" <options type=\"joystick\" instance=\"1\" Product=\"\"/>\n");
-    }
-    if devices.joystick2 {
-        xml.push_str(" <options type=\"joystick\" instance=\"2\" Product=\"\"/>\n");
+    // Add options for all selected joysticks
+    for i in 1..=16 {
+        if devices.is_joystick_selected(i) {
+            xml.push_str(&format!(
+                " <options type=\"joystick\" instance=\"{}\" Product=\"\"/>\n",
+                i
+            ));
+        }
     }
     if devices.gamepad {
         xml.push_str(" <options type=\"gamepad\" instance=\"1\" Product=\"\"/>\n");
@@ -1856,11 +1997,11 @@ pub fn generate_unbind_xml(
                 if devices.gamepad {
                     xml.push_str("   <rebind input=\"gp1_ \"/>\n");
                 }
-                if devices.joystick1 {
-                    xml.push_str("   <rebind input=\"js1_ \"/>\n");
-                }
-                if devices.joystick2 {
-                    xml.push_str("   <rebind input=\"js2_ \"/>\n");
+                // Add blank rebinds for all selected joysticks
+                for i in 1..=16 {
+                    if devices.is_joystick_selected(i) {
+                        xml.push_str(&format!("   <rebind input=\"js{}_ \"/>\n", i));
+                    }
                 }
             }
 
@@ -1902,11 +2043,11 @@ pub fn generate_restore_defaults_xml(
     if devices.gamepad {
         xml.push_str("   <gamepad instance=\"1\"/>\n");
     }
-    if devices.joystick1 {
-        xml.push_str("   <joystick instance=\"1\"/>\n");
-    }
-    if devices.joystick2 {
-        xml.push_str("   <joystick instance=\"2\"/>\n");
+    // Add all selected joysticks dynamically
+    for i in 1..=16 {
+        if devices.is_joystick_selected(i) {
+            xml.push_str(&format!("   <joystick instance=\"{}\"/>\n", i));
+        }
     }
     xml.push_str("  </devices>\n");
 
@@ -1919,11 +2060,14 @@ pub fn generate_restore_defaults_xml(
     if devices.mouse {
         xml.push_str(" <options type=\"mouse\" instance=\"1\" Product=\"Mouse  {6F1D2B62-D5A0-11CF-BFC7-444553540000}\"/>\n");
     }
-    if devices.joystick1 {
-        xml.push_str(" <options type=\"joystick\" instance=\"1\" Product=\"\"/>\n");
-    }
-    if devices.joystick2 {
-        xml.push_str(" <options type=\"joystick\" instance=\"2\" Product=\"\"/>\n");
+    // Add options for all selected joysticks
+    for i in 1..=16 {
+        if devices.is_joystick_selected(i) {
+            xml.push_str(&format!(
+                " <options type=\"joystick\" instance=\"{}\" Product=\"\"/>\n",
+                i
+            ));
+        }
     }
     if devices.gamepad {
         xml.push_str(" <options type=\"gamepad\" instance=\"1\" Product=\"\"/>\n");
@@ -1941,8 +2085,7 @@ pub fn generate_restore_defaults_xml(
             if (devices.keyboard && !action.default_keyboard.trim().is_empty())
                 || (devices.mouse && !action.default_mouse.trim().is_empty())
                 || (devices.gamepad && !action.default_gamepad.trim().is_empty())
-                || (devices.joystick1 && !action.default_joystick.trim().is_empty())
-                || (devices.joystick2 && !action.default_joystick.trim().is_empty())
+                || (devices.has_any_joystick() && !action.default_joystick.trim().is_empty())
             {
                 has_default_bindings = true;
                 break;
@@ -1971,11 +2114,13 @@ pub fn generate_restore_defaults_xml(
             if devices.gamepad && !action.default_gamepad.trim().is_empty() {
                 default_inputs.push(format!("gp1_{}", action.default_gamepad.trim()));
             }
-            if devices.joystick1 && !action.default_joystick.trim().is_empty() {
-                default_inputs.push(format!("js1_{}", action.default_joystick.trim()));
-            }
-            if devices.joystick2 && !action.default_joystick.trim().is_empty() {
-                default_inputs.push(format!("js2_{}", action.default_joystick.trim()));
+            // Add default joystick bindings for all selected joysticks
+            if !action.default_joystick.trim().is_empty() {
+                for i in 1..=16 {
+                    if devices.is_joystick_selected(i) {
+                        default_inputs.push(format!("js{}_{}", i, action.default_joystick.trim()));
+                    }
+                }
             }
 
             // Only write the action if it has default bindings

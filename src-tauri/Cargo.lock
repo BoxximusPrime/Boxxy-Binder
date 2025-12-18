@@ -352,6 +352,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "boxxy-binder"
+version = "0.11.1"
+dependencies = [
+ "chrono",
+ "env_logger",
+ "hidapi",
+ "hidreport",
+ "hut 0.4.0",
+ "log",
+ "quick-xml 0.36.2",
+ "rusty-xinput",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tokio",
+ "windows 0.58.0",
+]
+
+[[package]]
 name = "brotli"
 version = "8.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3295,28 +3317,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "sc-joy-mapper"
-version = "0.10.0"
-dependencies = [
- "chrono",
- "env_logger",
- "hidapi",
- "hidreport",
- "hut 0.4.0",
- "log",
- "quick-xml 0.36.2",
- "rusty-xinput",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tokio",
- "windows 0.58.0",
 ]
 
 [[package]]

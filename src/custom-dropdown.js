@@ -331,4 +331,37 @@ export class CustomDropdown
             this.selectOption(index);
         }
     }
+
+    destroy()
+    {
+        // Clean up event listeners
+        if (this.hideTooltipTimeout)
+        {
+            clearTimeout(this.hideTooltipTimeout);
+            this.hideTooltipTimeout = null;
+        }
+
+        // Remove hover tooltip if it exists
+        if (this.hoverTooltip && this.hoverTooltip.parentNode)
+        {
+            this.hoverTooltip.remove();
+            this.hoverTooltip = null;
+        }
+
+        // Remove wrapper and restore original select element
+        if (this.wrapper && this.wrapper.parentNode)
+        {
+            // Show original element again
+            this.element.style.display = '';
+
+            // Replace wrapper with original element
+            this.wrapper.parentNode.replaceChild(this.element, this.wrapper);
+        }
+
+        // Clear references
+        this.button = null;
+        this.menu = null;
+        this.wrapper = null;
+        this.items = null;
+    }
 }

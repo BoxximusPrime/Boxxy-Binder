@@ -506,6 +506,13 @@ async function loadKeybindingsFile()
         displayKeybindings();
         updateFileIndicator(filePath);
 
+        // Load control settings (invert, exponent, curves) into the controls editor
+        if (window.loadControlSettings && currentKeybindings?.device_options)
+        {
+            console.log('Loading control settings from keybindings file');
+            window.loadControlSettings(currentKeybindings.device_options);
+        }
+
         // Refresh the visual view if it's loaded and visible
         if (window.refreshVisualView)
         {
@@ -531,7 +538,8 @@ export async function loadPersistedKeybindings()
             hasSavedPath: !!savedPath,
             cachedUnsavedState,
             hasCachedDelta: !!cachedDelta,
-            cachedDeltaLength: cachedDelta?.length || 0
+            cachedDeltaLength: cachedDelta?.length || 0,
+            savedPath: savedPath
         });
 
         // Set filename if we have a saved path
@@ -555,7 +563,10 @@ export async function loadPersistedKeybindings()
                     const userCustomizations = JSON.parse(cachedDelta);
                     console.log('Parsed cached delta:', {
                         hasData: !!userCustomizations,
-                        actionMapsCount: userCustomizations?.action_maps?.length || 0
+                        actionMapsCount: userCustomizations?.action_maps?.length || 0,
+                        hasDevices: !!userCustomizations?.devices,
+                        deviceOptionsCount: userCustomizations?.devices?.device_options?.length || 0,
+                        deviceOptionsPreview: userCustomizations?.devices?.device_options?.slice(0, 2)
                     });
                     await invoke('restore_user_customizations', { customizations: userCustomizations });
 
@@ -569,6 +580,19 @@ export async function loadPersistedKeybindings()
                     displayKeybindings();
                     updateFileIndicator(savedPath);
                     updateUnsavedIndicator();
+
+                    // Load control settings (invert, exponent, curves) into the controls editor
+                    console.log('Checking for device_options in restored bindings:', {
+                        hasBindings: !!currentKeybindings,
+                        hasDeviceOptions: !!currentKeybindings?.device_options,
+                        deviceOptionsCount: currentKeybindings?.device_options?.length || 0,
+                        deviceOptionsPreview: currentKeybindings?.device_options?.slice(0, 2)
+                    });
+                    if (window.loadControlSettings && currentKeybindings?.device_options)
+                    {
+                        console.log('Loading control settings from cached changes');
+                        window.loadControlSettings(currentKeybindings.device_options);
+                    }
 
                     console.log('Unsaved changes restored successfully');
                     return;
@@ -594,6 +618,14 @@ export async function loadPersistedKeybindings()
 
                 displayKeybindings();
                 updateFileIndicator(savedPath);
+
+                // Load control settings (invert, exponent, curves) into the controls editor
+                if (window.loadControlSettings && currentKeybindings?.device_options)
+                {
+                    console.log('Loading control settings from persisted file');
+                    window.loadControlSettings(currentKeybindings.device_options);
+                }
+
                 return;
             } catch (error)
             {
@@ -629,6 +661,13 @@ export async function loadPersistedKeybindings()
 
                 displayKeybindings();
                 showUnsavedFileIndicator();
+
+                // Load control settings (invert, exponent, curves) into the controls editor
+                if (window.loadControlSettings && currentKeybindings?.device_options)
+                {
+                    console.log('Loading control settings from new keybinding set');
+                    window.loadControlSettings(currentKeybindings.device_options);
+                }
 
                 console.log('Unsaved new keybinding set restored successfully');
                 return;
@@ -694,6 +733,7 @@ async function cacheUserCustomizations()
         console.log('Cached user customizations delta:', {
             hasData: !!userCustomizations,
             actionMapsCount: userCustomizations?.action_maps?.length || 0,
+            deviceOptionsCount: userCustomizations?.devices?.device_options?.length || 0,
             profileName: userCustomizations?.profile_name
         });
     } catch (error)
@@ -702,6 +742,9 @@ async function cacheUserCustomizations()
         // Non-critical error - we can always reload from file
     }
 }
+
+// Expose for cross-module access (controls-editor needs this)
+window.cacheUserCustomizations = cacheUserCustomizations;
 
 async function newKeybinding()
 {
@@ -900,8 +943,28 @@ async function saveKeybindings()
             return;
         }
 
+        // Update control options before saving (if the controls editor is available)
+        if (window.getAllControlOptions)
+        {
+            const controlOptions = window.getAllControlOptions();
+            if (controlOptions && controlOptions.length > 0)
+            {
+                console.log('Updating control options:', controlOptions);
+                await invoke('update_control_options', { controlOptions });
+            }
+        }
+
         // Save to the current file path
         await invoke('export_keybindings', { filePath: savedPath });
+
+        // Cache the updated customizations (including control options)
+        await cacheUserCustomizations();
+
+        // Mark controls as saved
+        if (window.markControlsSettingsSaved)
+        {
+            window.markControlsSettingsSaved();
+        }
 
         // Clear unsaved changes flag
         hasUnsavedChanges = false;
@@ -1087,8 +1150,25 @@ async function saveKeybindingsAs()
             return;
         }
 
+        // Update control options before saving (if the controls editor is available)
+        if (window.getAllControlOptions)
+        {
+            const controlOptions = window.getAllControlOptions();
+            if (controlOptions && controlOptions.length > 0)
+            {
+                console.log('Updating control options:', controlOptions);
+                await invoke('update_control_options', { controlOptions });
+            }
+        }
+
         // Save to the new file path
         await invoke('export_keybindings', { filePath });
+
+        // Mark controls as saved
+        if (window.markControlsSettingsSaved)
+        {
+            window.markControlsSettingsSaved();
+        }
 
         // Update the stored file path
         localStorage.setItem('keybindingsFilePath', filePath);
@@ -3175,7 +3255,8 @@ async function resetAllActionMapBindings(actionMapName)
 }
 
 /**
- * Swap all joystick prefixes (js1 <-> js2) in the current keybindings.
+ * Swap device prefixes (js1, js2, gp1, etc.) on all keybinding inputs.
+ * Opens a modal to let the user select which prefixes to swap.
  * This is useful when Star Citizen flips device associations.
  */
 async function swapJoystickPrefixes()
@@ -3186,107 +3267,126 @@ async function swapJoystickPrefixes()
         return;
     }
 
+    // Show swap modal
+    const modal = document.getElementById('swap-device-prefixes-modal');
+    const firstSelect = document.getElementById('swap-prefix-first-select');
+    const secondSelect = document.getElementById('swap-prefix-second-select');
+    const confirmBtn = document.getElementById('swap-device-prefixes-confirm-btn');
+    const cancelBtn = document.getElementById('swap-device-prefixes-cancel-btn');
+
+    // Get max device counts from settings (from device-manager.js)
+    const maxJs = window.getMaxJoysticks ? window.getMaxJoysticks() : 4;
+    const maxGp = window.getMaxGamepads ? window.getMaxGamepads() : 4;
+
+    // Populate dropdowns with available prefixes
+    const populateSelect = (selectElement) =>
+    {
+        selectElement.innerHTML = '<option value="">-- Select a prefix --</option>';
+
+        // Add joystick prefixes
+        for (let i = 1; i <= maxJs; i++)
+        {
+            const option = document.createElement('option');
+            option.value = `js${i}`;
+            option.textContent = `js${i} (Joystick ${i})`;
+            selectElement.appendChild(option);
+        }
+
+        // Add gamepad prefixes
+        for (let i = 1; i <= maxGp; i++)
+        {
+            const option = document.createElement('option');
+            option.value = `gp${i}`;
+            option.textContent = `gp${i} (Gamepad ${i})`;
+            selectElement.appendChild(option);
+        }
+    };
+
+    populateSelect(firstSelect);
+    populateSelect(secondSelect);
+
+    // Auto-select js1 and js2 as defaults (most common case)
+    firstSelect.value = 'js1';
+    secondSelect.value = 'js2';
+
+    // Show modal
+    modal.style.display = 'flex';
+
+    // Wait for user action
+    const result = await new Promise(resolve =>
+    {
+        const handleConfirm = () =>
+        {
+            const firstPrefix = firstSelect.value;
+            const secondPrefix = secondSelect.value;
+
+            if (!firstPrefix || !secondPrefix)
+            {
+                window.showAlert('Please select both prefixes to swap.', 'Selection Required');
+                return;
+            }
+
+            if (firstPrefix === secondPrefix)
+            {
+                window.showAlert('Please select two different prefixes.', 'Invalid Selection');
+                return;
+            }
+
+            cleanup();
+            resolve({ firstPrefix, secondPrefix });
+        };
+
+        const handleCancel = () =>
+        {
+            cleanup();
+            resolve(null);
+        };
+
+        const cleanup = () =>
+        {
+            confirmBtn.removeEventListener('click', handleConfirm);
+            cancelBtn.removeEventListener('click', handleCancel);
+            modal.style.display = 'none';
+        };
+
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+    });
+
+    if (!result) return;
+
+    const { firstPrefix, secondPrefix } = result;
+
     try
     {
-        let swapCount = 0;
-        const tempPlaceholder = 'js_TEMP_SWAP_';
-
-        // Iterate through all action maps and their actions
-        for (const actionMap of currentKeybindings.action_maps)
-        {
-            for (const action of actionMap.actions)
-            {
-                if (!action.bindings) continue;
-
-                for (const binding of action.bindings)
-                {
-                    if (!binding.input) continue;
-
-                    const originalInput = binding.input;
-
-                    // Check if this is a js1 or js2 binding
-                    if (binding.input.match(/^js1_/i))
-                    {
-                        // First, replace js1 with a temp placeholder
-                        binding.input = binding.input.replace(/^js1_/i, tempPlaceholder);
-                        swapCount++;
-                    }
-                    else if (binding.input.match(/^js2_/i))
-                    {
-                        // Replace js2 with js1
-                        binding.input = binding.input.replace(/^js2_/i, 'js1_');
-                        swapCount++;
-                    }
-
-                    // Also update display_name if it contains the joystick prefix
-                    if (binding.display_name && originalInput !== binding.input)
-                    {
-                        if (binding.display_name.includes('Joystick 1'))
-                        {
-                            binding.display_name = binding.display_name.replace('Joystick 1', 'Joystick TEMP');
-                        }
-                        else if (binding.display_name.includes('Joystick 2'))
-                        {
-                            binding.display_name = binding.display_name.replace('Joystick 2', 'Joystick 1');
-                        }
-                    }
-                }
-            }
-        }
-
-        // Second pass: replace temp placeholder with js2
-        for (const actionMap of currentKeybindings.action_maps)
-        {
-            for (const action of actionMap.actions)
-            {
-                if (!action.bindings) continue;
-
-                for (const binding of action.bindings)
-                {
-                    if (!binding.input) continue;
-
-                    if (binding.input.startsWith(tempPlaceholder))
-                    {
-                        binding.input = binding.input.replace(tempPlaceholder, 'js2_');
-                    }
-
-                    // Also fix display_name temp placeholder
-                    if (binding.display_name && binding.display_name.includes('Joystick TEMP'))
-                    {
-                        binding.display_name = binding.display_name.replace('Joystick TEMP', 'Joystick 2');
-                    }
-                }
-            }
-        }
-
-        // Also swap the device entries if they exist
-        if (currentKeybindings.devices && currentKeybindings.devices.joysticks)
-        {
-            const joysticks = currentKeybindings.devices.joysticks;
-            if (joysticks.length >= 2)
-            {
-                // Swap the first two joysticks
-                const temp = joysticks[0];
-                joysticks[0] = joysticks[1];
-                joysticks[1] = temp;
-            }
-        }
+        // Call the Rust backend to swap the prefixes in the actual state
+        const swapCount = await invoke('swap_device_prefixes', {
+            firstPrefix: firstPrefix,
+            secondPrefix: secondPrefix
+        });
 
         if (swapCount > 0)
         {
+            // Mark as unsaved
             hasUnsavedChanges = true;
-            renderKeybindings();
+            if (window.updateUnsavedIndicator) window.updateUnsavedIndicator();
+
+            // Refresh the bindings from the backend to update the UI
+            await refreshBindings();
+
+            // Cache the updated customizations
             cacheUserCustomizations();
-            window.showSuccessMessage(`Swapped ${swapCount} joystick bindings (JS1 ↔ JS2)`);
+
+            window.showSuccessMessage(`Swapped ${swapCount} bindings (${firstPrefix.toUpperCase()} ↔ ${secondPrefix.toUpperCase()})`);
         }
         else
         {
-            if (window.showAlert) await window.showAlert('No joystick bindings found to swap.', 'No Bindings');
+            if (window.showAlert) await window.showAlert(`No bindings found with prefixes ${firstPrefix} or ${secondPrefix}.`, 'No Bindings');
         }
     }
     catch (error)
     {
-        console.error('Error swapping joystick prefixes:', error);
+        console.error('Error swapping device prefixes:', error);
         if (window.showAlert) await window.showAlert(`Error swapping prefixes: ${error}`, 'Error');
     }
 }

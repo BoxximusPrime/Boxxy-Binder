@@ -63,7 +63,7 @@
       <!-- Header Row 1 -->
       <div class="header-row-1">
         <div class="header-logo">
-          <h1>Boxxy-Bindey<span id="app-version">v0.10.0</span></h1>
+          <h1>Boxxy Binder<span id="app-version">v0.11.1</span></h1>
           <div id="update-info" class="header-update-info"></div>
         </div>
         <div id="theme-switcher" class="theme-switcher-container">
@@ -87,7 +87,6 @@
           <button id="tab-template" class="tab-btn" data-tab="template">Template Editor</button>
           <button id="tab-debugger" class="tab-btn" data-tab="debugger">Device Manager</button>
           <button id="tab-character" class="tab-btn" data-tab="character">Character Manager</button>
-          <button id="tab-controls" class="tab-btn" data-tab="controls">🎛️ Controls</button>
           <button id="tab-help" class="tab-btn" data-tab="help">❓ Help</button>
           <button id="tab-settings" class="tab-btn tab-settings-btn" data-tab="settings"
             title="Settings & Debug">⚙️</button>
@@ -191,6 +190,10 @@
               <span class="view-icon">🎮</span>
               <span>Visual View</span>
             </button>
+            <button id="bindings-view-controls" class="bindings-view-btn" data-view="controls">
+              <span class="view-icon">🎛️</span>
+              <span>Controls</span>
+            </button>
           </div>
           <div class="bindings-sub-nav-right">
             <!-- File Status Section -->
@@ -232,8 +235,8 @@
                 <h3>Actions</h3>
                 <button id="clear-sc-binds-btn" class="btn btn-secondary" style="width: 100%;">🗑️ Generate Unbind
                   Profile</button>
-                <button id="swap-joystick-prefixes-btn" class="btn btn-secondary" style="width: 100%;">🔄 Swap JS1 ↔
-                  JS2</button>
+                <button id="swap-joystick-prefixes-btn" class="btn btn-secondary" style="width: 100%;">� Swap Device
+                  Prefixes</button>
                 <!-- Restore Defaults - COMMENTED OUT: Has issues with SC not properly applying bindings
                 <button id="restore-defaults-btn" class="btn btn-secondary" style="width: 100%;">🔄 Restore
                   Defaults</button>
@@ -439,6 +442,85 @@
           </div>
         </div>
         <!-- End Visual View Container -->
+
+        <!-- Controls View Container -->
+        <div id="bindings-controls-view" class="bindings-view-container">
+          <div class="controls-editor-container">
+            <!-- Controls Toolbar -->
+            <div class="controls-toolbar">
+              <div class="controls-toolbar-left">
+                <span class="controls-file-label" id="controls-file-label">No controls file loaded</span>
+              </div>
+              <div class="controls-toolbar-right">
+                <button class="btn btn-secondary" id="controls-load-btn" title="Load controls from file">
+                  <span>📂</span> Load
+                </button>
+                <button class="btn btn-secondary" id="controls-save-btn" title="Save controls to file">
+                  <span>💾</span> Save
+                </button>
+                <button class="btn btn-secondary" id="controls-save-as-btn" title="Save controls as new file">
+                  <span>📄</span> Save As
+                </button>
+                <div class="controls-toolbar-divider"></div>
+                <button class="btn btn-secondary" id="controls-import-btn" title="Import from Star Citizen settings">
+                  <span>📥</span> Import from SC
+                </button>
+                <button class="btn btn-primary" id="controls-apply-btn" title="Apply controls to Star Citizen">
+                  <span>🚀</span> Apply to SC
+                </button>
+              </div>
+            </div>
+
+            <!-- Device Type Tabs -->
+            <div class="controls-device-tabs" id="controls-device-tabs">
+              <button class="controls-device-tab active" data-device="keyboard">
+                <span class="tab-icon">⌨️</span>
+                <span>Keyboard</span>
+              </button>
+              <button class="controls-device-tab" data-device="gamepad">
+                <span class="tab-icon">🎮</span>
+                <span>Gamepad</span>
+              </button>
+              <button class="controls-device-tab" data-device="joystick">
+                <span class="tab-icon">🕹️</span>
+                <span>Joystick</span>
+              </button>
+            </div>
+
+            <!-- Main Content Area -->
+            <div class="controls-main-content">
+              <!-- Tree Navigation Sidebar -->
+              <div class="controls-tree-sidebar">
+                <div class="controls-tree-header">
+                  <h3>📋 Control Options</h3>
+                </div>
+                <div class="controls-tree-content" id="controls-tree-content">
+                  <div class="controls-empty-state">
+                    <div class="empty-icon">⏳</div>
+                    <h3>Loading...</h3>
+                    <p>Parsing control options from AllBinds.xml</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Settings Panel -->
+              <div class="controls-settings-panel">
+                <div class="controls-settings-header">
+                  <h2>Settings</h2>
+                  <span class="controls-settings-path"></span>
+                </div>
+                <div class="controls-settings-content" id="controls-settings-content">
+                  <div class="controls-empty-state">
+                    <div class="empty-icon">🎛️</div>
+                    <h3>Select a Control Option</h3>
+                    <p>Choose an option from the tree on the left to view and edit its settings.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- End Controls View Container -->
       </div>
       <!-- End Bindings Tab -->
 
@@ -461,7 +543,11 @@
                 No devices yet. Add a device for each physical stick, throttle, or pedal.
               </div>
               <div id="template-pages-list" class="template-pages-list"></div>
-              <button id="add-template-page-btn" class="btn btn-secondary btn-block">+ Add Device</button>
+              <div class="device-actions-row">
+                <button id="add-template-page-btn" class="btn btn-secondary" style="flex:1;">+ Add Device</button>
+                <button id="import-device-btn" class="btn btn-secondary" title="Import a device from a file">📥
+                  Import</button>
+              </div>
             </div>
 
             <div class="section" style="display:flex; flex-direction:column; gap:6px;">
@@ -571,7 +657,8 @@
               </div>
             </div>
             <p class="dm-section-description">
-              View and manage your connected devices. Assign custom prefixes (js1-js5, gp1-gp5) to override the
+              View and manage your connected devices. Assign custom prefixes (js1-jsN, gp1-gpN based on your settings)
+              to override the
               auto-detected IDs. Prefix changes are saved automatically and persist between sessions, and will be used
               when assigning keybindings in the main Keybindings tab.
             </p>
@@ -721,59 +808,6 @@
         </div>
       </div>
 
-      <!-- TAB: Controls Editor Page -->
-      <div id="tab-content-controls" class="tab-content">
-        <div class="controls-editor-container">
-          <!-- Device Type Tabs -->
-          <div class="controls-device-tabs" id="controls-device-tabs">
-            <button class="controls-device-tab active" data-device="keyboard">
-              <span class="tab-icon">⌨️</span>
-              <span>Keyboard</span>
-            </button>
-            <button class="controls-device-tab" data-device="gamepad">
-              <span class="tab-icon">🎮</span>
-              <span>Gamepad</span>
-            </button>
-            <button class="controls-device-tab" data-device="joystick">
-              <span class="tab-icon">🕹️</span>
-              <span>Joystick</span>
-            </button>
-          </div>
-
-          <!-- Main Content Area -->
-          <div class="controls-main-content">
-            <!-- Tree Navigation Sidebar -->
-            <div class="controls-tree-sidebar">
-              <div class="controls-tree-header">
-                <h3>📋 Control Options</h3>
-              </div>
-              <div class="controls-tree-content" id="controls-tree-content">
-                <div class="controls-empty-state">
-                  <div class="empty-icon">⏳</div>
-                  <h3>Loading...</h3>
-                  <p>Parsing control options from AllBinds.xml</p>
-                </div>
-              </div>
-            </div>
-
-            <!-- Settings Panel -->
-            <div class="controls-settings-panel">
-              <div class="controls-settings-header">
-                <h2>Settings</h2>
-                <span class="controls-settings-path"></span>
-              </div>
-              <div class="controls-settings-content" id="controls-settings-content">
-                <div class="controls-empty-state">
-                  <div class="empty-icon">🎛️</div>
-                  <h3>Select a Control Option</h3>
-                  <p>Choose an option from the tree on the left to view and edit its settings.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- TAB 5: Help Page -->
       <div id="tab-content-help" class="tab-content">
         <div class="tab-subheader">
@@ -805,8 +839,6 @@
                 <td style="padding: 0.5rem;">Reset font size to default</td>
               </tr>
             </table>
-            <p class="help-note" style="margin-top: 1rem;"><strong>💡 Tip:</strong> These shortcuts work on Mac too!
-              Just use Cmd instead of Ctrl. The font size preference is saved automatically.</p>
           </div>
 
           <div class="help-section">
@@ -1002,6 +1034,42 @@
           </div>
 
           <div class="settings-section">
+            <h3>🕹️ Device Configuration</h3>
+            <p>Configure the maximum number of joystick and gamepad inputs supported by the application.</p>
+            <div class="setting-row" style="display: flex; gap: 1rem; align-items: center; margin: 1rem 0;">
+              <label for="max-joysticks-select" style="flex-shrink: 0;">Max Joystick Inputs (js1-jsN):</label>
+              <select id="max-joysticks-select"
+                style="padding: 0.5rem; background: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="4">4 (Default)</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+                <option value="9">9</option>
+                <option value="10">10</option>
+                <option value="12">12</option>
+                <option value="16">16</option>
+              </select>
+            </div>
+            <div class="setting-row" style="display: flex; gap: 1rem; align-items: center; margin: 1rem 0;">
+              <label for="max-gamepads-select" style="flex-shrink: 0;">Max Gamepad Inputs (gp1-gpN):</label>
+              <select id="max-gamepads-select"
+                style="padding: 0.5rem; background: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="4">4 (Default)</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+              </select>
+            </div>
+            <p class="info-text">Changes will apply after refreshing the device list or restarting the app.</p>
+          </div>
+
+          <div class="settings-section">
             <h3>🎨 Visual Effects</h3>
             <p>Customize the visual appearance and effects of the application.</p>
             <div class="checkbox-container">
@@ -1120,6 +1188,32 @@
       <div class="binding-modal-buttons">
         <button id="binding-modal-save-btn" class="btn btn-success">💾 Save Binding</button>
         <button id="binding-cancel-btn" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Installation Selection Modal (for Controls import/apply) -->
+  <div id="installation-select-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 500px;">
+      <div class="modal-header">
+        <h2 id="installation-select-title">📥 Select Installation</h2>
+      </div>
+      <div class="modal-body">
+        <p id="installation-select-message" style="margin-bottom: 1rem;">Choose which Star Citizen installation to use:
+        </p>
+        <div id="installation-select-list" style="display: flex; flex-direction: column; gap: 0.5rem;">
+          <!-- Installation buttons will be added here -->
+        </div>
+        <div id="installation-select-not-configured" style="display: none; margin-top: 1rem;">
+          <div class="warning-box">
+            <p><strong>⚠️ Star Citizen Installation Directory Not Set</strong></p>
+            <p>Configure your Star Citizen installation directory in Settings first.</p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="installation-select-cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="installation-select-browse-btn" class="btn btn-primary">📂 Browse for File</button>
       </div>
     </div>
   </div>
@@ -1366,12 +1460,7 @@
             <select id="template-page-prefix"
               style="width: 100%; padding: 8px; background: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px;">
               <option value="">Select a prefix</option>
-              <option value="js1">js1</option>
-              <option value="js2">js2</option>
-              <option value="js3">js3</option>
-              <option value="js4">js4</option>
-              <option value="gp1">gp1</option>
-              <option value="gp2">gp2</option>
+              <!-- Options populated dynamically by JS based on max joystick/gamepad settings -->
             </select>
             <div class="info-text" style="margin-top: 0.25rem;">
               Force this device to use a specific device ID (e.g. js1) regardless of detection. Useful if your devices
@@ -1452,6 +1541,49 @@
     </div>
   </div>
 
+  <!-- Swap Device Prefixes Modal -->
+  <div id="swap-device-prefixes-modal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h2>Swap Device Prefixes</h2>
+      </div>
+      <div class="modal-body">
+        <div class="info-text" style="margin-bottom: 1rem;">
+          Swap device prefixes (js1, js2, gp1, etc.) on all button inputs across the entire template. This is useful
+          when devices change order.
+        </div>
+
+        <label>
+          First Device Prefix:
+          <select id="swap-prefix-first-select">
+            <option value="">-- Select a prefix --</option>
+          </select>
+        </label>
+
+        <div style="text-align: center; margin: 0.5rem 0; font-size: 1.5rem; color: var(--text-muted);">
+          ⇄
+        </div>
+
+        <label>
+          Second Device Prefix:
+          <select id="swap-prefix-second-select">
+            <option value="">-- Select a prefix --</option>
+          </select>
+        </label>
+
+        <div class="info-text"
+          style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 4px;">
+          ℹ️ This will swap the prefixes on all button inputs throughout the entire template. For example, all
+          "js1_button3" will become "js2_button3" and vice versa.
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="swap-device-prefixes-cancel-btn" class="btn btn-secondary">Cancel</button>
+        <button id="swap-device-prefixes-confirm-btn" class="btn btn-success">Swap Prefixes</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Custom Axis Mapping Modal -->
   <div id="custom-axis-modal" class="modal" style="display: none;">
     <div class="modal-content" style="max-width: 700px;">
@@ -1527,10 +1659,36 @@
         <h2>🎉 What's New</h2>
       </div>
       <div class="modal-body whats-new-body">
-        <!-- v0.9.1 Collapsible Section -->
+        <!-- v0.11.0 Collapsible Section -->
+        <div class="whats-new-version-section">
+          <button class="whats-new-version-toggle" data-version="0.11.1">
+            <span class="version-toggle-arrow">▼</span>
+            <span class="version-toggle-label">v0.11.0</span>
+          </button>
+          <div class="whats-new-version-content" id="whats-new-0110" style="display: block;">
+            <div class="whats-new-section">
+              <h3>✨ New Features</h3>
+              <ul>
+                <li><strong>Import/Export Devices in Templates:</strong> You can now import and export individual
+                  devices from templates for easy sharing and backup.</li>
+                <li><strong>Controls Editor:</strong> New controls editor interface for managing Star Citizen control
+                  schemes (note: still a work in progress and partially working due to Star Citizen compatibility
+                  limitations).</li>
+                <li><strong>Max Joystick Inputs Setting:</strong> Added a new setting in Options to customize the
+                  maximum number of joystick inputs.</li>
+              </ul>
+              <h3>v0.11.1</h3>
+              <ul>
+                <li><strong>Bug Fixes:</strong> Fixed joystick prefixes swaps not saving in keybindings page.</li>
+                <li><strong>Features:</strong> Updated keybindings list to 4.5.</li>
+            </div>
+          </div>
+        </div>
+
+        <!-- v0.10.0 Collapsible Section -->
         <div class="whats-new-version-section">
           <button class="whats-new-version-toggle" data-version="0.10.0">
-            <span class="version-toggle-arrow">▼</span>
+            <span class="version-toggle-arrow">▶</span>
             <span class="version-toggle-label">v0.10.0</span>
           </button>
           <div class="whats-new-version-content" id="whats-new-091" style="display: block;">
@@ -1605,7 +1763,7 @@
         </div>
 
         <div class="whats-new-footer">
-          <p>Thank you for using the SC Binding Utility!</p>
+          <p>Thank you for using the Boxxy Binder!</p>
           <p class="text-muted">Be sure to report any issues on the github <a
               href="https://github.com/BoxximusPrime/SC-Binding-Utility/issues" target="_blank"
               rel="noopener noreferrer">repository</a>.</p>
@@ -1620,6 +1778,8 @@
   <!-- Debug Info Footer -->
   <div id="debug-info"
     style="position: fixed; bottom: 0; right: 0; padding: 5px 10px; background: rgba(0,0,0,0.7); color: #888; font-size: 10px; border-top-left-radius: 4px; z-index: 10000;">
+    <span id="debug-log-error-icon" style="display: none; color: #ff6b6b; margin-right: 4px;"
+      title="Errors detected - click to view logs">⚠</span>
     <span id="debug-log-path" style="cursor: pointer; text-decoration: underline;"
       title="Click to copy log file path">Logs</span>
   </div>
@@ -1643,7 +1803,7 @@
         </div>
 
         <h3 style="margin-bottom: 1rem;">Select devices to unbind:</h3>
-        <div style="margin-bottom: 1.5rem;">
+        <div id="unbind-devices-container" style="margin-bottom: 1.5rem;">
           <div class="checkbox-container" style="margin-bottom: 0.5rem;">
             <input type="checkbox" id="unbind-keyboard" checked />
             <label for="unbind-keyboard">Keyboard</label>
@@ -1656,14 +1816,8 @@
             <input type="checkbox" id="unbind-gamepad" checked />
             <label for="unbind-gamepad">Gamepad</label>
           </div>
-          <div class="checkbox-container" style="margin-bottom: 0.5rem;">
-            <input type="checkbox" id="unbind-joystick1" checked />
-            <label for="unbind-joystick1">Joystick 1</label>
-          </div>
-          <div class="checkbox-container" style="margin-bottom: 0.5rem;">
-            <input type="checkbox" id="unbind-joystick2" checked />
-            <label for="unbind-joystick2">Joystick 2</label>
-          </div>
+          <!-- Joystick checkboxes will be populated dynamically by JS -->
+          <div id="unbind-joysticks-list"></div>
         </div>
 
         <div id="clear-binds-status" style="margin-top: 1rem; display: none;"></div>
@@ -1770,7 +1924,7 @@
         </div>
 
         <h3 style="margin-bottom: 1rem;">Select devices to restore:</h3>
-        <div style="margin-bottom: 1.5rem;">
+        <div id="restore-devices-container" style="margin-bottom: 1.5rem;">
           <div class="checkbox-container" style="margin-bottom: 0.5rem;">
             <input type="checkbox" id="restore-keyboard" checked />
             <label for="restore-keyboard">Keyboard</label>
@@ -1783,14 +1937,8 @@
             <input type="checkbox" id="restore-gamepad" />
             <label for="restore-gamepad">Gamepad</label>
           </div>
-          <div class="checkbox-container" style="margin-bottom: 0.5rem;">
-            <input type="checkbox" id="restore-joystick1" />
-            <label for="restore-joystick1">Joystick 1</label>
-          </div>
-          <div class="checkbox-container" style="margin-bottom: 0.5rem;">
-            <input type="checkbox" id="restore-joystick2" />
-            <label for="restore-joystick2">Joystick 2</label>
-          </div>
+          <!-- Joystick checkboxes will be populated dynamically by JS -->
+          <div id="restore-joysticks-list"></div>
         </div>
 
         <div id="restore-defaults-status" style="margin-top: 1rem; display: none;"></div>

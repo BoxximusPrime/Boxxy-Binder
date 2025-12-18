@@ -1,7 +1,7 @@
 # Star Citizen Binding Utility
 
-<img width="1502" height="1156" alt="sc-joy-mapper_uK1072xT1b" src="https://github.com/user-attachments/assets/d93c0709-602d-42c0-8a11-716c1efc043c" />
-<img width="1502" height="1032" alt="sc-joy-mapper_vncPl1X5MI" src="https://github.com/user-attachments/assets/9f30bd34-36b4-4a0c-b67f-94a0a998ae49" />
+<img width="1502" height="1156" alt="boxxy-binder_uK1072xT1b" src="https://github.com/user-attachments/assets/d93c0709-602d-42c0-8a11-716c1efc043c" />
+<img width="1502" height="1032" alt="boxxy-binder_vncPl1X5MI" src="https://github.com/user-attachments/assets/9f30bd34-36b4-4a0c-b67f-94a0a998ae49" />
 
 A desktop application for managing joystick, keyboard, and mouse key bindings for Star Citizen outside of the game. Built with Tauri 2.0 and Rust, this tool provides a powerful interface to organize, customize, and debug your control scheme.
 

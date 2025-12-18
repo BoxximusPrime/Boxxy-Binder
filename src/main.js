@@ -6,6 +6,21 @@ import { initializeUpdateChecker } from './update-checker.js';
 import { Tooltip } from './tooltip.js';
 import { CustomDropdown } from './custom-dropdown.js';
 
+// Track if any errors have been logged this session
+let hasLoggedErrors = false;
+
+// Helper function to show error indicator
+function showErrorIndicator()
+{
+  if (hasLoggedErrors) return; // Already showing
+  hasLoggedErrors = true;
+  const errorIcon = document.getElementById('debug-log-error-icon');
+  if (errorIcon)
+  {
+    errorIcon.style.display = 'inline';
+  }
+}
+
 // Global error handler for uncaught errors
 window.addEventListener('error', async (event) =>
 {
@@ -16,6 +31,7 @@ window.addEventListener('error', async (event) =>
       message: event.error?.message || event.message || 'Unknown error',
       stack: event.error?.stack || null
     });
+    showErrorIndicator();
   } catch (e)
   {
     console.error('Failed to log error to backend:', e);
@@ -32,11 +48,26 @@ window.addEventListener('unhandledrejection', async (event) =>
       message: event.reason?.message || String(event.reason) || 'Unknown promise rejection',
       stack: event.reason?.stack || null
     });
+    showErrorIndicator();
   } catch (e)
   {
     console.error('Failed to log promise rejection to backend:', e);
   }
 });
+
+// Helper function to log error messages (exported for use by other modules)
+window.logError = async (message, stack = null) =>
+{
+  console.error(message);
+  try
+  {
+    await invoke('log_error', { message, stack });
+    showErrorIndicator();
+  } catch (e)
+  {
+    console.error('Failed to log error to backend:', e);
+  }
+};
 
 // Helper function to log info messages
 window.logInfo = async (message) =>
@@ -206,7 +237,7 @@ window.showAlert = showAlert;
 
 function initializeWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.10.0';
+  const CURRENT_VERSION = '0.11.1';
   const WHATS_NEW_KEY = 'whatsNew';
 
   // Check if the stored version matches the current version
@@ -221,7 +252,7 @@ function initializeWhatsNewModal()
 
 function showWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.10.0';
+  const CURRENT_VERSION = '0.11.1';
   const WHATS_NEW_KEY = 'whatsNew';
 
   const modal = document.getElementById('whats-new-modal');
@@ -383,7 +414,7 @@ window.addEventListener("DOMContentLoaded", async () =>
   if (clearSCBindsBtn) { new Tooltip(clearSCBindsBtn, 'Generate a keybinding file that forcefully unbinds all actions in-game'); }
 
   const swapJoystickPrefixesBtn = document.getElementById('swap-joystick-prefixes-btn');
-  if (swapJoystickPrefixesBtn) { new Tooltip(swapJoystickPrefixesBtn, 'Swap JS1 and JS2 prefixes on all joystick bindings - useful when Star Citizen flips device order'); }
+  if (swapJoystickPrefixesBtn) { new Tooltip(swapJoystickPrefixesBtn, 'Swap device prefixes on all bindings - useful when Star Citizen flips device order'); }
 
   const restoreDefaultsBtn = document.getElementById('restore-defaults-btn');
   if (restoreDefaultsBtn) { new Tooltip(restoreDefaultsBtn, 'Generate a profile with only default bindings'); }
@@ -532,7 +563,7 @@ function initializeTabSystem()
 }
 
 /**
- * Switch between list and visual views within the Bindings tab
+ * Switch between list, visual, and controls views within the Bindings tab
  */
 function switchBindingsView(viewName)
 {
@@ -549,7 +580,8 @@ function switchBindingsView(viewName)
   {
     const isListView = container.id === 'bindings-list-view' && viewName === 'list';
     const isVisualView = container.id === 'bindings-visual-view' && viewName === 'visual';
-    container.classList.toggle('active', isListView || isVisualView);
+    const isControlsView = container.id === 'bindings-controls-view' && viewName === 'controls';
+    container.classList.toggle('active', isListView || isVisualView || isControlsView);
   });
 
   // Save to localStorage
@@ -565,6 +597,15 @@ function switchBindingsView(viewName)
     if (window.refreshVisualView)
     {
       window.refreshVisualView();
+    }
+  }
+
+  // If switching to controls view, initialize it
+  if (viewName === 'controls')
+  {
+    if (window.initializeControlsEditor)
+    {
+      window.initializeControlsEditor();
     }
   }
 }
@@ -645,6 +686,54 @@ function initializeSettingsPage()
     scInstallPathDisplay.textContent = savedSCPath;
     scInstallPathDisplay.classList.remove('empty');
     updateSCInstallationsList(savedSCPath);
+  }
+
+  // Max joysticks setting
+  const maxJoysticksSelect = document.getElementById('max-joysticks-select');
+  if (maxJoysticksSelect)
+  {
+    // Load saved value
+    const savedMaxJs = window.getMaxJoysticks ? window.getMaxJoysticks() : 4;
+    maxJoysticksSelect.value = savedMaxJs.toString();
+
+    maxJoysticksSelect.addEventListener('change', (e) =>
+    {
+      const value = parseInt(e.target.value, 10);
+      if (window.setMaxJoysticks)
+      {
+        window.setMaxJoysticks(value);
+      }
+      // Re-render controls editor device tabs if it exists
+      if (window.renderDeviceTabs)
+      {
+        window.renderDeviceTabs();
+      }
+      console.log('[SETTINGS] Max joysticks set to:', value);
+    });
+  }
+
+  // Max gamepads setting
+  const maxGamepadsSelect = document.getElementById('max-gamepads-select');
+  if (maxGamepadsSelect)
+  {
+    // Load saved value
+    const savedMaxGp = window.getMaxGamepads ? window.getMaxGamepads() : 4;
+    maxGamepadsSelect.value = savedMaxGp.toString();
+
+    maxGamepadsSelect.addEventListener('change', (e) =>
+    {
+      const value = parseInt(e.target.value, 10);
+      if (window.setMaxGamepads)
+      {
+        window.setMaxGamepads(value);
+      }
+      // Re-render controls editor device tabs if it exists
+      if (window.renderDeviceTabs)
+      {
+        window.renderDeviceTabs();
+      }
+      console.log('[SETTINGS] Max gamepads set to:', value);
+    });
   }
 
   // Starfield visibility toggle
@@ -802,14 +891,6 @@ function switchTab(tabName)
     if (window.initializeDeviceManager)
     {
       window.initializeDeviceManager();
-    }
-  }
-  else if (tabName === 'controls')
-  {
-    // Initialize controls editor if needed
-    if (window.initializeControlsEditor)
-    {
-      window.initializeControlsEditor();
     }
   }
 }
@@ -1952,8 +2033,36 @@ window.removeBindingFromModal = removeBindingFromModal;
 // CLEAR SC BINDS FUNCTIONS
 // ============================================================================
 
+/**
+ * Populate joystick checkboxes dynamically based on max joystick setting
+ */
+function populateUnbindJoystickCheckboxes()
+{
+  const container = document.getElementById('unbind-joysticks-list');
+  if (!container) return;
+
+  const maxJs = window.getMaxJoysticks ? window.getMaxJoysticks() : 4;
+  let html = '';
+
+  for (let i = 1; i <= maxJs; i++)
+  {
+    // Check the first 2 by default for backwards compatibility
+    const checked = i <= 2 ? 'checked' : '';
+    html += `
+      <div class="checkbox-container" style="margin-bottom: 0.5rem;">
+        <input type="checkbox" id="unbind-joystick${i}" ${checked} />
+        <label for="unbind-joystick${i}">Joystick ${i}</label>
+      </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
 function openClearSCBindsModal()
 {
+  // Populate joystick checkboxes dynamically
+  populateUnbindJoystickCheckboxes();
+
   const modal = document.getElementById('clear-sc-binds-modal');
   modal.style.display = 'flex';
 }
@@ -1976,17 +2085,26 @@ async function generateUnbindProfile()
 
   try
   {
+    // Build joysticks array dynamically based on max setting
+    const maxJs = window.getMaxJoysticks ? window.getMaxJoysticks() : 4;
+    const joysticks = [];
+    for (let i = 1; i <= maxJs; i++)
+    {
+      const checkbox = document.getElementById(`unbind-joystick${i}`);
+      joysticks.push(checkbox ? checkbox.checked : false);
+    }
+
     // Get selected devices
     const devices = {
       keyboard: document.getElementById('unbind-keyboard').checked,
       mouse: document.getElementById('unbind-mouse').checked,
       gamepad: document.getElementById('unbind-gamepad').checked,
-      joystick1: document.getElementById('unbind-joystick1').checked,
-      joystick2: document.getElementById('unbind-joystick2').checked,
+      joysticks: joysticks,
     };
 
     // Check if at least one device is selected
-    if (!Object.values(devices).some(v => v))
+    const hasDevice = devices.keyboard || devices.mouse || devices.gamepad || joysticks.some(v => v);
+    if (!hasDevice)
     {
       statusDiv.style.display = 'block';
       statusDiv.style.color = 'var(--accent-primary)';
@@ -2126,8 +2244,35 @@ async function removeUnbindFiles()
 // RESTORE DEFAULTS FUNCTIONS
 // ============================================================================
 
+/**
+ * Populate joystick checkboxes dynamically based on max joystick setting
+ */
+function populateRestoreJoystickCheckboxes()
+{
+  const container = document.getElementById('restore-joysticks-list');
+  if (!container) return;
+
+  const maxJs = window.getMaxJoysticks ? window.getMaxJoysticks() : 4;
+  let html = '';
+
+  for (let i = 1; i <= maxJs; i++)
+  {
+    // Joysticks are unchecked by default for restore
+    html += `
+      <div class="checkbox-container" style="margin-bottom: 0.5rem;">
+        <input type="checkbox" id="restore-joystick${i}" />
+        <label for="restore-joystick${i}">Joystick ${i}</label>
+      </div>`;
+  }
+
+  container.innerHTML = html;
+}
+
 function openRestoreDefaultsModal()
 {
+  // Populate joystick checkboxes dynamically
+  populateRestoreJoystickCheckboxes();
+
   const modal = document.getElementById('restore-defaults-modal');
   modal.style.display = 'flex';
 }
@@ -2150,17 +2295,26 @@ async function generateRestoreDefaultsProfile()
 
   try
   {
+    // Build joysticks array dynamically based on max setting
+    const maxJs = window.getMaxJoysticks ? window.getMaxJoysticks() : 4;
+    const joysticks = [];
+    for (let i = 1; i <= maxJs; i++)
+    {
+      const checkbox = document.getElementById(`restore-joystick${i}`);
+      joysticks.push(checkbox ? checkbox.checked : false);
+    }
+
     // Get selected devices
     const devices = {
       keyboard: document.getElementById('restore-keyboard').checked,
       mouse: document.getElementById('restore-mouse').checked,
       gamepad: document.getElementById('restore-gamepad').checked,
-      joystick1: document.getElementById('restore-joystick1').checked,
-      joystick2: document.getElementById('restore-joystick2').checked,
+      joysticks: joysticks,
     };
 
     // Check if at least one device is selected
-    if (!Object.values(devices).some(v => v))
+    const hasDevice = devices.keyboard || devices.mouse || devices.gamepad || joysticks.some(v => v);
+    if (!hasDevice)
     {
       statusDiv.style.display = 'block';
       statusDiv.style.color = 'var(--accent-primary)';

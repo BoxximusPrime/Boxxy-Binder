@@ -12,6 +12,85 @@ let devicePrefixMapping = {};
 // Cache key for localStorage
 const DEVICE_PREFIX_CACHE_KEY = 'devicePrefixMapping';
 const DEVICE_UUID_CACHE_KEY = 'deviceUuidMapping'; // Maps device identifiers to their UUIDs
+const MAX_JOYSTICKS_KEY = 'maxJoystickInputs';
+const MAX_GAMEPADS_KEY = 'maxGamepadInputs';
+
+// ============================================================================
+// DEVICE LIMITS CONFIGURATION
+// ============================================================================
+
+/**
+ * Get the maximum number of joystick inputs from settings
+ * @returns {number} Max joystick count (default 4)
+ */
+export function getMaxJoysticks()
+{
+    const saved = localStorage.getItem(MAX_JOYSTICKS_KEY);
+    return saved ? parseInt(saved, 10) : 4;
+}
+
+/**
+ * Get the maximum number of gamepad inputs from settings
+ * @returns {number} Max gamepad count (default 4)
+ */
+export function getMaxGamepads()
+{
+    const saved = localStorage.getItem(MAX_GAMEPADS_KEY);
+    return saved ? parseInt(saved, 10) : 4;
+}
+
+/**
+ * Set the maximum number of joystick inputs
+ * @param {number} count 
+ */
+export function setMaxJoysticks(count)
+{
+    localStorage.setItem(MAX_JOYSTICKS_KEY, count.toString());
+    console.log(`[DEVICE-MANAGER] Max joysticks set to ${count}`);
+}
+
+/**
+ * Set the maximum number of gamepad inputs
+ * @param {number} count 
+ */
+export function setMaxGamepads(count)
+{
+    localStorage.setItem(MAX_GAMEPADS_KEY, count.toString());
+    console.log(`[DEVICE-MANAGER] Max gamepads set to ${count}`);
+}
+
+/**
+ * Generate HTML options for joystick prefixes
+ * @param {string} savedPrefix - Currently saved prefix to mark as selected
+ * @returns {string} HTML options string
+ */
+export function generateJoystickPrefixOptions(savedPrefix)
+{
+    const maxJs = getMaxJoysticks();
+    const maxGp = getMaxGamepads();
+    let options = `<option value="" ${savedPrefix === '' ? 'selected' : ''}>Use Default</option>\n`;
+
+    for (let i = 1; i <= maxJs; i++)
+    {
+        const value = `js${i}`;
+        options += `<option value="${value}" ${savedPrefix === value ? 'selected' : ''}>${value}</option>\n`;
+    }
+
+    for (let i = 1; i <= maxGp; i++)
+    {
+        const value = `gp${i}`;
+        options += `<option value="${value}" ${savedPrefix === value ? 'selected' : ''}>${value}</option>\n`;
+    }
+
+    return options;
+}
+
+// Make functions available globally for other modules
+window.getMaxJoysticks = getMaxJoysticks;
+window.getMaxGamepads = getMaxGamepads;
+window.setMaxJoysticks = setMaxJoysticks;
+window.setMaxGamepads = setMaxGamepads;
+window.generateJoystickPrefixOptions = generateJoystickPrefixOptions;
 
 // Input debugging state
 let isDebuggerActive = false;
@@ -173,17 +252,7 @@ function createDeviceCard(device, categoryIndex, isGp)
         <span class="dm-detail-label">Assigned Prefix:</span>
         <div class="dm-prefix-wrapper">
           <select class="dm-prefix-select" data-device-uuid="${deviceUuid}" data-device-name="${device.name}">
-            <option value="" ${savedPrefix === '' ? 'selected' : ''}>Use Default</option>
-            <option value="js1" ${savedPrefix === 'js1' ? 'selected' : ''}>js1</option>
-            <option value="js2" ${savedPrefix === 'js2' ? 'selected' : ''}>js2</option>
-            <option value="js3" ${savedPrefix === 'js3' ? 'selected' : ''}>js3</option>
-            <option value="js4" ${savedPrefix === 'js4' ? 'selected' : ''}>js4</option>
-            <option value="js5" ${savedPrefix === 'js5' ? 'selected' : ''}>js5</option>
-            <option value="gp1" ${savedPrefix === 'gp1' ? 'selected' : ''}>gp1</option>
-            <option value="gp2" ${savedPrefix === 'gp2' ? 'selected' : ''}>gp2</option>
-            <option value="gp3" ${savedPrefix === 'gp3' ? 'selected' : ''}>gp3</option>
-            <option value="gp4" ${savedPrefix === 'gp4' ? 'selected' : ''}>gp4</option>
-            <option value="gp5" ${savedPrefix === 'gp5' ? 'selected' : ''}>gp5</option>
+            ${generateJoystickPrefixOptions(savedPrefix)}
           </select>
           <div class="dm-prefix-badge dm-override-badge">OVERRIDE</div>
         </div>
@@ -197,17 +266,7 @@ function createDeviceCard(device, categoryIndex, isGp)
         <span class="dm-detail-label">Assigned Prefix:</span>
         <div class="dm-prefix-wrapper">
           <select class="dm-prefix-select" data-device-uuid="${deviceUuid}" data-device-name="${device.name}">
-            <option value="" ${savedPrefix === '' ? 'selected' : ''}>Use Default</option>
-            <option value="js1" ${savedPrefix === 'js1' ? 'selected' : ''}>js1</option>
-            <option value="js2" ${savedPrefix === 'js2' ? 'selected' : ''}>js2</option>
-            <option value="js3" ${savedPrefix === 'js3' ? 'selected' : ''}>js3</option>
-            <option value="js4" ${savedPrefix === 'js4' ? 'selected' : ''}>js4</option>
-            <option value="js5" ${savedPrefix === 'js5' ? 'selected' : ''}>js5</option>
-            <option value="gp1" ${savedPrefix === 'gp1' ? 'selected' : ''}>gp1</option>
-            <option value="gp2" ${savedPrefix === 'gp2' ? 'selected' : ''}>gp2</option>
-            <option value="gp3" ${savedPrefix === 'gp3' ? 'selected' : ''}>gp3</option>
-            <option value="gp4" ${savedPrefix === 'gp4' ? 'selected' : ''}>gp4</option>
-            <option value="gp5" ${savedPrefix === 'gp5' ? 'selected' : ''}>gp5</option>
+            ${generateJoystickPrefixOptions(savedPrefix)}
           </select>
           <div class="dm-prefix-badge dm-default-badge">DEFAULT</div>
         </div>

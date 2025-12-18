@@ -1027,6 +1027,7 @@ p[style*="color: red"] {
   background-color: var(--bg-medium);
   border-bottom: 2px solid var(--bg-darkest);
   padding: 0;
+  overflow: hidden;
 }
 
 .bindings-sub-nav-left {
@@ -1037,17 +1038,20 @@ p[style*="color: red"] {
 
 .bindings-sub-nav-right {
   display: flex;
-  gap: 1rem;
+  gap: 0.5rem;
   align-items: center;
   padding: 0.5rem 1rem;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  flex-wrap: wrap;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .bindings-header-section {
   display: flex;
   gap: 0.5rem;
   align-items: center;
-  padding: 0 1.8rem 0 1.0rem;
+  padding: 0 0.75rem;
   border-right: 1px solid var(--bg-light);
 }
 
@@ -1070,7 +1074,7 @@ p[style*="color: red"] {
   cursor: pointer;
   font-size: 0.95rem;
   font-weight: 500;
-  padding: 1rem 2rem;
+  padding: 1rem 1.25rem;
   transition: all 0.2s;
   white-space: nowrap;
   border-radius: 0;
@@ -1119,6 +1123,8 @@ p[style*="color: red"] {
   white-space: nowrap;
   min-width: 0;
   flex-shrink: 1;
+  font-size: 0.75rem;
+  max-width: 200px;
 }
 
 .loaded-file-name {
@@ -3467,8 +3473,11 @@ input[type="checkbox"]:disabled:hover {
 
 .settings-section {
   margin-bottom: 2.5rem;
+  padding: 1.5rem;
   padding-bottom: 2rem;
   border-bottom: 1px solid var(--bg-lighter);
+  background: var(--bg-medium);
+  border-radius: 6px;
 }
 
 .settings-section:last-child {

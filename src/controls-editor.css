@@ -12,6 +12,73 @@
     overflow: hidden;
 }
 
+/* Controls Toolbar */
+.controls-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    background: var(--bg-medium);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, var(--bg-lighter));
+    flex-shrink: 0;
+}
+
+.controls-toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.controls-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.controls-file-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    font-style: italic;
+}
+
+.controls-file-label.has-file {
+    color: var(--text-primary);
+    font-style: normal;
+    font-weight: 500;
+}
+
+.controls-toolbar-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--border-color, var(--bg-lighter));
+    margin: 0 0.5rem;
+}
+
+.controls-toolbar .btn {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+}
+
+.controls-toolbar .btn span:first-child {
+    font-size: 1rem;
+}
+
+/* Installation Selection Button */
+.installation-select-btn {
+    transition: all 0.2s ease;
+    border: 1px solid var(--border-color, var(--bg-lighter)) !important;
+}
+
+.installation-select-btn:hover {
+    background: var(--bg-light) !important;
+    border-color: var(--accent-primary, #4ec9b0) !important;
+    transform: translateX(4px);
+}
+
 /* Device Type Tabs */
 .controls-device-tabs {
     display: flex;
@@ -20,6 +87,26 @@
     background: var(--bg-medium);
     border-radius: 8px;
     border: 1px solid var(--border-color, var(--bg-lighter));
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.controls-device-tabs::-webkit-scrollbar {
+    height: 6px;
+}
+
+.controls-device-tabs::-webkit-scrollbar-track {
+    background: var(--bg-light);
+    border-radius: 3px;
+}
+
+.controls-device-tabs::-webkit-scrollbar-thumb {
+    background: var(--bg-lighter);
+    border-radius: 3px;
+}
+
+.controls-device-tabs::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
 }
 
 .controls-device-tab {
@@ -63,7 +150,7 @@
 
 /* Tree Navigation Sidebar */
 .controls-tree-sidebar {
-    width: 300px;
+    width: 375px;
     min-width: 250px;
     background: var(--bg-medium);
     border-radius: 8px;
@@ -120,6 +207,22 @@
 
 .controls-tree-node.has-children {
     font-weight: 500;
+}
+
+.controls-tree-node.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: auto;
+    /* Keep pointer events for tooltip */
+}
+
+.controls-tree-node.disabled .controls-tree-label {
+    color: var(--text-secondary);
+    text-decoration: line-through;
+}
+
+.controls-tree-node.disabled:hover {
+    background: transparent;
 }
 
 .controls-tree-expand {
@@ -477,6 +580,7 @@
     border-radius: 3px;
     outline: none;
     -webkit-appearance: none;
+    appearance: none;
 }
 
 .controls-exponent-setting input[type="range"]::-webkit-slider-thumb {
@@ -500,6 +604,136 @@
     text-align: center;
 }
 
+/* Curve Mode Selector */
+.controls-curve-mode-selector {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    background: var(--bg-dark);
+    border-radius: 6px;
+    border: 1px solid var(--bg-lighter);
+    margin-bottom: 1rem;
+}
+
+.controls-curve-mode-selector .mode-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.controls-curve-mode-selector .mode-label {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.controls-curve-mode-selector .mode-description {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.mode-toggle-group {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.mode-toggle-btn {
+    padding: 0.5rem 1rem;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-lighter);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.mode-toggle-btn:hover {
+    background: var(--bg-light);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+.mode-toggle-btn.active {
+    background: var(--accent-primary);
+    color: var(--text-inverse);
+    border-color: var(--accent-primary);
+}
+
+/* Exponent Editor Container */
+.controls-exponent-editor {
+    background: var(--bg-dark);
+    border-radius: 8px;
+    border: 1px solid var(--bg-lighter);
+    padding: 1.5rem;
+}
+
+.controls-exponent-editor .controls-exponent-description {
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 6px;
+}
+
+.controls-exponent-editor .controls-exponent-description p {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-primary);
+    font-size: 0.9rem;
+}
+
+.controls-exponent-editor .controls-exponent-description ul {
+    margin: 0;
+    padding-left: 1.25rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+.controls-exponent-editor .controls-exponent-description ul li {
+    margin: 0.25rem 0;
+}
+
+.controls-exponent-editor .controls-exponent-description strong {
+    color: var(--accent-primary);
+}
+
+.controls-exponent-editor .controls-exponent-setting {
+    margin-top: 0;
+}
+
+.controls-exponent-editor .controls-curve-canvas-container {
+    margin-top: 1rem;
+}
+
+/* Exponent Presets */
+.controls-exponent-presets {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--bg-lighter);
+}
+
+.controls-exponent-preset-btn {
+    padding: 0.5rem 1rem;
+    background: var(--bg-medium);
+    border: 1px solid var(--bg-lighter);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.controls-exponent-preset-btn:hover {
+    background: var(--bg-light);
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
 /* Inherited Settings Notice */
 .controls-inherited-notice {
     display: flex;
@@ -510,6 +744,15 @@
     border: 1px solid rgba(59, 130, 246, 0.3);
     border-radius: 6px;
     margin-bottom: 1rem;
+}
+
+.controls-inherited-notice.inherited-value {
+    background: rgba(251, 191, 36, 0.1);
+    border-color: rgba(251, 191, 36, 0.4);
+}
+
+.controls-inherited-notice.inherited-value .notice-text strong {
+    color: #fbbf24;
 }
 
 .controls-inherited-notice .notice-icon {
@@ -524,6 +767,31 @@
 
 .controls-inherited-notice .notice-text strong {
     color: #60a5fa;
+}
+
+.controls-inherited-notice .clear-inheritance-btn {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* Inherited state styling */
+.controls-exponent-setting.inherited,
+.controls-invert-toggle.inherited {
+    opacity: 0.85;
+    position: relative;
+}
+
+.controls-exponent-setting.inherited::before,
+.controls-invert-toggle.inherited::before {
+    content: '';
+    position: absolute;
+    left: -0.5rem;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: #fbbf24;
+    border-radius: 2px;
 }
 
 /* Reset/Apply Buttons */
@@ -647,4 +915,45 @@
 .controls-instance-selector select:focus {
     outline: none;
     border-color: var(--accent-primary);
+}
+
+/* Section headers in tree - styled like SC's collapsible sections */
+.controls-tree-item.section-item {
+    margin-top: 0.5rem;
+}
+
+.controls-tree-item.section-item:first-child {
+    margin-top: 0;
+}
+
+.controls-tree-node.section-header {
+    background: var(--bg-light);
+    border: 1px solid var(--bg-lighter);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.25rem;
+}
+
+.controls-tree-node.section-header .controls-tree-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--accent-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+}
+
+.controls-tree-node.section-header:hover {
+    background: var(--bg-lighter);
+    border-color: var(--accent-primary);
+}
+
+.controls-tree-node.section-header .controls-tree-expand {
+    color: var(--accent-primary);
+}
+
+/* Nested items under section headers */
+.section-item>.controls-tree-children {
+    padding-left: 0.75rem;
+    margin-left: 0.5rem;
+    border-left: 2px solid var(--bg-lighter);
 }

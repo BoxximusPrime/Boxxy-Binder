@@ -179,6 +179,18 @@
     margin-top: 0.5rem;
 }
 
+/* Device actions row (Add + Import buttons) */
+.device-actions-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.device-actions-row .btn {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+}
+
 .template-page-card {
     border: 1px solid var(--bg-light);
     border-left: 3px solid transparent;
@@ -186,7 +198,7 @@
     padding: 0.65rem;
     border-radius: 6px;
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
     gap: 0.75rem;
     transition: border-color 0.2s ease, background 0.2s ease;
     cursor: pointer;
@@ -222,11 +234,17 @@
     display: flex;
     align-items: center;
     gap: 0.4rem;
+    justify-content: flex-end;
 }
 
 .template-page-actions button {
     font-size: 0.8rem;
     padding: 0.25rem 0.6rem;
+}
+
+.template-page-actions .page-export-btn {
+    padding: 0.25rem 0.6rem;
+    font-size: 0.8rem;
 }
 
 .page-modal-device-row {

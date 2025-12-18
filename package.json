@@ -1,6 +1,6 @@
 {
-    "name": "sc-joy-mapper",
-    "version": "0.10.0",
+    "name": "boxxy-binder",
+    "version": "0.11.1",
     "type": "module",
     "scripts": {
         "dev": "vite",

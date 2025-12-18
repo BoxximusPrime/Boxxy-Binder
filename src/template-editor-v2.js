@@ -226,13 +226,16 @@ function renderPageList()
         card.dataset.pageId = page.id;
         card.dataset.pageIndex = index;
         card.innerHTML = `
-            <div class="page-drag-handle" title="Drag to reorder">⋮⋮</div>
-            <div class="page-card-content">
-                <span class="template-page-name">${page.name || 'Untitled Page'}</span>
-                <span class="template-page-device">${page.device_name || 'Device not selected'}</span>
-                <div class="template-page-meta">${describeAxisMapping(page)}</div>
+            <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+                <div class="page-drag-handle" title="Drag to reorder">⋮⋮</div>
+                <div class="page-card-content">
+                    <span class="template-page-name">${page.name || 'Untitled Page'}</span>
+                    <span class="template-page-device">${page.device_name || 'Device not selected'}</span>
+                    <div class="template-page-meta">${describeAxisMapping(page)}</div>
+                </div>
             </div>
             <div class="template-page-actions">
+                <button type="button" class="btn btn-secondary btn-sm page-export-btn" title="Export this device">📤 Export</button>
                 <button type="button" class="btn btn-secondary btn-sm page-edit-btn">Edit</button>
                 <button type="button" class="btn btn-secondary btn-sm page-delete-btn">Delete</button>
             </div>
@@ -472,6 +475,9 @@ function openPageModal(pageId = null)
     state.modalImagePath = '';
     state.modalImageDataUrl = null;
 
+    // Populate prefix options dynamically based on settings
+    populatePrefixOptions();
+
     if (pageId)
     {
         const page = state.template.pages.find(p => p.id === pageId);
@@ -535,6 +541,44 @@ function openPageModal(pageId = null)
 
     dom.pageModal.style.display = 'flex';
     dom.pageNameInput.focus();
+}
+
+/**
+ * Populate the device prefix dropdown options dynamically based on max joystick/gamepad settings
+ */
+function populatePrefixOptions()
+{
+    if (!dom.pagePrefixSelect) return;
+
+    // Use the global function from device-manager.js if available, otherwise use defaults
+    const maxJs = window.getMaxJoysticks ? window.getMaxJoysticks() : 4;
+    const maxGp = window.getMaxGamepads ? window.getMaxGamepads() : 4;
+
+    let optionsHtml = '<option value="">Select a prefix</option>\n';
+
+    for (let i = 1; i <= maxJs; i++)
+    {
+        optionsHtml += `<option value="js${i}">js${i}</option>\n`;
+    }
+
+    for (let i = 1; i <= maxGp; i++)
+    {
+        optionsHtml += `<option value="gp${i}">gp${i}</option>\n`;
+    }
+
+    dom.pagePrefixSelect.innerHTML = optionsHtml;
+
+    // Reinitialize CustomDropdown if it exists
+    if (dom.devicePrefixDropdown)
+    {
+        dom.devicePrefixDropdown.destroy();
+    }
+    dom.devicePrefixDropdown = new CustomDropdown(dom.pagePrefixSelect, {
+        onChange: (item) =>
+        {
+            console.log('[DevicePrefix] Changed to:', item.value);
+        }
+    });
 }
 
 function updatePageModalTitle()
@@ -735,6 +779,25 @@ function deletePage(pageId)
     callbacks.onPagesChanged?.(state.template.pages);
 }
 
+async function deletePageWithConfirmation(pageId)
+{
+    const page = state.template.pages.find(p => p.id === pageId);
+    if (!page) return;
+
+    const confirmed = await window.showConfirmation(
+        `Are you sure you want to delete the device "${page.name || 'Untitled Device'}"? This action cannot be undone.`,
+        '🗑️ Delete Device',
+        'Delete',
+        'Cancel',
+        'btn-danger'
+    );
+
+    if (confirmed)
+    {
+        deletePage(pageId);
+    }
+}
+
 function handlePagesListClick(event)
 {
     const card = event.target.closest('.template-page-card');
@@ -742,6 +805,12 @@ function handlePagesListClick(event)
     const pageId = card.dataset.pageId;
     if (!pageId) return;
 
+    if (event.target.classList.contains('page-export-btn'))
+    {
+        event.stopPropagation();
+        exportDevice(pageId);
+        return;
+    }
     if (event.target.classList.contains('page-edit-btn'))
     {
         event.stopPropagation();
@@ -751,7 +820,7 @@ function handlePagesListClick(event)
     if (event.target.classList.contains('page-delete-btn'))
     {
         event.stopPropagation();
-        deletePage(pageId);
+        deletePageWithConfirmation(pageId);
         return;
     }
     selectPage(pageId);
@@ -1421,6 +1490,11 @@ export async function initializeTemplatePagesUI(options = {})
 
     dom.pagesList.addEventListener('click', handlePagesListClick);
     dom.addPageBtn?.addEventListener('click', () => openPageModal());
+
+    // Import device button
+    const importDeviceBtn = document.getElementById('import-device-btn');
+    importDeviceBtn?.addEventListener('click', () => importDevice());
+
     dom.pageCancelBtn?.addEventListener('click', closePageModal);
     dom.pageSaveBtn?.addEventListener('click', savePageFromModal);
     dom.pageDeleteBtn?.addEventListener('click', () =>
@@ -1503,3 +1577,276 @@ export function refreshTemplatePagesUI(templateOverride = null)
 
 // Expose selectPage to window so other modules can select pages
 window.selectPage = selectPage;
+
+// ============================================
+// Device Export/Import Functionality
+// ============================================
+
+/**
+ * Export a single device (page) to a JSON file
+ * @param {string} pageId - The ID of the page/device to export
+ */
+async function exportDevice(pageId)
+{
+    const page = state.template.pages.find(p => p.id === pageId);
+    if (!page)
+    {
+        console.error('[ExportDevice] Page not found:', pageId);
+        return;
+    }
+
+    // Create a clean copy for export
+    const exportData = cloneDeep(page);
+
+    // Generate a new ID so the imported device doesn't conflict
+    delete exportData.id;
+
+    // Wrap in a device export format with metadata
+    const deviceExport = {
+        type: 'boxxy-binder-device',
+        version: '1.0',
+        exportedAt: new Date().toISOString(),
+        device: exportData
+    };
+
+    const invoke = getInvoke();
+    if (!invoke)
+    {
+        // Fallback: download via browser
+        const blob = new Blob([JSON.stringify(deviceExport, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const safeName = (page.name || 'device').replace(/[^a-zA-Z0-9-_ ]/g, '').trim();
+        a.download = `${safeName}.device.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        if (window.showToast)
+        {
+            window.showToast(`Exported "${page.name || 'Untitled Device'}"`, 'success');
+        }
+        return;
+    }
+
+    try
+    {
+        // Use Tauri save dialog
+        const { save } = window.__TAURI__.dialog;
+
+        let resourceDir;
+        try
+        {
+            resourceDir = await invoke('get_resource_dir');
+        }
+        catch (e)
+        {
+            console.warn('Could not get resource directory:', e);
+            resourceDir = undefined;
+        }
+
+        const safeName = (page.name || 'device').replace(/[^a-zA-Z0-9-_ ]/g, '').trim();
+
+        const filePath = await save({
+            filters: [{
+                name: 'Device Template',
+                extensions: ['device.json']
+            }],
+            defaultPath: resourceDir ? `${resourceDir}/${safeName}.device.json` : `${safeName}.device.json`
+        });
+
+        if (!filePath) return; // User cancelled
+
+        await invoke('save_template', {
+            filePath,
+            templateJson: JSON.stringify(deviceExport, null, 2)
+        });
+
+        if (window.showToast)
+        {
+            window.showToast(`Exported "${page.name || 'Untitled Device'}"`, 'success');
+        }
+    }
+    catch (error)
+    {
+        console.error('[ExportDevice] Error:', error);
+        const showAlert = window.showAlert || alert;
+        await showAlert(`Failed to export device: ${error}`, 'Export Error');
+    }
+}
+
+/**
+ * Import a device from a JSON file and add it to the current template
+ */
+async function importDevice()
+{
+    const invoke = getInvoke();
+
+    if (!invoke)
+    {
+        // Fallback: use file input
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json,.device.json';
+        input.onchange = async (e) =>
+        {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (event) =>
+            {
+                try
+                {
+                    const data = JSON.parse(event.target.result);
+                    await processImportedDevice(data, file.name);
+                }
+                catch (error)
+                {
+                    console.error('[ImportDevice] Parse error:', error);
+                    const showAlert = window.showAlert || alert;
+                    await showAlert('Failed to parse device file. Make sure it\'s a valid device export.', 'Import Error');
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+        return;
+    }
+
+    try
+    {
+        // Use Tauri open dialog
+        const { open } = window.__TAURI__.dialog;
+
+        let resourceDir;
+        try
+        {
+            resourceDir = await invoke('get_resource_dir');
+        }
+        catch (e)
+        {
+            console.warn('Could not get resource directory:', e);
+            resourceDir = undefined;
+        }
+
+        const filePath = await open({
+            filters: [{
+                name: 'Device Template',
+                extensions: ['json', 'device.json']
+            }],
+            multiple: false,
+            defaultPath: resourceDir
+        });
+
+        if (!filePath) return; // User cancelled
+
+        const fileContent = await invoke('load_template', { filePath });
+        const data = JSON.parse(fileContent);
+        const fileName = filePath.split(/[\\/]/).pop();
+
+        await processImportedDevice(data, fileName);
+    }
+    catch (error)
+    {
+        console.error('[ImportDevice] Error:', error);
+        const showAlert = window.showAlert || alert;
+        await showAlert(`Failed to import device: ${error}`, 'Import Error');
+    }
+}
+
+/**
+ * Process and add an imported device to the template
+ * @param {Object} data - The parsed JSON data
+ * @param {string} fileName - The name of the imported file (for error messages)
+ */
+async function processImportedDevice(data, fileName)
+{
+    const showAlert = window.showAlert || alert;
+
+    // Validate the data format
+    let deviceData;
+
+    if (data.type === 'boxxy-binder-device' && data.device)
+    {
+        // New device export format
+        deviceData = cloneDeep(data.device);
+    }
+    else if (data.pages && Array.isArray(data.pages) && data.pages.length > 0)
+    {
+        // Full template file - ask user which device to import
+        const pageNames = data.pages.map((p, i) => `${i + 1}. ${p.name || 'Untitled Device'}`).join('\n');
+
+        // For simplicity, import the first device. Could add a selection modal later.
+        const showConfirmation = window.showConfirmation;
+        if (showConfirmation)
+        {
+            const confirmed = await showConfirmation(
+                `This file contains ${data.pages.length} device(s):\n${pageNames}\n\nImport the first device?`,
+                'Import from Template',
+                'Import First Device',
+                'Cancel'
+            );
+            if (!confirmed) return;
+        }
+
+        deviceData = cloneDeep(data.pages[0]);
+    }
+    else if (data.name && (data.buttons || data.device_prefix))
+    {
+        // Looks like a raw device/page object
+        deviceData = cloneDeep(data);
+    }
+    else
+    {
+        await showAlert(
+            'This file doesn\'t appear to be a valid device export.\n\nExpected a .device.json file or a template file.',
+            'Invalid File Format'
+        );
+        return;
+    }
+
+    // Generate a new unique ID
+    deviceData.id = generatePageId();
+
+    // Check for name conflicts and append a number if needed
+    let baseName = deviceData.name || 'Imported Device';
+    let finalName = baseName;
+    let counter = 1;
+
+    while (state.template.pages.some(p => p.name === finalName))
+    {
+        counter++;
+        finalName = `${baseName} (${counter})`;
+    }
+    deviceData.name = finalName;
+
+    // Ensure buttons array exists
+    if (!Array.isArray(deviceData.buttons))
+    {
+        deviceData.buttons = [];
+    }
+
+    // Add to template
+    state.template.pages.push(deviceData);
+
+    // Select the newly imported device
+    state.selectedPageId = deviceData.id;
+
+    // Mark as dirty and refresh
+    markTemplateDirty();
+    renderPageList();
+    callbacks.onPagesChanged?.(state.template.pages);
+    callbacks.onPageSelected?.(deviceData.id);
+
+    if (window.showToast)
+    {
+        window.showToast(`Imported "${deviceData.name}"`, 'success');
+    }
+}
+
+// Expose importDevice to window so the import button can call it
+window.importDevice = importDevice;
+window.deletePageWithConfirmation = deletePageWithConfirmation;

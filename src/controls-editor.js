@@ -17,6 +17,7 @@ const { invoke } = window.__TAURI__.core;
 
 let controlsData = null; // Parsed optiontree data
 let currentDeviceType = 'keyboard'; // 'keyboard', 'gamepad', 'joystick'
+let currentGamepadInstance = 1; // For gamepad, which instance (1-8)
 let currentJoystickInstance = 1; // For joystick, which instance (1-8)
 let selectedNode = null; // Currently selected node in tree
 let hasUnsavedChanges = false;
@@ -24,9 +25,56 @@ let hasUnsavedChanges = false;
 // User's custom settings (overrides for default values)
 let userSettings = {
     keyboard: {},
-    gamepad: {},
+    gamepad: {}, // Each key is instance number, value is settings object
     joystick: {} // Each key is instance number, value is settings object
 };
+
+// Debounce timer for syncing settings to backend
+let syncDebounceTimer = null;
+const SYNC_DEBOUNCE_MS = 500; // Wait 500ms after last change before syncing
+
+/**
+ * Sync control settings to backend (debounced)
+ * This ensures settings persist across page refreshes
+ */
+function debouncedSyncToBackend()
+{
+    if (syncDebounceTimer)
+    {
+        clearTimeout(syncDebounceTimer);
+    }
+
+    syncDebounceTimer = setTimeout(async () =>
+    {
+        try
+        {
+            const controlOptions = window.getAllControlOptions();
+            if (controlOptions && controlOptions.length > 0)
+            {
+                console.log('[CONTROLS-EDITOR] Syncing control options to backend:', controlOptions.length, 'items');
+                await invoke('update_control_options', { controlOptions });
+
+                // Mark as having unsaved changes in localStorage so it persists across refresh
+                localStorage.setItem('hasUnsavedChanges', 'true');
+                console.log('[CONTROLS-EDITOR] Set hasUnsavedChanges to true in localStorage');
+
+                // Also update the cache so settings persist across refresh
+                if (window.cacheUserCustomizations)
+                {
+                    await window.cacheUserCustomizations();
+                    console.log('[CONTROLS-EDITOR] Cache updated, localStorage.hasUnsavedChanges =', localStorage.getItem('hasUnsavedChanges'));
+                }
+            }
+        }
+        catch (error)
+        {
+            console.error('[CONTROLS-EDITOR] Error syncing to backend:', error);
+        }
+    }, SYNC_DEBOUNCE_MS);
+}
+
+// Current controls file path (for "Save" vs "Save As")
+let currentControlsFilePath = null;
 
 // ============================================================================
 // INITIALIZATION
@@ -38,6 +86,7 @@ window.initializeControlsEditor = async function ()
 
     // Set up event listeners
     setupDeviceTabListeners();
+    setupControlsToolbarListeners();
 
     // Parse optiontree data from AllBinds.xml
     await loadControlsData();
@@ -45,6 +94,9 @@ window.initializeControlsEditor = async function ()
     // Render initial view
     renderDeviceTabs();
     renderTree();
+
+    // Update file label
+    updateControlsFileLabel();
 
     console.log('[CONTROLS-EDITOR] Initialization complete');
 };
@@ -59,23 +111,561 @@ function setupDeviceTabListeners()
         const tab = e.target.closest('.controls-device-tab');
         if (!tab) return;
 
-        const deviceType = tab.dataset.device;
-        if (deviceType && deviceType !== currentDeviceType)
+        const deviceId = tab.dataset.device;
+        if (deviceId)
         {
-            switchDeviceType(deviceType);
+            // Check if this is already the active tab
+            let currentActiveId = currentDeviceType;
+            if (currentDeviceType === 'joystick')
+            {
+                currentActiveId = `joystick${currentJoystickInstance}`;
+            } else if (currentDeviceType === 'gamepad')
+            {
+                currentActiveId = `gamepad${currentGamepadInstance}`;
+            }
+
+            if (deviceId !== currentActiveId)
+            {
+                switchDeviceType(deviceId);
+            }
         }
     });
+}
 
-    // Instance selector for joystick
-    const instanceSelector = document.getElementById('controls-instance-select');
-    if (instanceSelector)
+function setupControlsToolbarListeners()
+{
+    const loadBtn = document.getElementById('controls-load-btn');
+    const saveBtn = document.getElementById('controls-save-btn');
+    const saveAsBtn = document.getElementById('controls-save-as-btn');
+    const importBtn = document.getElementById('controls-import-btn');
+    const applyBtn = document.getElementById('controls-apply-btn');
+
+    if (loadBtn) loadBtn.addEventListener('click', loadControlsFile);
+    if (saveBtn) saveBtn.addEventListener('click', saveControlsFile);
+    if (saveAsBtn) saveAsBtn.addEventListener('click', saveControlsFileAs);
+    if (importBtn) importBtn.addEventListener('click', importControlsFromSC);
+    if (applyBtn) applyBtn.addEventListener('click', applyControlsToSC);
+}
+
+function updateControlsFileLabel()
+{
+    const label = document.getElementById('controls-file-label');
+    if (!label) return;
+
+    if (currentControlsFilePath)
     {
-        instanceSelector.addEventListener('change', (e) =>
-        {
-            currentJoystickInstance = parseInt(e.target.value) || 1;
-            renderTree();
-            clearSettingsPanel();
+        const fileName = currentControlsFilePath.split(/[/\\]/).pop();
+        label.textContent = fileName;
+        label.classList.add('has-file');
+    }
+    else
+    {
+        label.textContent = 'No controls file loaded';
+        label.classList.remove('has-file');
+    }
+}
+
+// ============================================================================
+// CONTROLS FILE OPERATIONS
+// ============================================================================
+
+async function loadControlsFile()
+{
+    try
+    {
+        const { open } = window.__TAURI__.dialog;
+
+        const filePath = await open({
+            filters: [{
+                name: 'SC Controls',
+                extensions: ['sccontrols', 'json']
+            }],
+            multiple: false
         });
+
+        if (!filePath) return; // User cancelled
+
+        const loadedData = await invoke('load_controls_file', { filePath });
+
+        // Load into the editor
+        if (window.loadControlsFromFile)
+        {
+            window.loadControlsFromFile(loadedData);
+        }
+
+        // Update state
+        currentControlsFilePath = filePath;
+        hasUnsavedChanges = false;
+        updateControlsFileLabel();
+        updateSaveIndicator();
+
+        if (window.toast)
+        {
+            window.toast.success(`Loaded: ${filePath.split(/[/\\]/).pop()}`);
+        }
+
+        console.log('[CONTROLS-EDITOR] Loaded controls from:', filePath);
+    }
+    catch (error)
+    {
+        console.error('[CONTROLS-EDITOR] Error loading controls file:', error);
+        if (window.showAlert)
+        {
+            await window.showAlert(`Failed to load controls file: ${error}`, 'Error');
+        }
+    }
+}
+
+async function saveControlsFile()
+{
+    if (!currentControlsFilePath)
+    {
+        // No current file, redirect to Save As
+        await saveControlsFileAs();
+        return;
+    }
+
+    try
+    {
+        const settings = window.getControlsForSaving();
+        const profileName = currentControlsFilePath.split(/[/\\]/).pop().replace(/\.[^.]+$/, '');
+
+        await invoke('save_controls_file', {
+            filePath: currentControlsFilePath,
+            profileName,
+            settings
+        });
+
+        hasUnsavedChanges = false;
+        updateSaveIndicator();
+
+        if (window.toast)
+        {
+            window.toast.success('Controls saved!');
+        }
+
+        console.log('[CONTROLS-EDITOR] Saved controls to:', currentControlsFilePath);
+    }
+    catch (error)
+    {
+        console.error('[CONTROLS-EDITOR] Error saving controls file:', error);
+        if (window.showAlert)
+        {
+            await window.showAlert(`Failed to save controls file: ${error}`, 'Error');
+        }
+    }
+}
+
+async function saveControlsFileAs()
+{
+    try
+    {
+        const { save } = window.__TAURI__.dialog;
+
+        const filePath = await save({
+            filters: [{
+                name: 'SC Controls',
+                extensions: ['sccontrols']
+            }],
+            defaultPath: 'my_controls.sccontrols'
+        });
+
+        if (!filePath) return; // User cancelled
+
+        const settings = window.getControlsForSaving();
+        const profileName = filePath.split(/[/\\]/).pop().replace(/\.[^.]+$/, '');
+
+        await invoke('save_controls_file', {
+            filePath,
+            profileName,
+            settings
+        });
+
+        // Update state
+        currentControlsFilePath = filePath;
+        hasUnsavedChanges = false;
+        updateControlsFileLabel();
+        updateSaveIndicator();
+
+        if (window.toast)
+        {
+            window.toast.success(`Saved: ${filePath.split(/[/\\]/).pop()}`);
+        }
+
+        console.log('[CONTROLS-EDITOR] Saved controls to:', filePath);
+    }
+    catch (error)
+    {
+        console.error('[CONTROLS-EDITOR] Error saving controls file:', error);
+        if (window.showAlert)
+        {
+            await window.showAlert(`Failed to save controls file: ${error}`, 'Error');
+        }
+    }
+}
+
+async function importControlsFromSC()
+{
+    try
+    {
+        // Get SC installation directory
+        const scInstallDirectory = localStorage.getItem('scInstallDirectory');
+
+        if (!scInstallDirectory)
+        {
+            // Show dialog asking to configure or browse
+            const result = await showInstallationSelectDialog(
+                'Import Controls from Star Citizen',
+                'Select which Star Citizen installation to import control settings from:',
+                'import'
+            );
+
+            if (!result) return; // User cancelled
+
+            await performImport(result);
+            return;
+        }
+
+        // Scan for installations
+        const installations = await invoke('scan_sc_installations', { basePath: scInstallDirectory });
+
+        if (installations.length === 0)
+        {
+            // No installations found, offer to browse
+            const result = await showInstallationSelectDialog(
+                'Import Controls from Star Citizen',
+                'No Star Citizen installations found. Browse for the actionmaps.xml file:',
+                'import'
+            );
+
+            if (!result) return;
+            await performImport(result);
+            return;
+        }
+
+        if (installations.length === 1)
+        {
+            // Only one installation, use it directly
+            const actionmapsPath = await invoke('find_actionmaps_path', { basePath: installations[0].path });
+            if (actionmapsPath)
+            {
+                await performImport(actionmapsPath);
+            }
+            else
+            {
+                if (window.showAlert)
+                {
+                    await window.showAlert(`No actionmaps.xml found in ${installations[0].name}. The game may not have been run yet.`, 'Import Controls');
+                }
+            }
+            return;
+        }
+
+        // Multiple installations - show selection dialog
+        const result = await showInstallationSelectDialog(
+            'Import Controls from Star Citizen',
+            'Select which Star Citizen installation to import control settings from:',
+            'import',
+            installations
+        );
+
+        if (!result) return;
+        await performImport(result);
+    }
+    catch (error)
+    {
+        console.error('[CONTROLS-EDITOR] Error importing controls:', error);
+        if (window.showAlert)
+        {
+            await window.showAlert(`Failed to import controls: ${error}`, 'Error');
+        }
+    }
+}
+
+async function performImport(actionmapsPath)
+{
+    const loadedData = await invoke('import_controls_from_actionmaps', { actionmapsPath });
+
+    // Load into the editor
+    if (window.loadControlsFromFile)
+    {
+        window.loadControlsFromFile(loadedData);
+    }
+
+    // Don't set currentControlsFilePath - this is imported data, not from a controls file
+    hasUnsavedChanges = true;
+    updateSaveIndicator();
+
+    // Get installation name from path for the toast
+    const pathParts = actionmapsPath.split(/[/\\]/);
+    const installIdx = pathParts.findIndex(p => p === 'StarCitizen');
+    const installName = installIdx >= 0 && pathParts[installIdx + 1] ? pathParts[installIdx + 1] : 'Star Citizen';
+
+    if (window.toast)
+    {
+        window.toast.success(`Imported control settings from ${installName}!`);
+    }
+
+    console.log('[CONTROLS-EDITOR] Imported controls from:', actionmapsPath);
+}
+
+/**
+ * Show installation selection dialog
+ * @param {string} title - Dialog title
+ * @param {string} message - Dialog message
+ * @param {string} mode - 'import' or 'apply'
+ * @param {Array} installations - Array of installation objects (optional)
+ * @returns {Promise<string|null>} - Path to actionmaps.xml or null if cancelled
+ */
+async function showInstallationSelectDialog(title, message, mode, installations = null)
+{
+    return new Promise(async (resolve) =>
+    {
+        const modal = document.getElementById('installation-select-modal');
+        const titleEl = document.getElementById('installation-select-title');
+        const messageEl = document.getElementById('installation-select-message');
+        const listEl = document.getElementById('installation-select-list');
+        const notConfiguredEl = document.getElementById('installation-select-not-configured');
+        const cancelBtn = document.getElementById('installation-select-cancel-btn');
+        const browseBtn = document.getElementById('installation-select-browse-btn');
+
+        // Set title and message
+        titleEl.textContent = mode === 'import' ? '📥 ' + title : '🚀 ' + title;
+        messageEl.textContent = message;
+
+        // Clear previous list
+        listEl.innerHTML = '';
+        notConfiguredEl.style.display = 'none';
+
+        // Cleanup function
+        const cleanup = () =>
+        {
+            modal.style.display = 'none';
+            cancelBtn.removeEventListener('click', handleCancel);
+            browseBtn.removeEventListener('click', handleBrowse);
+            document.removeEventListener('keydown', handleEscape);
+        };
+
+        const handleCancel = () =>
+        {
+            cleanup();
+            resolve(null);
+        };
+
+        const handleBrowse = async () =>
+        {
+            cleanup();
+
+            const { open } = window.__TAURI__.dialog;
+            const filePath = await open({
+                filters: [{
+                    name: 'Star Citizen Settings',
+                    extensions: ['xml']
+                }],
+                multiple: false,
+                title: 'Select actionmaps.xml from Star Citizen'
+            });
+
+            resolve(filePath || null);
+        };
+
+        const handleEscape = (e) =>
+        {
+            if (e.key === 'Escape')
+            {
+                handleCancel();
+            }
+        };
+
+        // Add installation buttons if we have them
+        if (installations && installations.length > 0)
+        {
+            for (const install of installations)
+            {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-secondary installation-select-btn';
+                btn.style.cssText = 'display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; text-align: left; width: 100%;';
+                btn.innerHTML = `
+                    <span style="font-size: 1.5rem;">🚀</span>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; color: #4ec9b0;">${install.name}</div>
+                        <div style="font-size: 0.8rem; color: var(--text-secondary); font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis;">${install.path}</div>
+                    </div>
+                `;
+
+                btn.addEventListener('click', async () =>
+                {
+                    cleanup();
+
+                    try
+                    {
+                        const actionmapsPath = await invoke('find_actionmaps_path', { basePath: install.path });
+                        if (actionmapsPath)
+                        {
+                            resolve(actionmapsPath);
+                        }
+                        else
+                        {
+                            if (window.showAlert)
+                            {
+                                await window.showAlert(`No actionmaps.xml found in ${install.name}. The game may not have been run yet.`, 'Import Controls');
+                            }
+                            resolve(null);
+                        }
+                    }
+                    catch (error)
+                    {
+                        console.error('Error finding actionmaps.xml:', error);
+                        resolve(null);
+                    }
+                });
+
+                listEl.appendChild(btn);
+            }
+        }
+        else
+        {
+            // No installations configured
+            notConfiguredEl.style.display = 'block';
+        }
+
+        // Add event listeners
+        cancelBtn.addEventListener('click', handleCancel);
+        browseBtn.addEventListener('click', handleBrowse);
+        document.addEventListener('keydown', handleEscape);
+
+        // Show modal
+        modal.style.display = 'flex';
+    });
+}
+
+async function applyControlsToSC()
+{
+    try
+    {
+        // Check if there are any settings to apply
+        if (!window.hasControlSettings || !window.hasControlSettings())
+        {
+            if (window.showAlert)
+            {
+                await window.showAlert('No control settings to apply. Configure some settings first.', 'Apply Controls');
+            }
+            return;
+        }
+
+        // Get SC installation directory
+        const scInstallDirectory = localStorage.getItem('scInstallDirectory');
+        let actionmapsPath = null;
+
+        if (!scInstallDirectory)
+        {
+            // Show dialog asking to configure or browse
+            actionmapsPath = await showInstallationSelectDialog(
+                'Apply Controls to Star Citizen',
+                'Select which Star Citizen installation to apply control settings to:',
+                'apply'
+            );
+
+            if (!actionmapsPath) return;
+        }
+        else
+        {
+            // Scan for installations
+            const installations = await invoke('scan_sc_installations', { basePath: scInstallDirectory });
+
+            if (installations.length === 0)
+            {
+                // No installations found, offer to browse
+                actionmapsPath = await showInstallationSelectDialog(
+                    'Apply Controls to Star Citizen',
+                    'No Star Citizen installations found. Browse for the actionmaps.xml file:',
+                    'apply'
+                );
+
+                if (!actionmapsPath) return;
+            }
+            else if (installations.length === 1)
+            {
+                // Only one installation, use it directly
+                actionmapsPath = await invoke('find_actionmaps_path', { basePath: installations[0].path });
+                if (!actionmapsPath)
+                {
+                    if (window.showAlert)
+                    {
+                        await window.showAlert(`No actionmaps.xml found in ${installations[0].name}. The game may not have been run yet.`, 'Apply Controls');
+                    }
+                    return;
+                }
+            }
+            else
+            {
+                // Multiple installations - show selection dialog
+                actionmapsPath = await showInstallationSelectDialog(
+                    'Apply Controls to Star Citizen',
+                    'Select which Star Citizen installation to apply control settings to:',
+                    'apply',
+                    installations
+                );
+
+                if (!actionmapsPath) return;
+            }
+        }
+
+        // Get installation name from path for the confirmation dialog
+        const pathParts = actionmapsPath.split(/[/\\]/);
+        const installIdx = pathParts.findIndex(p => p === 'StarCitizen');
+        const installName = installIdx >= 0 && pathParts[installIdx + 1] ? pathParts[installIdx + 1] : 'Star Citizen';
+
+        // Show confirmation dialog
+        const confirmed = await window.showConfirmation(
+            `This will modify your ${installName} actionmaps.xml file directly.\n\n` +
+            '⚠️ A backup will be created automatically.\n\n' +
+            '🔄 You will need to restart Star Citizen for changes to take effect.\n\n' +
+            'Continue?',
+            'Apply Controls to Star Citizen'
+        );
+
+        if (!confirmed) return;
+
+        const settings = window.getControlsForSaving();
+        const profileName = currentControlsFilePath
+            ? currentControlsFilePath.split(/[/\\]/).pop().replace(/\.[^.]+$/, '')
+            : 'SC Joy Mapper';
+
+        const result = await invoke('apply_controls_to_actionmaps', {
+            actionmapsPath,
+            settings,
+            profileName
+        });
+
+        if (result.success)
+        {
+            if (window.toast)
+            {
+                window.toast.success(result.message, { duration: 5000 });
+            }
+            else if (window.showAlert)
+            {
+                await window.showAlert(result.message, 'Success');
+            }
+        }
+        else
+        {
+            if (window.showAlert)
+            {
+                await window.showAlert(result.message, 'Error');
+            }
+        }
+
+        console.log('[CONTROLS-EDITOR] Applied controls to SC:', result);
+    }
+    catch (error)
+    {
+        console.error('[CONTROLS-EDITOR] Error applying controls:', error);
+        if (window.showAlert)
+        {
+            await window.showAlert(`Failed to apply controls: ${error}`, 'Error');
+        }
     }
 }
 
@@ -133,10 +723,14 @@ function parseOptionTreesFromXml(xmlString)
         const type = tree.getAttribute('type');
         if (type && result.hasOwnProperty(type))
         {
-            result[type] = parseOptionGroup(tree, type);
-            result[type].instances = parseInt(tree.getAttribute('instances')) || 1;
-            result[type].sensitivityMin = parseFloat(tree.getAttribute('UISensitivityMin')) || 0.01;
-            result[type].sensitivityMax = parseFloat(tree.getAttribute('UISensitivityMax')) || 2.0;
+            // Parse the raw structure
+            const rawData = parseOptionGroup(tree, type);
+            rawData.instances = parseInt(tree.getAttribute('instances')) || 1;
+            rawData.sensitivityMin = parseFloat(tree.getAttribute('UISensitivityMin')) || 0.01;
+            rawData.sensitivityMax = parseFloat(tree.getAttribute('UISensitivityMax')) || 2.0;
+
+            // Transform to match Star Citizen's display hierarchy
+            result[type] = transformToSCHierarchy(rawData, type);
         }
     });
 
@@ -212,6 +806,293 @@ function parseVisibility(attr)
     return null;
 }
 
+// ============================================================================
+// LABEL MAPPINGS - Match Star Citizen's in-game display
+// ============================================================================
+
+/**
+ * Maps XML UILabel values (e.g., @ui_COFPS) to human-readable Star Citizen labels.
+ * Based on actual in-game OPTIONS MENU → CONTROLS screen.
+ */
+const SC_LABEL_MAP = {
+    // Top-level sections
+    '@ui_COInversionSettings': 'Inversion Settings',
+    '@ui_COMasterSensitivityCurvesMouse': 'Mouse Sensitivity Curves',
+    '@ui_COMasterSensitivityCurvesThumb': 'Thumbstick Sensitivity Curves',
+    '@ui_COMasterSensitivityCurvesJoystick': 'Joystick Sensitivity Curves',
+    '@ui_COMasterSensitivity': 'Master Sensitivity',
+
+    // Categories
+    '@ui_COFPS': 'On Foot',
+    '@ui_co_eva': 'FPS EVA',
+    '@ui_COFlight': 'Flight',
+    '@ui_COTurret': 'Turrets',
+    '@ui_COTurretAim': 'Turrets',
+    '@ui_COMannedGroundVehicle': 'Ground Vehicle',
+    '@ui_COMining': 'Mining',
+    '@ui_aiming': 'Aiming and Weapons',
+    '@ui_COAnyVehicle': 'Any Vehicle',
+
+    // On Foot / FPS
+    '@ui_COFPSView': 'On Foot View',
+    '@ui_COFPSViewPitch': 'On Foot (Pitch)',
+    '@ui_COFPSViewYaw': 'On Foot (Yaw)',
+    '@ui_COFPSMove': 'FPS Movement',
+    '@ui_COFPSMoveLeftRight': 'Move Left/Right',
+    '@ui_COFPSMoveForwardBackward': 'Move Forward/Backward',
+
+    // EVA
+    '@ui_co_eva_roll': 'EVA Roll',
+    '@ui_co_eva_move_strafe_lateral': 'EVA Strafe Lateral',
+    '@ui_co_eva_move_strafe_longitudinal': 'EVA Strafe Longitudinal',
+    '@ui_co_eva_move_strafe_vertical': 'EVA Strafe Vertical',
+
+    // Flight categories
+    '@ui_COFlightMove': 'Flight Movement',
+    '@ui_COFreeLook': 'Free Look Mode',
+    '@ui_COThrottleSensitivity': 'Throttle',
+
+    // Flight movement
+    '@ui_COFlightPitch': 'Flight (Pitch)',
+    '@ui_COFlightYaw': 'Flight (Yaw)',
+    '@ui_COFlightRoll': 'Flight (Roll)',
+    '@ui_COStrafeUpDown': 'Strafe Up/Down',
+    '@ui_COStrafeLeftRight': 'Strafe Left/Right',
+    '@ui_v_strafe_longitudinal': 'Strafe Longitudinal',
+    '@ui_v_strafe_forward': 'Strafe Forward',
+    '@ui_v_strafe_back': 'Strafe Backward',
+    '@ui_co_flight_move_speed_range_abs': 'Speed Limiter (abs)',
+    '@ui_co_flight_move_speed_range_rel': 'Velocity Limiter (rel)',
+    '@ui_co_flight_move_accel_range_abs': 'Acceleration Limiter (abs)',
+    '@ui_co_flight_move_accel_range_rel': 'Acceleration Limiter (rel)',
+    '@ui_co_flight_move_space_brake': 'Space Brake',
+
+    // Flight view / Free Look
+    '@ui_COFlightViewY': 'Flight View (Pitch)',
+    '@ui_COFlightViewX': 'Flight View (Yaw)',
+    '@ui_co_dynamic_zoom_rel': 'Dynamic Zoom (rel)',
+    '@ui_co_dynamic_zoom_abs': 'Dynamic Zoom (abs)',
+
+    // Throttle
+    '@ui_COFlightThrustAbsHalf': 'Thrust (Half)',
+    '@ui_COFlightThrustAbsFull': 'Thrust (Full)',
+
+    // Turret
+    '@ui_COTurretAimPitch': 'Turret Aim (Pitch)',
+    '@ui_COTurretAimYaw': 'Turret Aim (Yaw)',
+    '@ui_CO_Turret_VJMode': 'Turret Virtual Joystick Mode',
+    '@ui_CO_Turret_VJoyModePitch': 'Turret VJoy (Pitch)',
+    '@ui_CO_Turret_VJoyModeYaw': 'Turret VJoy (Yaw)',
+    '@ui_COTurretRelativeMode': 'Turret Relative Mode',
+    '@ui_CO_TurretRelativeModePitch': 'Turret Relative (Pitch)',
+    '@ui_CO_TurretRelativeModeYaw': 'Turret Relative (Yaw)',
+    '@ui_CO_TurretLimiterRelative': 'Turret Limiter (rel)',
+    '@ui_CO_TurretLimiterAbsolute': 'Turret Limiter (abs)',
+
+    // Ground Vehicle
+    '@ui_COGroundVehicleViewY': 'Vehicle View (Pitch)',
+    '@ui_COGroundVehicleViewX': 'Vehicle View (Yaw)',
+    '@ui_COGroundVehicleMove': 'Vehicle Move',
+    '@ui_COGroundVehicleMoveForward': 'Vehicle Move Forward',
+    '@ui_COGroundVehicleMoveBackward': 'Vehicle Move Backward',
+    '@ui_COMGVPitch': 'Vehicle (Pitch)',
+    '@ui_COMGVYaw': 'Vehicle (Yaw)',
+
+    // Any Vehicle modes (Mouse specific)
+    '@ui_COVJMode': 'Virtual Joystick Mode',
+    '@ui_COVJModePitch': 'VJoy Mode (Pitch)',
+    '@ui_COVJModeYaw': 'VJoy Mode (Yaw)',
+    '@ui_COVJModeRoll': 'VJoy Mode (Roll)',
+    '@ui_COVJFixedMode': 'Virtual Joystick Fixed Mode',
+    '@ui_COVJFixedModePitch': 'VJoy Fixed (Pitch)',
+    '@ui_COVJFixedModeYaw': 'VJoy Fixed (Yaw)',
+    '@ui_COVJFixedModeRoll': 'VJoy Fixed (Roll)',
+    '@ui_CORelativeMode': 'Relative Mode',
+    '@ui_CORelativeModePitch': 'Relative (Pitch)',
+    '@ui_CORelativeModeYaw': 'Relative (Yaw)',
+    '@ui_CORelativeModeRoll': 'Relative (Roll)',
+    '@ui_COAimMode': 'Aim Mode',
+    '@ui_COAimModePitch': 'Aim Mode (Pitch)',
+    '@ui_COAimModeYaw': 'Aim Mode (Yaw)',
+
+    // Mining
+    '@ui_COMiningThrottle': 'Mining Throttle',
+
+    // Aiming / Weapons
+    '@ui_weapon_convergence_distance_rel': 'Weapon Convergence (rel)',
+    '@ui_weapon_convergence_distance_abs': 'Weapon Convergence (abs)',
+};
+
+/**
+ * Get the Star Citizen display label for a node
+ */
+function getDisplayLabel(node)
+{
+    if (!node || !node.label) return 'Unknown';
+
+    // Check if we have a mapped label
+    if (SC_LABEL_MAP[node.label])
+    {
+        return SC_LABEL_MAP[node.label];
+    }
+
+    // Fall back to cleaning up the label
+    if (node.label.startsWith('@ui_'))
+    {
+        return cleanupLabel(node.label);
+    }
+
+    return node.label;
+}
+
+/**
+ * Transform the parsed XML hierarchy to match Star Citizen's display structure.
+ * SC shows a flattened view that skips intermediate container nodes.
+ */
+function transformToSCHierarchy(rawData, deviceType)
+{
+    if (!rawData) return null;
+
+    // Navigate to the relevant content node, skipping wrapper nodes
+    // XML structure: root > master > [mouse_curves|thumbstick_curves|joystick_curves] > inversion > ...
+    let contentNode = rawData;
+
+    // Find the curves node (contains the actual settings)
+    if (contentNode.children)
+    {
+        // Find master
+        const master = contentNode.children.find(c => c.name === 'master');
+        if (master && master.children)
+        {
+            // Find the curves container
+            const curvesNode = master.children.find(c =>
+                c.name === 'mouse_curves' ||
+                c.name === 'thumbstick_curves' ||
+                c.name === 'joystick_curves'
+            );
+            if (curvesNode)
+            {
+                contentNode = curvesNode;
+            }
+        }
+    }
+
+    // For joystick/gamepad, we want to show TWO top-level sections:
+    // 1. Inversion Settings
+    // 2. Sensitivity Curves (same tree but focused on curves)
+    // 
+    // For mouse/keyboard, we show just the Inversion Settings tree
+    // (curves are integrated within each node)
+
+    if (deviceType === 'joystick' || deviceType === 'gamepad')
+    {
+        // Find the inversion node
+        const inversionNode = contentNode.children?.find(c => c.name === 'inversion');
+        if (inversionNode)
+        {
+            // Helper function to mark all descendants with a section type and update paths
+            function markSectionType(node, sectionType, pathPrefix = null)
+            {
+                node.sectionType = sectionType;
+                // Update path if a prefix is provided (for curves section)
+                // Replace '.inversion.' or '.inversion' at end, or 'inversion.' at start, or just 'inversion'
+                if (pathPrefix && node.path)
+                {
+                    // Handle the inversion segment in the path
+                    // Could be: 'inversion', 'inversion.child', 'parent.inversion', 'parent.inversion.child'
+                    node.path = node.path
+                        .replace(/\.inversion\./, `.${pathPrefix}.`)
+                        .replace(/\.inversion$/, `.${pathPrefix}`)
+                        .replace(/^inversion\./, `${pathPrefix}.`)
+                        .replace(/^inversion$/, pathPrefix);
+                }
+                if (node.children)
+                {
+                    node.children.forEach(child => markSectionType(child, sectionType, pathPrefix));
+                }
+                return node;
+            }
+
+            // Deep clone for inversion section
+            const inversionClone = JSON.parse(JSON.stringify(inversionNode));
+            markSectionType(inversionClone, 'inversion');
+            inversionClone.label = '@ui_COInversionSettings';
+            inversionClone.isSection = true;
+
+            // Deep clone for curves section - mark as disabled
+            const curvesClone = JSON.parse(JSON.stringify(inversionNode));
+            markSectionType(curvesClone, 'curves', 'sensitivity_curves');
+            curvesClone.name = 'sensitivity_curves';
+            curvesClone.label = deviceType === 'joystick' ? '@ui_COMasterSensitivityCurvesJoystick' : '@ui_COMasterSensitivityCurvesThumb';
+            curvesClone.path = 'sensitivity_curves';
+            curvesClone.isSection = true;
+            curvesClone.disabled = true; // Mark as disabled - curves don't persist in SC
+            curvesClone.disabledReason = 'Sensitivity curve settings do not persist properly in Star Citizen and have been temporarily disabled.';
+
+            // Mark all children as disabled too
+            function markDisabled(node)
+            {
+                node.disabled = true;
+                node.disabledReason = 'Sensitivity curve settings do not persist properly in Star Citizen and have been temporarily disabled.';
+                if (node.children)
+                {
+                    node.children.forEach(child => markDisabled(child));
+                }
+            }
+            markDisabled(curvesClone);
+
+            // Create the two-section structure
+            return {
+                name: 'root',
+                label: deviceType === 'joystick' ? 'Joystick Controls' : 'Gamepad Controls',
+                path: 'root',
+                deviceType: deviceType,
+                children: [inversionClone, curvesClone],
+                instances: rawData.instances || 1,
+                sensitivityMin: rawData.sensitivityMin,
+                sensitivityMax: rawData.sensitivityMax
+            };
+        }
+    }
+    else
+    {
+        // Keyboard/Mouse: Show inversion settings directly (no curves for mouse)
+        const inversionNode = contentNode.children?.find(c => c.name === 'inversion');
+        if (inversionNode)
+        {
+            // Helper function to mark all descendants with a section type
+            function markSectionType(node, sectionType)
+            {
+                node.sectionType = sectionType;
+                if (node.children)
+                {
+                    node.children.forEach(child => markSectionType(child, sectionType));
+                }
+                return node;
+            }
+
+            const inversionClone = JSON.parse(JSON.stringify(inversionNode));
+            markSectionType(inversionClone, 'inversion');
+            inversionClone.label = '@ui_COInversionSettings';
+            inversionClone.isSection = true;
+
+            return {
+                name: 'root',
+                label: 'Mouse Controls',
+                path: 'root',
+                deviceType: deviceType,
+                children: [inversionClone],
+                instances: rawData.instances || 1,
+                sensitivityMin: rawData.sensitivityMin,
+                sensitivityMax: rawData.sensitivityMax
+            };
+        }
+    }
+
+    // Fallback: return as-is
+    return rawData;
+}
+
 function getDefaultControlsData()
 {
     // Minimal fallback data structure
@@ -231,14 +1112,47 @@ function renderDeviceTabs()
     const tabContainer = document.getElementById('controls-device-tabs');
     if (!tabContainer) return;
 
+    // Get max joysticks and gamepads from window (set by main.js)
+    const maxJs = window.getMaxJoysticks ? window.getMaxJoysticks() : 4;
+    const maxGp = window.getMaxGamepads ? window.getMaxGamepads() : 4;
+
+    // Build devices array dynamically
     const devices = [
-        { id: 'keyboard', icon: '⌨️', label: 'Keyboard' },
-        { id: 'gamepad', icon: '🎮', label: 'Gamepad' },
-        { id: 'joystick', icon: '🕹️', label: 'Joystick' }
+        { id: 'keyboard', icon: '⌨️', label: 'Keyboard' }
     ];
 
+    // Add gamepad tabs based on max gamepads setting
+    for (let i = 1; i <= maxGp; i++)
+    {
+        devices.push({
+            id: `gamepad${i}`,
+            icon: '🎮',
+            label: `Gamepad ${i}`
+        });
+    }
+
+    // Add joystick tabs based on max joysticks setting
+    for (let i = 1; i <= maxJs; i++)
+    {
+        devices.push({
+            id: `joystick${i}`,
+            icon: '🕹️',
+            label: `Joystick ${i}`
+        });
+    }
+
+    // Determine active tab (combine deviceType + instance for joysticks/gamepads)
+    let activeId = currentDeviceType;
+    if (currentDeviceType === 'joystick')
+    {
+        activeId = `joystick${currentJoystickInstance}`;
+    } else if (currentDeviceType === 'gamepad')
+    {
+        activeId = `gamepad${currentGamepadInstance}`;
+    }
+
     tabContainer.innerHTML = devices.map(device => `
-    <button class="controls-device-tab ${device.id === currentDeviceType ? 'active' : ''}" 
+    <button class="controls-device-tab ${device.id === activeId ? 'active' : ''}" 
             data-device="${device.id}">
       <span class="tab-icon">${device.icon}</span>
       <span>${device.label}</span>
@@ -246,23 +1160,39 @@ function renderDeviceTabs()
   `).join('');
 }
 
-function switchDeviceType(deviceType)
+function switchDeviceType(deviceId)
 {
-    currentDeviceType = deviceType;
+    // Parse instance from deviceId for joysticks and gamepads
+    if (deviceId.startsWith('joystick'))
+    {
+        currentDeviceType = 'joystick';
+        currentJoystickInstance = parseInt(deviceId.replace('joystick', '')) || 1;
+    }
+    else if (deviceId.startsWith('gamepad'))
+    {
+        currentDeviceType = 'gamepad';
+        currentGamepadInstance = parseInt(deviceId.replace('gamepad', '')) || 1;
+    }
+    else
+    {
+        currentDeviceType = deviceId;
+    }
+
     selectedNode = null;
 
     // Update tab states
+    let activeId = currentDeviceType;
+    if (currentDeviceType === 'joystick')
+    {
+        activeId = `joystick${currentJoystickInstance}`;
+    } else if (currentDeviceType === 'gamepad')
+    {
+        activeId = `gamepad${currentGamepadInstance}`;
+    }
     document.querySelectorAll('.controls-device-tab').forEach(tab =>
     {
-        tab.classList.toggle('active', tab.dataset.device === deviceType);
+        tab.classList.toggle('active', tab.dataset.device === activeId);
     });
-
-    // Show/hide instance selector for joystick
-    const instanceSelector = document.getElementById('controls-instance-selector');
-    if (instanceSelector)
-    {
-        instanceSelector.style.display = deviceType === 'joystick' ? 'flex' : 'none';
-    }
 
     renderTree();
     clearSettingsPanel();
@@ -308,6 +1238,17 @@ function renderTree()
             toggleTreeExpand(toggle);
         });
     });
+
+    // Initialize tooltips for disabled nodes
+    import('./tooltip.js').then(module =>
+    {
+        const Tooltip = module.Tooltip;
+        treeContent.querySelectorAll('.controls-tree-node.disabled[data-tooltip]').forEach(node =>
+        {
+            const tooltipText = node.getAttribute('data-tooltip');
+            new Tooltip(node, tooltipText);
+        });
+    }).catch(err => console.error('[CONTROLS-EDITOR] Error loading tooltip module:', err));
 }
 
 function renderTreeNode(node, depth)
@@ -316,39 +1257,32 @@ function renderTreeNode(node, depth)
 
     const hasChildren = node.children && node.children.length > 0;
     const isExpanded = depth < 2; // Auto-expand first 2 levels
+    const isSection = node.isSection === true;
+    const isDisabled = node.disabled === true;
 
-    // Determine what settings this node can show
-    const canShowInvert = node.showInvert === true || node.showInvert === 'inherit';
-    const canShowCurve = node.showCurve === true || node.showCurve === 'inherit';
+    // Get display label using our SC label map
+    const displayLabel = getDisplayLabel(node);
 
-    // Get display label (clean up @ui_ prefix for readability)
-    let displayLabel = node.label;
-    if (displayLabel.startsWith('@ui_'))
-    {
-        displayLabel = cleanupLabel(displayLabel);
-    }
+    // Section nodes get special styling
+    const nodeClasses = [
+        'controls-tree-node',
+        hasChildren ? 'has-children' : '',
+        isSection ? 'section-header' : '',
+        isDisabled ? 'disabled' : ''
+    ].filter(Boolean).join(' ');
 
-    // Build settings badges
-    let badges = '';
-    if (canShowInvert)
-    {
-        badges += '<span class="controls-tree-badge has-invert" title="Has inversion setting">↕</span>';
-    }
-    if (canShowCurve)
-    {
-        badges += '<span class="controls-tree-badge has-curve" title="Has curve setting">📈</span>';
-    }
+    // Add tooltip for disabled nodes
+    const tooltipAttr = isDisabled && node.disabledReason ? `data-tooltip="${node.disabledReason}"` : '';
 
     let html = `
-    <div class="controls-tree-item" data-path="${node.path}">
-      <div class="controls-tree-node ${hasChildren ? 'has-children' : ''}" data-path="${node.path}">
+    <div class="controls-tree-item ${isSection ? 'section-item' : ''}" data-path="${node.path}">
+      <div class="${nodeClasses}" data-path="${node.path}" ${tooltipAttr}>
         ${hasChildren ? `
           <span class="controls-tree-expand ${isExpanded ? 'expanded' : ''}">▶</span>
         ` : `
           <span class="controls-tree-expand" style="visibility: hidden;">▶</span>
         `}
-        <span class="controls-tree-label">${displayLabel}</span>
-        <div class="controls-tree-settings">${badges}</div>
+        <span class="controls-tree-label">${isDisabled ? '🚫 ' : ''}${displayLabel}</span>
       </div>
   `;
 
@@ -392,14 +1326,31 @@ function toggleTreeExpand(toggle)
 
 function selectTreeNode(path)
 {
+    // Find the node data first
+    const node = findNodeByPath(controlsData[currentDeviceType], path);
+
+    // Don't select disabled nodes
+    if (node && node.disabled)
+    {
+        console.log('[CONTROLS-EDITOR] Cannot select disabled node:', node.name);
+        return;
+    }
+
     // Update selection UI
     document.querySelectorAll('.controls-tree-node').forEach(node =>
     {
         node.classList.toggle('selected', node.dataset.path === path);
     });
 
-    // Find the node data
-    selectedNode = findNodeByPath(controlsData[currentDeviceType], path);
+    selectedNode = node;
+
+    // Debug logging
+    console.log('[CONTROLS-EDITOR] Selected path:', path);
+    console.log('[CONTROLS-EDITOR] Found node:', selectedNode);
+    if (selectedNode)
+    {
+        console.log('[CONTROLS-EDITOR] Node sectionType:', selectedNode.sectionType);
+    }
 
     // Render settings panel
     renderSettingsPanel(selectedNode);
@@ -409,44 +1360,59 @@ function findNodeByPath(root, path)
 {
     if (!root || !path) return null;
 
-    const parts = path.split('.');
-    let current = root;
+    console.log('[CONTROLS-EDITOR] findNodeByPath - searching for:', path, 'in root:', root.name);
 
-    for (let i = 0; i < parts.length; i++)
+    // Handle the case where path matches root directly
+    if (root.path === path)
     {
-        if (current.name === parts[i])
+        return root;
+    }
+
+    // Recursive search through children
+    function searchChildren(node, targetPath)
+    {
+        if (!node.children) return null;
+
+        for (const child of node.children)
         {
-            if (i === parts.length - 1)
+            if (child.path === targetPath)
             {
-                return current;
+                return child;
             }
-            // Look in children for next part
-            if (current.children)
-            {
-                const next = current.children.find(c => c.name === parts[i + 1]);
-                if (next)
-                {
-                    current = next;
-                    i++; // Skip the next iteration since we found it
-                } else
-                {
-                    return null;
-                }
-            }
-        } else if (current.children)
+            const found = searchChildren(child, targetPath);
+            if (found) return found;
+        }
+        return null;
+    }
+
+    return searchChildren(root, path);
+}
+
+/**
+ * Find a node by its name (the last part of the path)
+ * Used when loading control options from backend where we only have the option name
+ */
+function findNodeByName(root, name)
+{
+    if (!root || !name) return null;
+
+    // Check if this node's name matches
+    if (root.name === name)
+    {
+        return root;
+    }
+
+    // Recursive search through children
+    if (root.children)
+    {
+        for (const child of root.children)
         {
-            const found = current.children.find(c => c.name === parts[i]);
-            if (found)
-            {
-                current = found;
-            } else
-            {
-                return null;
-            }
+            const found = findNodeByName(child, name);
+            if (found) return found;
         }
     }
 
-    return current;
+    return null;
 }
 
 // ============================================================================
@@ -481,11 +1447,7 @@ function updateSettingsHeader(node)
         return;
     }
 
-    let displayLabel = node.label;
-    if (displayLabel.startsWith('@ui_'))
-    {
-        displayLabel = cleanupLabel(displayLabel);
-    }
+    const displayLabel = getDisplayLabel(node);
 
     if (headerTitle) headerTitle.textContent = displayLabel;
     if (headerPath) headerPath.textContent = node.path;
@@ -502,40 +1464,63 @@ function renderSettingsPanel(node)
 
     updateSettingsHeader(node);
 
-    const canShowInvert = node.showInvert === true || (node.showInvert === 'inherit');
-    const canShowCurve = node.showCurve === true || (node.showCurve === 'inherit');
-    const hasExponent = node.exponent !== null || getUserSetting(node.path, 'exponent', null) !== null;
+    // Only show settings for leaf nodes (nodes without children)
+    // Container nodes just organize the hierarchy
+    const isLeafNode = !node.children || node.children.length === 0;
 
-    // Check for curve in both node data and user settings
+    // Simplified logic: section type determines what controls to show
+    // - 'inversion' section: show invert toggles (leaf nodes only)
+    // - 'curves' section: DISABLED - sensitivity curves don't persist in Star Citizen
+    const sectionType = node.sectionType || 'inversion';
+    const isInversionSection = sectionType === 'inversion';
+    const isCurvesSection = sectionType === 'curves';
+
+    // Inversion: only leaf nodes in inversion section
+    // Curves: DISABLED - not persisting properly in Star Citizen
+    const showInvertSection = isLeafNode && isInversionSection;
+    const showCurveSection = false; // Disabled: sensitivity curves don't persist
+
+    console.log('[CONTROLS-EDITOR] renderSettingsPanel - node:', node.name, 'isLeaf:', isLeafNode, 'sectionType:', sectionType);
+
+    // Check for curve in both node data and user settings (with inheritance)
     const nodeCurve = node.curve;
-    const userCurve = getUserSetting(node.path, 'curve', null);
-    const hasCurve = nodeCurve !== null || (userCurve !== null && userCurve.points && userCurve.points.length > 0);
+    const curveInfo = getUserSettingWithInheritance(node.path, 'curve', null);
+    const userCurve = curveInfo.value;
+    const hasCurvePoints = nodeCurve !== null || (userCurve !== null && userCurve.points && userCurve.points.length > 0);
+
+    // Determine curve mode: 'exponent' (simple) or 'curve' (custom points)
+    // Check with inheritance so children inherit parent's mode
+    const curveModeInfo = getUserSettingWithInheritance(node.path, 'curveMode', hasCurvePoints ? 'curve' : 'exponent');
+    const curveMode = curveModeInfo.value;
 
     let html = '';
 
-    // Instance selector for joystick (shown at top of settings)
-    if (currentDeviceType === 'joystick')
+    // Inversion Section (only for leaf nodes)
+    if (showInvertSection)
     {
-        html += `
-      <div class="controls-instance-selector">
-        <label>Joystick Instance:</label>
-        <select id="controls-instance-select">
-          ${[1, 2, 3, 4, 5, 6, 7, 8].map(i => `
-            <option value="${i}" ${i === currentJoystickInstance ? 'selected' : ''}>Joystick ${i}</option>
-          `).join('')}
-        </select>
-      </div>
-    `;
-    }
+        const invertInfo = getUserSettingWithInheritance(node.path, 'invert', node.invert || false);
+        const currentInvert = invertInfo.value;
 
-    // Inversion Section
-    if (canShowInvert)
-    {
-        const currentInvert = getUserSetting(node.path, 'invert', node.invert);
+        // Build inheritance notice for inversion
+        let invertInheritanceNotice = '';
+        if (invertInfo.inherited && invertInfo.inheritedFrom)
+        {
+            invertInheritanceNotice = `
+              <div class="controls-inherited-notice inherited-value">
+                <span class="notice-icon">📥</span>
+                <span class="notice-text">Inherited from <strong>${formatInheritedFromLabel(invertInfo.inheritedFrom)}</strong></span>
+                <button class="btn btn-sm btn-secondary clear-inheritance-btn" data-path="${node.path}" data-setting="invert" title="Set custom value for this option">
+                  Override
+                </button>
+              </div>
+            `;
+        }
+
         html += `
       <div class="controls-setting-section">
         <h3>↕️ Inversion</h3>
-        <div class="controls-invert-toggle">
+        ${invertInheritanceNotice}
+        <div class="controls-invert-toggle ${invertInfo.inherited ? 'inherited' : ''}">
           <div class="toggle-info">
             <span class="toggle-label">Invert Axis</span>
             <span class="toggle-description">Reverse the direction of this input</span>
@@ -556,20 +1541,20 @@ function renderSettingsPanel(node)
     `;
     }
 
-    // Curve Section
-    if (canShowCurve)
+    // Curve Section (only for joystick/gamepad leaf nodes)
+    if (showCurveSection)
     {
         html += `
       <div class="controls-setting-section">
         <h3>📈 Response Curve</h3>
-        ${hasExponent ? renderExponentEditor(node) : ''}
-        ${hasCurve ? renderCurveEditor(node) : renderCurveEditorEmpty(node)}
+        ${renderCurveModeSelector(node, curveMode)}
+        ${curveMode === 'exponent' ? renderExponentEditor(node) : renderCurveEditor(node)}
       </div>
     `;
     }
 
-    // If nothing to show
-    if (!canShowInvert && !canShowCurve)
+    // If nothing to show (container node)
+    if (!showInvertSection && !showCurveSection)
     {
         html += `
       <div class="controls-inherited-notice">
@@ -587,8 +1572,7 @@ function renderSettingsPanel(node)
           <ul style="margin: 0; padding-left: 1.5rem; color: var(--text-secondary);">
             ${node.children.map(child =>
             {
-                let label = child.label.startsWith('@ui_') ? cleanupLabel(child.label) : child.label;
-                return `<li>${label}</li>`;
+                return `<li>${getDisplayLabel(child)}</li>`;
             }).join('')}
           </ul>
         </div>
@@ -596,8 +1580,8 @@ function renderSettingsPanel(node)
         }
     }
 
-    // Action buttons
-    if (canShowInvert || canShowCurve)
+    // Action buttons (only for leaf nodes with settings)
+    if (showInvertSection || showCurveSection)
     {
         html += `
       <div class="controls-action-buttons">
@@ -615,10 +1599,10 @@ function renderSettingsPanel(node)
     // Attach event listeners
     attachSettingsEventListeners(node);
 
-    // Render curve canvas if applicable - always render if canShowCurve is true
+    // Render curve canvas if applicable (only for leaf nodes)
     // (we show a linear line as default if no curve is defined)
     // Use requestAnimationFrame to ensure the canvas container has proper dimensions
-    if (canShowCurve)
+    if (showCurveSection)
     {
         requestAnimationFrame(() =>
         {
@@ -627,30 +1611,137 @@ function renderSettingsPanel(node)
     }
 }
 
-function renderExponentEditor(node)
+/**
+ * Renders the mode selector toggle between Exponent and Custom Curve modes
+ */
+function renderCurveModeSelector(node, currentMode)
 {
-    const currentExponent = getUserSetting(node.path, 'exponent', node.exponent);
-
     return `
-    <div class="controls-exponent-setting">
-      <label>Exponent:</label>
-      <input type="range" id="exponent-slider" min="0.5" max="5" step="0.1" 
-             value="${currentExponent}" data-path="${node.path}" data-setting="exponent">
-      <span class="controls-exponent-value" id="exponent-value">${currentExponent.toFixed(1)}</span>
+    <div class="controls-curve-mode-selector">
+      <div class="mode-info">
+        <span class="mode-label">Curve Type</span>
+        <span class="mode-description">Choose between simple exponent or custom curve points</span>
+      </div>
+      <div class="mode-toggle-group">
+        <button class="mode-toggle-btn ${currentMode === 'exponent' ? 'active' : ''}" 
+                data-mode="exponent" id="mode-exponent-btn">
+          📐 Exponent
+        </button>
+        <button class="mode-toggle-btn ${currentMode === 'curve' ? 'active' : ''}" 
+                data-mode="curve" id="mode-curve-btn">
+          📈 Custom Curve
+        </button>
+      </div>
     </div>
   `;
 }
 
+function renderExponentEditor(node)
+{
+    // Get exponent with inheritance info
+    const exponentInfo = getUserSettingWithInheritance(node.path, 'exponent', node.exponent || 1.0);
+    const currentExponent = exponentInfo.value || 1.0;
+
+    // Build inheritance notice HTML
+    let inheritanceNotice = '';
+    if (exponentInfo.inherited && exponentInfo.inheritedFrom)
+    {
+        inheritanceNotice = `
+          <div class="controls-inherited-notice inherited-value">
+            <span class="notice-icon">📥</span>
+            <span class="notice-text">Inherited from <strong>${formatInheritedFromLabel(exponentInfo.inheritedFrom)}</strong></span>
+            <button class="btn btn-sm btn-secondary clear-inheritance-btn" data-path="${node.path}" data-setting="exponent" title="Set custom value for this option">
+              Override
+            </button>
+          </div>
+        `;
+    }
+
+    return `
+    <div class="controls-exponent-editor">
+      ${inheritanceNotice}
+      <div class="controls-exponent-description">
+        <p>Adjust how the input responds to your controller movement.</p>
+        <ul>
+          <li><strong>1.0</strong> = Linear (direct 1:1 response)</li>
+          <li><strong>&lt; 1.0</strong> = More sensitive at the start, less at the end</li>
+          <li><strong>&gt; 1.0</strong> = Less sensitive at the start, more at the end (precision mode)</li>
+        </ul>
+      </div>
+      <div class="controls-exponent-setting ${exponentInfo.inherited ? 'inherited' : ''}">
+        <label>Exponent:</label>
+        <input type="range" id="exponent-slider" min="0.5" max="3.0" step="0.1" 
+               value="${currentExponent}" data-path="${node.path}" data-setting="exponent">
+        <span class="controls-exponent-value" id="exponent-value">${currentExponent.toFixed(1)}</span>
+      </div>
+      <div class="controls-exponent-presets">
+        <span style="color: var(--text-secondary); font-size: 0.85rem; margin-right: 0.5rem;">Presets:</span>
+        <button class="controls-exponent-preset-btn" data-exponent="1.0">Linear (1.0)</button>
+        <button class="controls-exponent-preset-btn" data-exponent="1.5">Smooth (1.5)</button>
+        <button class="controls-exponent-preset-btn" data-exponent="2.0">Precise (2.0)</button>
+        <button class="controls-exponent-preset-btn" data-exponent="2.5">Very Precise (2.5)</button>
+      </div>
+      <div class="controls-curve-canvas-container">
+        <canvas class="controls-curve-canvas" id="curve-canvas"></canvas>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Format the inherited-from label for display
+ */
+function formatInheritedFromLabel(name)
+{
+    // Try to get a friendly label from our label map
+    const labelKey = `@ui_CO${name}`;
+    if (SC_LABEL_MAP && SC_LABEL_MAP[labelKey])
+    {
+        return SC_LABEL_MAP[labelKey];
+    }
+    // Otherwise clean up the name
+    return cleanupLabel(name);
+}
+
 function renderCurveEditor(node)
 {
-    const curve = getUserSetting(node.path, 'curve', node.curve);
+    // Get curve with inheritance info
+    const curveInfo = getUserSettingWithInheritance(node.path, 'curve', node.curve);
+    let curve = curveInfo.value;
+
+    // Build inheritance notice for curves
+    let inheritanceNotice = '';
+    if (curveInfo.inherited && curveInfo.inheritedFrom)
+    {
+        inheritanceNotice = `
+          <div class="controls-inherited-notice inherited-value">
+            <span class="notice-icon">📥</span>
+            <span class="notice-text">Curve inherited from <strong>${formatInheritedFromLabel(curveInfo.inheritedFrom)}</strong></span>
+            <button class="btn btn-sm btn-secondary clear-inheritance-btn" data-path="${node.path}" data-setting="curve" title="Set custom curve for this option">
+              Override
+            </button>
+          </div>
+        `;
+    }
+
+    // If no curve exists, create a default linear curve with start/end points
+    if (!curve || !curve.points || curve.points.length === 0)
+    {
+        curve = {
+            reset: false,
+            points: [
+                { in: 0, out: 0 },
+                { in: 1, out: 1 }
+            ]
+        };
+    }
 
     if (curve.reset)
     {
         return `
       <div class="controls-inherited-notice">
         <span class="notice-icon">↩️</span>
-        <span class="notice-text">Curve is reset to linear. Points below are inherited from parent.</span>
+        <span class="notice-text">Curve is reset to linear. Click a preset below to define a custom curve.</span>
       </div>
       ${renderCurveEditorEmpty(node)}
     `;
@@ -658,6 +1749,7 @@ function renderCurveEditor(node)
 
     return `
     <div class="controls-curve-editor">
+      ${inheritanceNotice}
       <div class="controls-curve-canvas-container">
         <canvas class="controls-curve-canvas" id="curve-canvas"></canvas>
       </div>
@@ -708,7 +1800,7 @@ function renderCurveEditorEmpty(node)
       
       <div class="controls-inherited-notice" style="margin-top: 1rem;">
         <span class="notice-icon">ℹ️</span>
-        <span class="notice-text">No custom curve defined. Using linear response or inherited curve from parent.</span>
+        <span class="notice-text">No custom curve defined. Click a preset below to get started.</span>
       </div>
       
       <div class="controls-curve-presets">
@@ -831,9 +1923,10 @@ function renderCurveCanvas(node)
     ctx.fillText('Output', 0, 0);
     ctx.restore();
 
-    // Get curve data
+    // Get curve data and mode
+    const curveMode = getUserSetting(node.path, 'curveMode', 'exponent');
     const curve = getUserSetting(node.path, 'curve', node.curve);
-    const exponent = getUserSetting(node.path, 'exponent', node.exponent);
+    const exponent = getUserSetting(node.path, 'exponent', node.exponent) || 1.0;
 
     // Draw linear reference (dashed)
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
@@ -859,16 +1952,18 @@ function renderCurveCanvas(node)
         const inputVal = i / 100;
         let outputVal = inputVal;
 
-        // Apply exponent if present
-        if (exponent !== null)
+        if (curveMode === 'exponent')
         {
+            // In exponent mode, only apply exponent
             outputVal = Math.pow(inputVal, exponent);
         }
-
-        // Apply curve points if present
-        if (curve && curve.points && curve.points.length > 0 && !curve.reset)
+        else
         {
-            outputVal = interpolateCurve(inputVal, curve.points);
+            // In curve mode, apply curve points if present
+            if (curve && curve.points && curve.points.length > 0 && !curve.reset)
+            {
+                outputVal = interpolateCurve(inputVal, curve.points);
+            }
         }
 
         const x = padding + inputVal * graphWidth;
@@ -885,7 +1980,8 @@ function renderCurveCanvas(node)
     ctx.stroke();
 
     // Draw curve points as circles
-    if (curve && curve.points && curve.points.length > 0 && !curve.reset)
+    // Draw curve points as circles (only in curve mode)
+    if (curveMode === 'curve' && curve && curve.points && curve.points.length > 0 && !curve.reset)
     {
         ctx.fillStyle = accentColor;
         curve.points.forEach(point =>
@@ -956,6 +2052,26 @@ function interpolateCurve(input, points)
 
 function attachSettingsEventListeners(node)
 {
+    // Override inherited value buttons
+    const overrideBtns = document.querySelectorAll('.clear-inheritance-btn');
+    overrideBtns.forEach(btn =>
+    {
+        btn.addEventListener('click', (e) =>
+        {
+            const path = e.target.dataset.path;
+            const setting = e.target.dataset.setting;
+
+            // Get the current inherited value and set it as an explicit value for this node
+            const inheritedInfo = getUserSettingWithInheritance(path, setting, null);
+            if (inheritedInfo.value !== null)
+            {
+                setUserSetting(path, setting, inheritedInfo.value);
+                markUnsaved();
+                renderSettingsPanel(node);
+            }
+        });
+    });
+
     // Invert toggle
     const invertToggle = document.getElementById('invert-toggle');
     if (invertToggle)
@@ -964,6 +2080,30 @@ function attachSettingsEventListeners(node)
         {
             setUserSetting(node.path, 'invert', e.target.checked);
             markUnsaved();
+        });
+    }
+
+    // Curve mode toggle buttons
+    const modeExponentBtn = document.getElementById('mode-exponent-btn');
+    const modeCurveBtn = document.getElementById('mode-curve-btn');
+
+    if (modeExponentBtn)
+    {
+        modeExponentBtn.addEventListener('click', () =>
+        {
+            setUserSetting(node.path, 'curveMode', 'exponent');
+            markUnsaved();
+            renderSettingsPanel(node);
+        });
+    }
+
+    if (modeCurveBtn)
+    {
+        modeCurveBtn.addEventListener('click', () =>
+        {
+            setUserSetting(node.path, 'curveMode', 'curve');
+            markUnsaved();
+            renderSettingsPanel(node);
         });
     }
 
@@ -976,22 +2116,30 @@ function attachSettingsEventListeners(node)
         {
             const val = parseFloat(e.target.value);
             exponentValue.textContent = val.toFixed(1);
+            // Ensure curveMode is set to 'exponent' when using the exponent slider
+            setUserSetting(node.path, 'curveMode', 'exponent');
             setUserSetting(node.path, 'exponent', val);
+
             markUnsaved();
             renderCurveCanvas(node);
         });
     }
 
-    // Instance selector
-    const instanceSelect = document.getElementById('controls-instance-select');
-    if (instanceSelect)
+    // Exponent preset buttons
+    const exponentPresetBtns = document.querySelectorAll('.controls-exponent-preset-btn');
+    exponentPresetBtns.forEach(btn =>
     {
-        instanceSelect.addEventListener('change', (e) =>
+        btn.addEventListener('click', () =>
         {
-            currentJoystickInstance = parseInt(e.target.value) || 1;
+            const exponent = parseFloat(btn.dataset.exponent);
+            // Ensure curveMode is set to 'exponent' when using preset buttons
+            setUserSetting(node.path, 'curveMode', 'exponent');
+            setUserSetting(node.path, 'exponent', exponent);
+
+            markUnsaved();
             renderSettingsPanel(node);
         });
-    }
+    });
 
     // Curve point inputs
     const curvePointInputs = document.querySelectorAll('#curve-points-tbody input');
@@ -1030,14 +2178,14 @@ function attachSettingsEventListeners(node)
         });
     }
 
-    // Preset buttons
+    // Curve preset buttons
     const presetBtns = document.querySelectorAll('.controls-curve-preset-btn');
-    console.log('[CONTROLS-EDITOR] Found', presetBtns.length, 'preset buttons');
+    console.log('[CONTROLS-EDITOR] Found', presetBtns.length, 'curve preset buttons');
     presetBtns.forEach(btn =>
     {
         btn.addEventListener('click', () =>
         {
-            console.log('[CONTROLS-EDITOR] Preset button clicked:', btn.dataset.preset);
+            console.log('[CONTROLS-EDITOR] Curve preset button clicked:', btn.dataset.preset);
             applyCurvePreset(node, btn.dataset.preset);
             markUnsaved();
             renderSettingsPanel(node);
@@ -1074,6 +2222,8 @@ function updateCurvePoint(node, event)
         curve.points[index][field] = Math.max(0, Math.min(1, value));
     }
 
+    // Ensure curveMode is set to 'curve' when modifying curve points
+    setUserSetting(node.path, 'curveMode', 'curve');
     setUserSetting(node.path, 'curve', curve);
 }
 
@@ -1083,6 +2233,8 @@ function removeCurvePoint(node, index)
     if (curve && curve.points)
     {
         curve.points.splice(index, 1);
+        // Ensure curveMode is set to 'curve' when modifying curve points
+        setUserSetting(node.path, 'curveMode', 'curve');
         setUserSetting(node.path, 'curve', curve);
     }
 }
@@ -1129,6 +2281,8 @@ function addCurvePoint(node)
     curve.points.push({ in: newIn, out: newIn });
     curve.points.sort((a, b) => a.in - b.in);
 
+    // Ensure curveMode is set to 'curve' when adding curve points
+    setUserSetting(node.path, 'curveMode', 'curve');
     setUserSetting(node.path, 'curve', curve);
 }
 
@@ -1176,7 +2330,11 @@ function applyCurvePreset(node, presetName)
     {
         console.log('[CONTROLS-EDITOR] Applying preset:', presetName, 'to path:', node.path);
         console.log('[CONTROLS-EDITOR] Preset data:', JSON.stringify(preset));
-        setUserSetting(node.path, 'curve', JSON.parse(JSON.stringify(preset)));
+        const curveData = JSON.parse(JSON.stringify(preset));
+        // Set curveMode to 'curve' when applying a curve preset
+        setUserSetting(node.path, 'curveMode', 'curve');
+        setUserSetting(node.path, 'curve', curveData);
+
         console.log('[CONTROLS-EDITOR] User settings after apply:', JSON.stringify(userSettings[currentDeviceType]));
     }
     else
@@ -1208,6 +2366,10 @@ function resetNodeSettings(node)
 // USER SETTINGS MANAGEMENT
 // ============================================================================
 
+/**
+ * Get a user setting for a path, checking direct setting and option name fallback.
+ * Does NOT check parent inheritance - use getUserSettingWithInheritance for that.
+ */
 function getUserSetting(path, settingName, defaultValue)
 {
     let settings;
@@ -1215,18 +2377,81 @@ function getUserSetting(path, settingName, defaultValue)
     if (currentDeviceType === 'joystick')
     {
         settings = userSettings.joystick[currentJoystickInstance] || {};
+    } else if (currentDeviceType === 'gamepad')
+    {
+        settings = userSettings.gamepad[currentGamepadInstance] || {};
     } else
     {
         settings = userSettings[currentDeviceType] || {};
     }
 
+    // First, try the full path
     const pathSettings = settings[path];
     if (pathSettings && pathSettings[settingName] !== undefined)
     {
         return pathSettings[settingName];
     }
 
+    // If not found, try just the option name (last segment of path)
+    // This handles settings imported from actionmaps.xml which use option names only
+    const optionName = path.split('.').pop();
+    if (optionName !== path)
+    {
+        const optionSettings = settings[optionName];
+        if (optionSettings && optionSettings[settingName] !== undefined)
+        {
+            return optionSettings[settingName];
+        }
+    }
+
     return defaultValue;
+}
+
+/**
+ * Get a user setting with inheritance from parent nodes.
+ * Returns an object with { value, inherited, inheritedFrom } to indicate source.
+ * 
+ * @param {string} path - Full path to the node (e.g., "Options.onfoot.Sensitivity.fps_view_pitch")
+ * @param {string} settingName - The setting name (e.g., "exponent", "curveMode")
+ * @param {*} defaultValue - Default value if nothing is set
+ * @returns {{ value: *, inherited: boolean, inheritedFrom: string|null }}
+ */
+function getUserSettingWithInheritance(path, settingName, defaultValue)
+{
+    // First, check if this node has its own setting
+    const directValue = getUserSetting(path, settingName, undefined);
+    if (directValue !== undefined)
+    {
+        return { value: directValue, inherited: false, inheritedFrom: null };
+    }
+
+    // Check parent paths for inherited values
+    const pathParts = path.split('.');
+
+    // Walk up the tree, checking each parent level
+    for (let i = pathParts.length - 1; i >= 1; i--)
+    {
+        const parentPath = pathParts.slice(0, i).join('.');
+        const parentValue = getUserSetting(parentPath, settingName, undefined);
+
+        if (parentValue !== undefined)
+        {
+            // Found an inherited value
+            const parentName = pathParts[i - 1]; // Name of the parent node
+            return { value: parentValue, inherited: true, inheritedFrom: parentName };
+        }
+    }
+
+    // No inherited value found, return default
+    return { value: defaultValue, inherited: false, inheritedFrom: null };
+}
+
+/**
+ * Check if a node has its own explicit setting (not inherited)
+ */
+function hasOwnSetting(path, settingName)
+{
+    return getUserSetting(path, settingName, undefined) !== undefined;
 }
 
 function setUserSetting(path, settingName, value)
@@ -1242,6 +2467,17 @@ function setUserSetting(path, settingName, value)
             userSettings.joystick[currentJoystickInstance][path] = {};
         }
         userSettings.joystick[currentJoystickInstance][path][settingName] = value;
+    } else if (currentDeviceType === 'gamepad')
+    {
+        if (!userSettings.gamepad[currentGamepadInstance])
+        {
+            userSettings.gamepad[currentGamepadInstance] = {};
+        }
+        if (!userSettings.gamepad[currentGamepadInstance][path])
+        {
+            userSettings.gamepad[currentGamepadInstance][path] = {};
+        }
+        userSettings.gamepad[currentGamepadInstance][path][settingName] = value;
     } else
     {
         if (!userSettings[currentDeviceType][path])
@@ -1250,6 +2486,77 @@ function setUserSetting(path, settingName, value)
         }
         userSettings[currentDeviceType][path][settingName] = value;
     }
+
+    // Mark as having unsaved changes (for save indicator)
+    hasUnsavedChanges = true;
+    if (window.markUnsavedChanges)
+    {
+        window.markUnsavedChanges();
+    }
+
+    // Sync to backend (debounced) so settings persist across refresh
+    debouncedSyncToBackend();
+}
+
+/**
+ * Propagate curve settings from a container node to all its children
+ */
+function propagateCurveToChildren(node, curve)
+{
+    if (!node.children || node.children.length === 0) return;
+
+    // Deep clone the curve for each child
+    const curveClone = JSON.parse(JSON.stringify(curve));
+
+    function applyToDescendants(childNode)
+    {
+        // Apply curveMode and curve to this child
+        setUserSetting(childNode.path, 'curveMode', 'curve');
+        setUserSetting(childNode.path, 'curve', JSON.parse(JSON.stringify(curveClone)));
+
+        // Recursively apply to grandchildren
+        if (childNode.children)
+        {
+            childNode.children.forEach(grandchild => applyToDescendants(grandchild));
+        }
+    }
+
+    node.children.forEach(child => applyToDescendants(child));
+
+    console.log('[CONTROLS-EDITOR] Propagated curve to all children of:', node.name);
+}
+
+/**
+ * Propagate exponent settings from a container node to all its children
+ */
+function propagateExponentToChildren(node, exponent)
+{
+    if (!node.children || node.children.length === 0) return;
+
+    function applyToDescendants(childNode)
+    {
+        // Apply curveMode and exponent to this child
+        setUserSetting(childNode.path, 'curveMode', 'exponent');
+        setUserSetting(childNode.path, 'exponent', exponent);
+
+        // Recursively apply to grandchildren
+        if (childNode.children)
+        {
+            childNode.children.forEach(grandchild => applyToDescendants(grandchild));
+        }
+    }
+
+    node.children.forEach(child => applyToDescendants(child));
+
+    console.log('[CONTROLS-EDITOR] Propagated exponent to all children of:', node.name);
+}
+
+/**
+ * Check if a node is a container (has children)
+ */
+function isContainerNode(node)
+{
+    return node.children && node.children.length > 0;
 }
 
 function markUnsaved()
@@ -1268,6 +2575,23 @@ function updateSaveIndicator()
     }
 }
 
+/**
+ * Mark the controls settings as saved (called after successful save)
+ */
+window.markControlsSettingsSaved = function ()
+{
+    hasUnsavedChanges = false;
+    updateSaveIndicator();
+};
+
+/**
+ * Check if there are unsaved control settings
+ */
+window.hasUnsavedControlSettings = function ()
+{
+    return hasUnsavedChanges;
+};
+
 // ============================================================================
 // EXPORT FUNCTIONS
 // ============================================================================
@@ -1281,7 +2605,20 @@ window.getControlSettings = function ()
 };
 
 /**
- * Generate XML options element for saving
+ * Generate XML options elements for saving to the keybindings file.
+ * Returns an array of { deviceType, instance, xml } objects.
+ * 
+ * The XML format for Star Citizen control options:
+ * - Simple invert: <option_name invert="1"/>
+ * - Exponent only: <option_name exponent="1.5"/>
+ * - Curve with points:
+ *   <option_name exponent="1">
+ *     <nonlinearity_curve>
+ *       <point in="0" out="0"/>
+ *       <point in="0.5" out="0.25"/>
+ *       <point in="1" out="1"/>
+ *     </nonlinearity_curve>
+ *   </option_name>
  */
 window.generateControlOptionsXml = function (deviceType, instance = 1)
 {
@@ -1295,34 +2632,428 @@ window.generateControlOptionsXml = function (deviceType, instance = 1)
         settings = userSettings[deviceType] || {};
     }
 
+    console.log(`[CONTROLS-EDITOR] generateControlOptionsXml for ${deviceType} instance ${instance}:`, settings);
+
     if (Object.keys(settings).length === 0)
+    {
+        console.log(`[CONTROLS-EDITOR] No settings for ${deviceType}`);
+        return null;
+    }
+
+    const controlOptions = [];
+
+    for (const [path, pathSettings] of Object.entries(settings))
+    {
+        // Skip internal UI state like 'curveMode' 
+        // We only want actual game settings: invert, exponent, curve
+
+        const optionName = path.split('.').pop(); // Get last part of path
+        const curveMode = pathSettings.curveMode || 'exponent';
+
+        const hasInvert = pathSettings.invert !== undefined;
+        const hasExponent = curveMode === 'exponent' && pathSettings.exponent !== undefined && pathSettings.exponent !== 1.0;
+        const hasCurve = curveMode === 'curve' && pathSettings.curve && pathSettings.curve.points && pathSettings.curve.points.length > 0;
+
+        console.log(`[CONTROLS-EDITOR] Path: ${path}, optionName: ${optionName}, hasInvert: ${hasInvert}, invert value: ${pathSettings.invert}, hasExponent: ${hasExponent}, hasCurve: ${hasCurve}`);
+
+        // Skip if no actual settings to save
+        if (!hasInvert && !hasExponent && !hasCurve)
+        {
+            console.log(`[CONTROLS-EDITOR] Skipping ${path} - no settings to save`);
+            continue;
+        }
+
+        controlOptions.push({
+            name: optionName,
+            invert: hasInvert ? pathSettings.invert : undefined,
+            exponent: hasExponent ? pathSettings.exponent : (hasCurve ? 1 : undefined),
+            curve: hasCurve ? pathSettings.curve : undefined
+        });
+    }
+
+    console.log(`[CONTROLS-EDITOR] Generated ${controlOptions.length} control options for ${deviceType}:`, controlOptions);
+
+    if (controlOptions.length === 0)
     {
         return null;
     }
 
-    let xml = `  <options type="${deviceType}" instance="${instance}">\n`;
+    return controlOptions;
+};
 
-    for (const [path, pathSettings] of Object.entries(settings))
+/**
+ * Generate all control options for all device types.
+ * Returns an object with device options ready to be merged into the keybindings.
+ */
+window.getAllControlOptions = function ()
+{
+    console.log('[CONTROLS-EDITOR] getAllControlOptions called, userSettings:', JSON.stringify(userSettings, null, 2));
+
+    const allOptions = [];
+
+    // Check keyboard settings
+    const keyboardOptions = window.generateControlOptionsXml('keyboard', 1);
+    if (keyboardOptions)
     {
-        const optionName = path.split('.').pop(); // Get last part of path
-
-        let attrs = [];
-        if (pathSettings.invert !== undefined)
-        {
-            attrs.push(`invert="${pathSettings.invert ? '1' : '0'}"`);
-        }
-
-        if (attrs.length > 0)
-        {
-            xml += `    <${optionName} ${attrs.join(' ')}/>\n`;
-        }
-
-        // TODO: Add nonlinearity_curve export if curve is defined
+        allOptions.push({
+            deviceType: 'keyboard',
+            instance: 1,
+            options: keyboardOptions
+        });
     }
 
-    xml += '  </options>\n';
+    // Check gamepad settings
+    const gamepadOptions = window.generateControlOptionsXml('gamepad', 1);
+    if (gamepadOptions)
+    {
+        allOptions.push({
+            deviceType: 'gamepad',
+            instance: 1,
+            options: gamepadOptions
+        });
+    }
 
-    return xml;
+    // Check joystick settings (instances 1-8)
+    for (let i = 1; i <= 8; i++)
+    {
+        const joystickOptions = window.generateControlOptionsXml('joystick', i);
+        if (joystickOptions)
+        {
+            allOptions.push({
+                deviceType: 'joystick',
+                instance: i,
+                options: joystickOptions
+            });
+        }
+    }
+
+    return allOptions;
+};
+
+/**
+ * Load control settings from parsed options data.
+ * Called when loading a keybindings file that contains options.
+ */
+window.loadControlSettings = function (deviceOptions)
+{
+    if (!deviceOptions || !Array.isArray(deviceOptions))
+    {
+        return;
+    }
+
+    // Clear existing settings
+    userSettings = {
+        keyboard: {},
+        gamepad: {},
+        joystick: {}
+    };
+
+    for (const deviceOpt of deviceOptions)
+    {
+        const { device_type, instance, control_options } = deviceOpt;
+
+        if (!control_options || control_options.length === 0)
+        {
+            continue;
+        }
+
+        for (const opt of control_options)
+        {
+            const optionName = opt.name; // The option name (e.g., 'fps_view_pitch')
+            const settings = {};
+
+            // Parse attributes - they come as an array of [key, value] tuples
+            if (opt.attributes && Array.isArray(opt.attributes))
+            {
+                for (const attr of opt.attributes)
+                {
+                    // Handle both [key, value] arrays and {key, value} objects
+                    const key = Array.isArray(attr) ? attr[0] : attr.key;
+                    const value = Array.isArray(attr) ? attr[1] : attr.value;
+
+                    if (key === 'invert')
+                    {
+                        settings.invert = value === '1';
+                    }
+                    else if (key === 'exponent')
+                    {
+                        settings.exponent = parseFloat(value);
+                        // Only set curveMode to exponent if we don't have curve points
+                        if (!opt.curve_points || opt.curve_points.length === 0)
+                        {
+                            settings.curveMode = 'exponent';
+                        }
+                    }
+                }
+            }
+
+            // Parse curve points if present
+            if (opt.curve_points && Array.isArray(opt.curve_points) && opt.curve_points.length > 0)
+            {
+                settings.curveMode = 'curve';
+                settings.curve = {
+                    points: opt.curve_points.map(pt => ({
+                        in: parseFloat(pt.in_val),
+                        out: parseFloat(pt.out_val)
+                    }))
+                };
+            }
+
+            // Find the full tree path for this option
+            // The tree uses paths like "root.master.mouse_curves.inversion.fps.fps_view_pitch"
+            // but the backend only stores the option name like "fps_view_pitch"
+            let fullPath = optionName;
+            const treeData = controlsData && controlsData[device_type];
+            if (treeData)
+            {
+                const node = findNodeByName(treeData, optionName);
+                if (node && node.path)
+                {
+                    fullPath = node.path;
+                }
+            }
+
+            // Store the settings using the full path
+            if (device_type === 'joystick')
+            {
+                const instanceNum = parseInt(instance) || 1;
+                if (!userSettings.joystick[instanceNum])
+                {
+                    userSettings.joystick[instanceNum] = {};
+                }
+                userSettings.joystick[instanceNum][fullPath] = settings;
+            }
+            else
+            {
+                if (!userSettings[device_type])
+                {
+                    userSettings[device_type] = {};
+                }
+                userSettings[device_type][fullPath] = settings;
+            }
+        }
+    }
+
+    console.log('[CONTROLS-EDITOR] Loaded control settings:', userSettings);
+
+    // Re-render the tree to reflect the loaded settings (checkboxes, etc.)
+    renderTree();
+
+    // If there's a selected node, re-render the settings panel too
+    if (selectedNode)
+    {
+        renderSettingsPanel(selectedNode);
+    }
+};
+
+// ============================================================================
+// CONTROLS FILE SAVE/LOAD (New .sccontrols format)
+// ============================================================================
+
+/**
+ * Get the user settings in a format suitable for saving to a .sccontrols file
+ */
+window.getControlsForSaving = function ()
+{
+    // Convert userSettings to the format expected by the backend
+    const devices = {
+        keyboard: null,
+        gamepad: null,
+        joystick: null
+    };
+
+    // Convert keyboard settings
+    if (userSettings.keyboard && Object.keys(userSettings.keyboard).length > 0)
+    {
+        devices.keyboard = convertSettingsForSave(userSettings.keyboard);
+    }
+
+    // Convert gamepad settings
+    if (userSettings.gamepad && Object.keys(userSettings.gamepad).length > 0)
+    {
+        devices.gamepad = {};
+        for (const [instanceNum, instanceSettings] of Object.entries(userSettings.gamepad))
+        {
+            if (instanceSettings && Object.keys(instanceSettings).length > 0)
+            {
+                devices.gamepad[instanceNum] = convertSettingsForSave(instanceSettings);
+            }
+        }
+        if (Object.keys(devices.gamepad).length === 0)
+        {
+            devices.gamepad = null;
+        }
+    }
+
+    // Convert joystick settings
+    if (userSettings.joystick && Object.keys(userSettings.joystick).length > 0)
+    {
+        devices.joystick = {};
+        for (const [instanceNum, instanceSettings] of Object.entries(userSettings.joystick))
+        {
+            if (instanceSettings && Object.keys(instanceSettings).length > 0)
+            {
+                devices.joystick[instanceNum] = convertSettingsForSave(instanceSettings);
+            }
+        }
+        if (Object.keys(devices.joystick).length === 0)
+        {
+            devices.joystick = null;
+        }
+    }
+
+    return devices;
+};
+
+/**
+ * Convert internal settings format to save format
+ * Path-based keys are converted to option names only
+ * NOTE: Only invert settings are saved - curve/exponent are disabled
+ */
+function convertSettingsForSave(settings)
+{
+    const result = {};
+    for (const [path, pathSettings] of Object.entries(settings))
+    {
+        // Extract the option name from the path (last segment)
+        const optionName = path.split('.').pop();
+
+        // Only include invert settings - curves/exponent don't persist in Star Citizen
+        const saveSettings = {};
+
+        if (pathSettings.invert !== undefined)
+        {
+            saveSettings.invert = pathSettings.invert;
+        }
+
+        // NOTE: Curve mode, exponent, and curve data are intentionally NOT saved
+        // These settings don't persist properly in Star Citizen
+        {
+            result[optionName] = saveSettings;
+        }
+    }
+    return result;
+}
+
+/**
+ * Load settings from a .sccontrols file into the controls editor
+ */
+window.loadControlsFromFile = function (loadedData)
+{
+    console.log('[CONTROLS-EDITOR] Loading controls from file:', loadedData);
+
+    // Clear existing settings
+    userSettings = {
+        keyboard: {},
+        gamepad: {},
+        joystick: {}
+    };
+
+    // Load keyboard settings
+    if (loadedData.devices && loadedData.devices.keyboard)
+    {
+        userSettings.keyboard = convertLoadedSettings(loadedData.devices.keyboard);
+    }
+
+    // Load gamepad settings
+    if (loadedData.devices && loadedData.devices.gamepad)
+    {
+        for (const [instanceNum, instanceSettings] of Object.entries(loadedData.devices.gamepad))
+        {
+            userSettings.gamepad[instanceNum] = convertLoadedSettings(instanceSettings);
+        }
+    }
+
+    // Load joystick settings
+    if (loadedData.devices && loadedData.devices.joystick)
+    {
+        for (const [instanceNum, instanceSettings] of Object.entries(loadedData.devices.joystick))
+        {
+            userSettings.joystick[instanceNum] = convertLoadedSettings(instanceSettings);
+        }
+    }
+
+    console.log('[CONTROLS-EDITOR] Loaded user settings:', userSettings);
+
+    // Mark as having unsaved changes (since we loaded from external file)
+    hasUnsavedChanges = false;
+    updateSaveIndicator();
+
+    // Re-render the tree and settings
+    renderTree();
+    if (selectedNode)
+    {
+        renderSettingsPanel(selectedNode);
+    }
+};
+
+/**
+ * Convert loaded settings format to internal format
+ * Need to map option names back to full paths
+ */
+function convertLoadedSettings(loadedSettings)
+{
+    const result = {};
+
+    for (const [optionName, settings] of Object.entries(loadedSettings))
+    {
+        // For now, use the option name as the path
+        // The tree will match by option name when rendering
+        // TODO: Could map to full paths using controlsData if needed
+
+        const pathSettings = {};
+
+        if (settings.invert !== undefined)
+        {
+            pathSettings.invert = settings.invert;
+        }
+        if (settings.curveMode !== undefined)
+        {
+            pathSettings.curveMode = settings.curveMode;
+        }
+        if (settings.exponent !== undefined)
+        {
+            pathSettings.exponent = settings.exponent;
+        }
+        if (settings.curve !== undefined)
+        {
+            pathSettings.curve = settings.curve;
+        }
+
+        if (Object.keys(pathSettings).length > 0)
+        {
+            result[optionName] = pathSettings;
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Check if there are any control settings to save
+ */
+window.hasControlSettings = function ()
+{
+    const hasKeyboard = userSettings.keyboard && Object.keys(userSettings.keyboard).length > 0;
+    const hasGamepad = userSettings.gamepad && Object.keys(userSettings.gamepad).length > 0;
+    const hasJoystick = userSettings.joystick && Object.keys(userSettings.joystick).length > 0;
+    return hasKeyboard || hasGamepad || hasJoystick;
+};
+
+/**
+ * Clear all control settings
+ */
+window.clearControlSettings = function ()
+{
+    userSettings = {
+        keyboard: {},
+        gamepad: {},
+        joystick: {}
+    };
+    hasUnsavedChanges = false;
+    updateSaveIndicator();
+    renderTree();
+    clearSettingsPanel();
 };
 
 // Make initialization globally available

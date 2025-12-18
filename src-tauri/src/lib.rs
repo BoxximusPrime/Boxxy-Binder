@@ -3,6 +3,7 @@ use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 
+mod controls;
 mod directinput;
 mod hid_reader;
 mod keybindings;
@@ -371,6 +372,101 @@ fn reset_binding(
     }
 }
 
+/// Swap device prefixes (e.g., js1 <-> js2) on all bindings.
+/// Returns the number of bindings that were swapped.
+#[tauri::command]
+fn swap_device_prefixes(
+    first_prefix: String,
+    second_prefix: String,
+    state: tauri::State<Mutex<AppState>>,
+) -> Result<u32, String> {
+    let mut app_state = state.lock().unwrap();
+
+    if let Some(ref mut bindings) = app_state.current_bindings {
+        let mut swap_count: u32 = 0;
+        let temp_placeholder = "TEMP_SWAP_PREFIX";
+
+        // Build prefix patterns with underscore (e.g., "js1_")
+        let first_with_underscore = format!("{}_", first_prefix.to_lowercase());
+        let second_with_underscore = format!("{}_", second_prefix.to_lowercase());
+        let temp_with_underscore = format!("{}_", temp_placeholder);
+
+        // First pass: swap first_prefix -> temp, second_prefix -> first_prefix
+        for action_map in bindings.action_maps.iter_mut() {
+            for action in action_map.actions.iter_mut() {
+                for rebind in action.rebinds.iter_mut() {
+                    let input_lower = rebind.input.to_lowercase();
+                    if input_lower.starts_with(&first_with_underscore) {
+                        // Replace first_prefix with temp placeholder
+                        rebind.input = format!(
+                            "{}{}",
+                            temp_with_underscore,
+                            &rebind.input[first_with_underscore.len()..]
+                        );
+                        swap_count += 1;
+                    } else if input_lower.starts_with(&second_with_underscore) {
+                        // Replace second_prefix with first_prefix
+                        rebind.input = format!(
+                            "{}{}",
+                            first_with_underscore,
+                            &rebind.input[second_with_underscore.len()..]
+                        );
+                        swap_count += 1;
+                    }
+                }
+            }
+        }
+
+        // Second pass: replace temp placeholder with second_prefix
+        for action_map in bindings.action_maps.iter_mut() {
+            for action in action_map.actions.iter_mut() {
+                for rebind in action.rebinds.iter_mut() {
+                    if rebind.input.starts_with(&temp_with_underscore) {
+                        rebind.input = format!(
+                            "{}{}",
+                            second_with_underscore,
+                            &rebind.input[temp_with_underscore.len()..]
+                        );
+                    }
+                }
+            }
+        }
+
+        // Also swap joystick device entries if both are joystick prefixes
+        let first_js_match = first_prefix
+            .to_lowercase()
+            .strip_prefix("js")
+            .and_then(|s| s.parse::<usize>().ok());
+        let second_js_match = second_prefix
+            .to_lowercase()
+            .strip_prefix("js")
+            .and_then(|s| s.parse::<usize>().ok());
+
+        if let (Some(first_idx), Some(second_idx)) = (first_js_match, second_js_match) {
+            let first_idx = first_idx.saturating_sub(1); // Convert 1-based to 0-based
+            let second_idx = second_idx.saturating_sub(1);
+
+            if first_idx < bindings.devices.joysticks.len()
+                && second_idx < bindings.devices.joysticks.len()
+            {
+                bindings.devices.joysticks.swap(first_idx, second_idx);
+                info!(
+                    "Swapped joystick device entries at indices {} and {}",
+                    first_idx, second_idx
+                );
+            }
+        }
+
+        info!(
+            "Swapped {} bindings between {} and {}",
+            swap_count, first_prefix, second_prefix
+        );
+        Ok(swap_count)
+    } else {
+        Err("No bindings loaded".to_string())
+    }
+}
+
 #[tauri::command]
 fn get_current_bindings(
     state: tauri::State<Mutex<AppState>>,
@@ -463,6 +559,27 @@ fn export_keybindings(
 
     // Drop the mutable borrow before creating immutable borrow
     if let Some(ref bindings) = app_state.current_bindings {
+        // Debug: log device_options state before export
+        info!(
+            "Exporting with {} device_options:",
+            bindings.devices.device_options.len()
+        );
+        for opt in &bindings.devices.device_options {
+            info!(
+                "  - {} instance {} with {} control_options",
+                opt.device_type,
+                opt.instance,
+                opt.control_options.len()
+            );
+            for ctrl in &opt.control_options {
+                info!(
+                    "      {} with {} attributes",
+                    ctrl.name,
+                    ctrl.attributes.len()
+                );
+            }
+        }
+
         // Get AllBinds for category mapping
         let all_binds = app_state.all_binds.as_ref();
 
@@ -873,6 +990,189 @@ fn clear_custom_bindings(state: tauri::State<Mutex<AppState>>) -> Result<(), Str
     Ok(())
 }
 
+/// Struct for control option from the frontend
+#[derive(serde::Deserialize)]
+struct ControlOptionInput {
+    name: String,
+    #[serde(default)]
+    invert: Option<bool>,
+    #[serde(default)]
+    exponent: Option<f64>,
+    #[serde(default)]
+    curve: Option<CurveInput>,
+}
+
+#[derive(serde::Deserialize)]
+struct CurveInput {
+    #[serde(default)]
+    points: Vec<CurvePoint>,
+}
+
+#[derive(serde::Deserialize)]
+struct CurvePoint {
+    #[serde(rename = "in")]
+    input: f64,
+    #[serde(rename = "out")]
+    output: f64,
+}
+
+/// Struct for device control options from the frontend
+#[derive(serde::Deserialize)]
+struct DeviceControlOptionsInput {
+    #[serde(rename = "deviceType")]
+    device_type: String,
+    instance: i32,
+    options: Vec<ControlOptionInput>,
+}
+
+#[tauri::command]
+fn update_control_options(
+    control_options: Vec<DeviceControlOptionsInput>,
+    state: tauri::State<Mutex<AppState>>,
+) -> Result<(), String> {
+    let mut app_state = state.lock().unwrap();
+
+    info!(
+        "update_control_options called with {} device(s)",
+        control_options.len()
+    );
+
+    // Debug: log what we received
+    for dev in &control_options {
+        info!(
+            "  Device: {} instance {} with {} options",
+            dev.device_type,
+            dev.instance,
+            dev.options.len()
+        );
+        for opt in &dev.options {
+            info!(
+                "    Option: {} invert={:?} exponent={:?}",
+                opt.name, opt.invert, opt.exponent
+            );
+        }
+    }
+
+    // Initialize current_bindings if it doesn't exist
+    if app_state.current_bindings.is_none() {
+        info!("current_bindings is None, creating new structure");
+        app_state.current_bindings = Some(ActionMaps {
+            profile_name: "User Customizations".to_string(),
+            action_maps: Vec::new(),
+            categories: Vec::new(),
+            devices: keybindings::DeviceInfo {
+                keyboards: Vec::new(),
+                mice: Vec::new(),
+                joysticks: Vec::new(),
+                device_options: Vec::new(),
+            },
+        });
+    }
+
+    if let Some(ref mut bindings) = app_state.current_bindings {
+        // Build a map of existing device options to preserve Product strings
+        let mut existing_products: std::collections::HashMap<(String, String), String> =
+            std::collections::HashMap::new();
+        for opt in &bindings.devices.device_options {
+            existing_products.insert(
+                (opt.device_type.clone(), opt.instance.clone()),
+                opt.product.clone(),
+            );
+        }
+
+        // Clear existing device_options for the device types we're updating
+        let updated_device_types: std::collections::HashSet<(String, i32)> = control_options
+            .iter()
+            .map(|d| (d.device_type.clone(), d.instance))
+            .collect();
+
+        bindings.devices.device_options.retain(|opt| {
+            let instance: i32 = opt.instance.parse().unwrap_or(1);
+            !updated_device_types.contains(&(opt.device_type.clone(), instance))
+        });
+
+        // Add new control options
+        for device_opts in control_options {
+            let mut control_opts_vec = Vec::new();
+
+            for opt in device_opts.options {
+                let mut attributes = Vec::new();
+                let mut curve_points = Vec::new();
+
+                // Add invert attribute
+                if let Some(invert) = opt.invert {
+                    attributes.push((
+                        "invert".to_string(),
+                        if invert { "1" } else { "0" }.to_string(),
+                    ));
+                }
+
+                // Add exponent attribute
+                if let Some(exp) = opt.exponent {
+                    attributes.push(("exponent".to_string(), format!("{}", exp)));
+                }
+
+                // Handle curves with nested points
+                if let Some(curve) = opt.curve {
+                    for point in curve.points {
+                        curve_points.push(keybindings::CurvePointData {
+                            in_val: format!("{}", point.input),
+                            out_val: format!("{}", point.output),
+                        });
+                    }
+                }
+
+                control_opts_vec.push(keybindings::ControlOption {
+                    name: opt.name,
+                    attributes,
+                    curve_points,
+                });
+            }
+
+            if !control_opts_vec.is_empty() {
+                let instance_str = device_opts.instance.to_string();
+                // Look up the preserved Product string, or use default for standard devices
+                let product = existing_products
+                    .get(&(device_opts.device_type.clone(), instance_str.clone()))
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        // Provide default Product strings for standard device types
+                        match device_opts.device_type.as_str() {
+                            "keyboard" => {
+                                "Keyboard  {6F1D2B61-D5A0-11CF-BFC7-444553540000}".to_string()
+                            }
+                            "mouse" => "Mouse  {6F1D2B61-D5A0-11CF-BFC7-444553540000}".to_string(),
+                            "gamepad" => "Controller (Gamepad)".to_string(),
+                            _ => String::new(),
+                        }
+                    });
+
+                info!(
+                    "Adding device options for {} instance {} with product '{}' and {} control options",
+                    device_opts.device_type, instance_str, product, control_opts_vec.len()
+                );
+
+                bindings
+                    .devices
+                    .device_options
+                    .push(keybindings::DeviceOptions {
+                        device_type: device_opts.device_type,
+                        instance: instance_str,
+                        product,
+                        control_options: control_opts_vec,
+                    });
+            }
+        }
+
+        info!(
+            "Updated device options. Total: {}",
+            bindings.devices.device_options.len()
+        );
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn scan_sc_installations(base_path: String) -> Result<Vec<ScInstallation>, String> {
     use std::path::Path;
@@ -1071,7 +1371,9 @@ fn get_log_file_path(app_handle: tauri::AppHandle) -> Result<String, String> {
         .app_log_dir()
         .map_err(|e| format!("Failed to get log directory: {}", e))?;
 
-    let log_file = log_dir.join("sc-joy-mapper.log");
+    // Use date-based log file name
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let log_file = log_dir.join(format!("boxxy-binder-{}.log", today));
     Ok(log_file.to_string_lossy().to_string())
 }
 
@@ -1118,7 +1420,12 @@ fn setup_logging(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error
     let log_dir = app_handle.path().app_log_dir()?;
     std::fs::create_dir_all(&log_dir)?;
 
-    let log_file = log_dir.join("sc-joy-mapper.log");
+    // Use date-based log file name
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let log_file = log_dir.join(format!("boxxy-binder-{}.log", today));
+
+    // Clean up old log files (keep only the last 3 days)
+    cleanup_old_logs(&log_dir, 3);
 
     // Set up file logging with env_logger
     let target = Box::new(
@@ -1148,6 +1455,36 @@ fn setup_logging(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
+/// Clean up old log files, keeping only the specified number of most recent files
+fn cleanup_old_logs(log_dir: &std::path::Path, keep_count: usize) {
+    use std::fs;
+
+    let entries = match fs::read_dir(log_dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+
+    // Collect all log files matching our pattern
+    let mut log_files: Vec<_> = entries
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            name_str.starts_with("boxxy-binder-") && name_str.ends_with(".log")
+        })
+        .collect();
+
+    // Sort by filename (which contains the date, so alphabetical order = chronological order)
+    log_files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+
+    // Remove files beyond the keep count
+    for file in log_files.iter().skip(keep_count) {
+        if let Err(e) = fs::remove_file(file.path()) {
+            eprintln!("Failed to remove old log file {:?}: {}", file.path(), e);
+        }
+    }
+}
+
 // Struct for unbind profile generation result
 #[derive(serde::Serialize)]
 struct UnbindProfileResult {
@@ -1169,8 +1506,8 @@ fn generate_unbind_profile(
     use std::fs;
 
     info!(
-        "Generating unbind profile for devices: keyboard={}, mouse={}, gamepad={}, js1={}, js2={}",
-        devices.keyboard, devices.mouse, devices.gamepad, devices.joystick1, devices.joystick2
+        "Generating unbind profile for devices: keyboard={}, mouse={}, gamepad={}, joysticks={:?}",
+        devices.keyboard, devices.mouse, devices.gamepad, devices.joysticks
     );
     info!("Using base path: {}", base_path);
 
@@ -1305,8 +1642,8 @@ fn generate_restore_defaults_profile(
     use std::fs;
 
     info!(
-        "Generating restore defaults profile for devices: keyboard={}, mouse={}, gamepad={}, js1={}, js2={}",
-        devices.keyboard, devices.mouse, devices.gamepad, devices.joystick1, devices.joystick2
+        "Generating restore defaults profile for devices: keyboard={}, mouse={}, gamepad={}, joysticks={:?}",
+        devices.keyboard, devices.mouse, devices.gamepad, devices.joysticks
     );
     info!("Using base path: {}", base_path);
 
@@ -1824,6 +2161,317 @@ fn delete_character_from_installation(
     Ok(())
 }
 
+// ===== Controls File Commands =====
+
+/// Save control settings to a .sccontrols file
+#[tauri::command]
+fn save_controls_file(
+    file_path: String,
+    profile_name: String,
+    settings: serde_json::Value,
+) -> Result<(), String> {
+    info!("Saving controls file to: {}", file_path);
+
+    // Parse the settings from frontend format
+    let devices: controls::DeviceSettingsInput =
+        serde_json::from_value(settings).map_err(|e| format!("Failed to parse settings: {}", e))?;
+
+    let input = controls::SaveControlsInput {
+        profile_name,
+        devices,
+    };
+
+    // Convert to our file format
+    let controls_file: controls::ControlsFile = input.into();
+
+    // Serialize to JSON
+    let json = controls_file.to_json()?;
+
+    // Write to file
+    std::fs::write(&file_path, json)
+        .map_err(|e| format!("Failed to write controls file: {}", e))?;
+
+    info!("Controls file saved successfully");
+    Ok(())
+}
+
+/// Load control settings from a .sccontrols file
+#[tauri::command]
+fn load_controls_file(file_path: String) -> Result<controls::LoadControlsOutput, String> {
+    info!("Loading controls file from: {}", file_path);
+
+    // Read the file
+    let json = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Failed to read controls file: {}", e))?;
+
+    // Parse the JSON
+    let controls_file = controls::ControlsFile::from_json(&json)?;
+
+    info!(
+        "Loaded controls file: {} (version {})",
+        controls_file.profile_name, controls_file.version
+    );
+
+    // Convert to output format for frontend
+    Ok(controls_file.into())
+}
+
+/// Read control options from actionmaps.xml for importing
+#[tauri::command]
+fn import_controls_from_actionmaps(
+    actionmaps_path: String,
+) -> Result<controls::LoadControlsOutput, String> {
+    info!(
+        "Importing controls from actionmaps.xml: {}",
+        actionmaps_path
+    );
+
+    // Read the actionmaps.xml file
+    let xml = std::fs::read_to_string(&actionmaps_path)
+        .map_err(|e| format!("Failed to read actionmaps.xml: {}", e))?;
+
+    // Parse the options elements
+    let device_options = controls::parse_actionmaps_options(&xml)?;
+
+    info!(
+        "Found {} device options in actionmaps.xml",
+        device_options.len()
+    );
+
+    // Convert to our internal format
+    let mut controls_file = controls::ControlsFile::new("Imported from Star Citizen".to_string());
+
+    for device in device_options {
+        let options: std::collections::HashMap<String, controls::ControlOptionSettings> = device
+            .options
+            .iter()
+            .map(|opt| {
+                let mut invert = None;
+                let mut exponent = None;
+
+                for (key, value) in &opt.attributes {
+                    match key.as_str() {
+                        "invert" => invert = Some(value == "1"),
+                        "exponent" => exponent = value.parse().ok(),
+                        _ => {}
+                    }
+                }
+
+                let curve = if opt.curve_points.is_empty() {
+                    None
+                } else {
+                    Some(controls::CurveData {
+                        points: opt
+                            .curve_points
+                            .iter()
+                            .map(|p| controls::CurvePoint {
+                                input: p.in_val.parse().unwrap_or(0.0),
+                                output: p.out_val.parse().unwrap_or(0.0),
+                            })
+                            .collect(),
+                    })
+                };
+
+                let curve_mode = if curve.is_some() {
+                    Some("curve".to_string())
+                } else if exponent.is_some() {
+                    Some("exponent".to_string())
+                } else {
+                    None
+                };
+
+                (
+                    opt.name.clone(),
+                    controls::ControlOptionSettings {
+                        invert,
+                        curve_mode,
+                        exponent,
+                        curve,
+                    },
+                )
+            })
+            .collect();
+
+        if !options.is_empty() {
+            let instance_settings = controls::DeviceInstanceSettings {
+                product: Some(device.product.clone()),
+                options,
+            };
+
+            match device.device_type.as_str() {
+                "keyboard" => controls_file.devices.keyboard = Some(instance_settings),
+                "gamepad" => controls_file.devices.gamepad = Some(instance_settings),
+                "joystick" => {
+                    let joysticks = controls_file
+                        .devices
+                        .joystick
+                        .get_or_insert(std::collections::HashMap::new());
+                    joysticks.insert(device.instance.clone(), instance_settings);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(controls_file.into())
+}
+
+/// Apply control settings to actionmaps.xml
+#[tauri::command]
+fn apply_controls_to_actionmaps(
+    actionmaps_path: String,
+    settings: serde_json::Value,
+    profile_name: String,
+) -> Result<controls::ApplyControlsResult, String> {
+    info!("Applying controls to actionmaps.xml: {}", actionmaps_path);
+
+    // Parse the settings
+    let devices: controls::DeviceSettingsInput =
+        serde_json::from_value(settings).map_err(|e| format!("Failed to parse settings: {}", e))?;
+
+    let input = controls::SaveControlsInput {
+        profile_name: profile_name.clone(),
+        devices,
+    };
+
+    let controls_file: controls::ControlsFile = input.into();
+
+    // Read the existing actionmaps.xml
+    let xml = std::fs::read_to_string(&actionmaps_path)
+        .map_err(|e| format!("Failed to read actionmaps.xml: {}", e))?;
+
+    // Create a backup
+    let backup_path = format!(
+        "{}.backup.{}",
+        actionmaps_path,
+        chrono::Local::now().format("%Y%m%d_%H%M%S")
+    );
+    std::fs::copy(&actionmaps_path, &backup_path)
+        .map_err(|e| format!("Failed to create backup: {}", e))?;
+
+    info!("Created backup at: {}", backup_path);
+
+    // Parse existing options
+    let existing_devices = controls::parse_actionmaps_options(&xml)?;
+
+    // Convert our settings to actionmaps format
+    let new_devices = controls::controls_to_actionmaps(&controls_file);
+
+    // Merge new settings with existing ones
+    // For each device type/instance, replace with new settings if we have them
+    let mut merged_devices = existing_devices.clone();
+
+    for new_device in new_devices {
+        // Find and replace existing device options, or add new one
+        if let Some(existing) = merged_devices
+            .iter_mut()
+            .find(|d| d.device_type == new_device.device_type && d.instance == new_device.instance)
+        {
+            // Merge options: update existing options, add new ones
+            for new_opt in &new_device.options {
+                if let Some(existing_opt) =
+                    existing.options.iter_mut().find(|o| o.name == new_opt.name)
+                {
+                    *existing_opt = new_opt.clone();
+                } else {
+                    existing.options.push(new_opt.clone());
+                }
+            }
+        } else {
+            merged_devices.push(new_device);
+        }
+    }
+
+    // Now we need to reconstruct the XML with updated options
+    // This is a bit complex because we need to preserve the overall structure
+
+    // Find the positions of <options> elements and </ActionProfiles>
+    // We'll replace the options section while preserving everything else
+
+    // Simple approach: find where options start and end, replace that section
+    let options_start = xml.find("<options");
+    let modifiers_pos = xml.find("<modifiers");
+
+    if options_start.is_none() || modifiers_pos.is_none() {
+        return Err("Could not find options section in actionmaps.xml".to_string());
+    }
+
+    let options_start = options_start.unwrap();
+    let modifiers_pos = modifiers_pos.unwrap();
+
+    // Build the new options section
+    let mut new_options_section = String::new();
+    for device in &merged_devices {
+        new_options_section.push_str(&controls::generate_options_xml(device));
+    }
+
+    // Reconstruct the XML
+    let new_xml = format!(
+        "{}{}  {}",
+        &xml[..options_start],
+        new_options_section,
+        &xml[modifiers_pos..]
+    );
+
+    // Write the updated XML
+    std::fs::write(&actionmaps_path, new_xml)
+        .map_err(|e| format!("Failed to write actionmaps.xml: {}", e))?;
+
+    info!("Successfully applied controls to actionmaps.xml");
+
+    Ok(controls::ApplyControlsResult {
+        success: true,
+        backup_path: Some(backup_path),
+        message:
+            "Controls applied successfully. Please restart Star Citizen for changes to take effect."
+                .to_string(),
+    })
+}
+
+/// Find the default actionmaps.xml path for a given SC installation
+#[tauri::command]
+fn find_actionmaps_path(base_path: String) -> Result<Option<String>, String> {
+    use std::path::Path;
+
+    let base = Path::new(&base_path);
+
+    // First, check if the base_path itself is an installation folder
+    // (e.g., D:\Games\StarCitizen\LIVE)
+    let direct_actionmaps = base
+        .join("user")
+        .join("client")
+        .join("0")
+        .join("Profiles")
+        .join("default")
+        .join("actionmaps.xml");
+
+    if direct_actionmaps.exists() {
+        return Ok(Some(direct_actionmaps.to_string_lossy().to_string()));
+    }
+
+    // Otherwise, check if it's a parent folder containing LIVE/PTU/etc.
+    let sc_folders = ["LIVE", "PTU", "EPTU", "TECH-PREVIEW"];
+
+    for folder in &sc_folders {
+        let actionmaps_path = base
+            .join(folder)
+            .join("user")
+            .join("client")
+            .join("0")
+            .join("Profiles")
+            .join("default")
+            .join("actionmaps.xml");
+
+        if actionmaps_path.exists() {
+            return Ok(Some(actionmaps_path.to_string_lossy().to_string()));
+        }
+    }
+
+    Ok(None)
+}
+
+// ===== End Controls File Commands =====
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1841,6 +2489,7 @@ pub fn run() {
             load_keybindings,
             update_binding,
             reset_binding,
+            swap_device_prefixes,
             get_current_bindings,
             export_keybindings,
             save_template,
@@ -1853,6 +2502,7 @@ pub fn run() {
             find_conflicting_bindings,
             clear_specific_binding,
             clear_custom_bindings,
+            update_control_options,
             scan_sc_installations,
             get_current_file_name,
             save_bindings_to_install,
@@ -1879,7 +2529,13 @@ pub fn run() {
             get_hid_axis_names,
             get_axis_names_for_device,
             get_directinput_to_hid_mapping,
-            get_hid_device_path
+            get_hid_device_path,
+            // Controls file commands
+            save_controls_file,
+            load_controls_file,
+            import_controls_from_actionmaps,
+            apply_controls_to_actionmaps,
+            find_actionmaps_path
         ])
         .setup(|app| {
             // Set up logging
