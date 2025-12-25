@@ -77,7 +77,7 @@ Star Citizen Joystick Mapper simplifies the complex task of configuring control 
 - **Batch Updates**: The auto-save system means changes sync instantly to your game, including multiple installs
 
 ## Discord
-Feel free to join us on Discord! https://discord.gg/73uBrHtX
+Feel free to join us on Discord! https://discord.gg/cjEtkeBG
 
 ## AI Disclaimer
 - This utility was created with vibes and some old fashioned analog brain.
