@@ -1,29 +1,25 @@
-# Star Citizen Binding Utility
-
-<img width="1502" height="1156" alt="boxxy-binder_uK1072xT1b" src="https://github.com/user-attachments/assets/d93c0709-602d-42c0-8a11-716c1efc043c" />
-<img width="1502" height="1032" alt="boxxy-binder_vncPl1X5MI" src="https://github.com/user-attachments/assets/9f30bd34-36b4-4a0c-b67f-94a0a998ae49" />
+# Boxxy Binder
 
 A desktop application for managing joystick, keyboard, and mouse key bindings for Star Citizen outside of the game. Built with Tauri 2.0 and Rust, this tool provides a powerful interface to organize, customize, and debug your control scheme.
-
-## Overview
-
-Star Citizen Joystick Mapper simplifies the complex task of configuring control inputs. Whether you're mapping a single joystick or dual-stick setup, this application provides visual feedback, comprehensive organization, and direct integration with your Star Citizen installation.
 
 ## Core Features
 
 ### Binding Management
+<img width="1602" height="1032" alt="image" src="https://github.com/user-attachments/assets/979b32ce-3954-4a89-b179-ac8583888389" />
 - **Keyboard/Mouse/Joystick Binding Page**: Comprehensive UI for viewing and modifying all key bindings
-- **Sorted Categories**: Automatically organized by major action categories (spaceships, fps, vehicles, etc.) for easy navigation
+- **Sorted Categories**: Organized by major action categories (spaceships, fps, vehicles, etc.) for easy navigation
 - **Advanced Filtering**: Quickly find specific actions or bindings
-- **Multi-Joystick Support**: Configure up to two joysticks per profile with dedicated left and right view modes
+- **Multi-Device Support**: Configure all kinds of devices, like joysticks, button boxes, etc
 
-### Visual Joystick Viewer
-- **Interactive Visualization**: See your joystick layout and all assigned actions at a glance
-- **Left/Right View**: Toggle between individual stick views or compare configurations side-by-side
+### Visual Device Viewer
+<img width="1602" height="1032" alt="image" src="https://github.com/user-attachments/assets/26ea855b-14d4-4485-84b4-0e6bd977ea3c" />
+- **Interactive Visualization**: See your device layout and all assigned actions at a glance
+- **Device Stacking**: Can add multiple templates and view all devices within them
 - **Visual Indicators**: Identify customized bindings and default overrides
-- **Customizable Display**: Hide default keys and focus only on personalized bindings
+- **Customizable Display**: Hide default binds, customize font size and button sizes, and more
 
 ### Template Editor
+<img width="1602" height="1032" alt="image" src="https://github.com/user-attachments/assets/47ae769c-286e-4c6e-af6b-94f9da918a2c" />
 - **Custom Template Builder**: Create your own joystick input templates without leaving the app
 - **Button Management**: Add, remove, and reposition buttons on your template
 - **Image Upload**: Add custom images and button graphics to your templates
@@ -41,14 +37,9 @@ Star Citizen Joystick Mapper simplifies the complex task of configuring control 
 - **Profile Management**: Support for multiple joystick profiles (VKB, Thrustmaster, etc.)
 - **Change Detection**: Auto-save captures and applies configuration changes
 
-## Advanced Features
-
-- **Modifier Key Support**: Bind actions with Ctrl, Alt, and Shift modifiers
-- **Binding Conflict Detection**: Visual alerts when multiple actions share the same binding
-- **Visual Export**: Export your joystick layout to an image
-- **Cleared Binding Display**: Visual distinction between cleared overrides and default bindings
-- **State Persistence**: Application remembers your visual view settings (pan, zoom, active view) between sessions
-- **Checks for Updates**: Automatically checks github for any updates
+### Character appearance manager
+<img width="1602" height="1032" alt="image" src="https://github.com/user-attachments/assets/f8ccd3a6-3e5c-44d2-b679-ae53dfe28c59" />
+- **Backup/Save Your Characters**: Managing multiple installs can make saving and updating your characters a pain - use this to sync them between all installs
 
 ## Technical Stack
 
@@ -57,16 +48,9 @@ Star Citizen Joystick Mapper simplifies the complex task of configuring control 
 - **Platform**: Windows Desktop
 - **Input Handling**: DirectInput integration for joystick hardware detection
 
-## Usage
+## To Install
 
-1. **Launch the Application**: Start the Joystick Mapper
-2. **Load or Create a Profile**: Select an existing keybinding .xml file or create a new one
-   - When saving a key binding file, name is "layout_NAME_exported.xml" replacing NAME with your bindings name.
-4. **Customize Bindings**: 
-   - Use the Binding Page to set up keyboard, mouse, and joystick inputs
-   - Use the Visual View to see your joystick layout
-5. **Apply Changes**: Auto-save will update your Star Citizen installation automatically when you save your bindings
-6. 6. While in-game, go to your advanced key bindings, and import your saved profile (sometimes may need to import twice, idk why)
+1. **Check the Releases on this repo**: You can find all releases and installer binaries in the releases section on this github repo (right side of page).
 
 ## Tips & Tricks
 
@@ -78,14 +62,10 @@ Star Citizen Joystick Mapper simplifies the complex task of configuring control 
 
 ## Discord
 Feel free to join us on Discord! https://discord.gg/cjEtkeBG
+- We have a user-submitted template section with different kinds of devices and combos. Feel free to join and grab them - or submit your own! As well as bug reports, etc.
 
 ## AI Disclaimer
-- This utility was created with vibes and some old fashioned analog brain.
+- I used copilot to make this app, and ComfyUI to make the logo.
 
-## License
-
-This project is designed for personal use with Star Citizen by Cloud Imperium Games.
-
----
-
-Made with Rust and web technologies for the Star Citizen community.
+## Finding this usefull and want to support me?
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/C0C51OF2NM)
