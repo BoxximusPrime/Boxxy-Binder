@@ -15,7 +15,7 @@ A desktop application for managing joystick (including button boxes, etc), keybo
 
 ### Visual Device Viewer
 
-<img width="1602" height="1032" alt="image" src="https://github.com/user-attachments/assets/26ea855b-14d4-4485-84b4-0e6bd977ea3c" />
+<img width="1602" height="1032" alt="image" src="https://github.com/user-attachments/assets/f8ccd3a6-3e5c-44d2-b679-ae53dfe28c59" />
 
 - **Interactive Visualization**: See your device layout and all assigned actions at a glance
 - **Device Stacking**: Can add multiple templates and view all devices within them
@@ -46,7 +46,7 @@ A desktop application for managing joystick (including button boxes, etc), keybo
 
 ### Character appearance manager
 
-<img width="1602" height="1032" alt="image" src="https://github.com/user-attachments/assets/f8ccd3a6-3e5c-44d2-b679-ae53dfe28c59" />
+<img width="1602" height="1032" alt="image" src="https://github.com/user-attachments/assets/26ea855b-14d4-4485-84b4-0e6bd977ea3c" />
 
 - **Backup/Save Your Characters**: Managing multiple installs can make saving and updating your characters a pain - use this to sync them between all installs
 
