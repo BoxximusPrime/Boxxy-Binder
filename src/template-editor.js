@@ -33,6 +33,12 @@ import
 } from './button-renderer.js';
 import { initializeTemplatePagesUI, refreshTemplatePagesUI } from './template-editor-v2.js';
 
+import
+    {
+        drawToggle3WayBoxes,
+        drawRotaryBoxes
+    } from './input-type-renderer.js';
+
 /**
  * Migrate template from v1.0 to v1.1
  * - Rename joystickNumber to devicePrefix
@@ -191,10 +197,7 @@ async function loadUtilities()
 // State
 let templateData = {
     name: '',
-    joystickNumber: 2, // Default to joystick 2 (for dual stick setups) - deprecated, use per-stick joystickNumber
-    leftStick: { joystickNumber: 1, buttons: [] }, // Left stick config - deprecated, use pages instead
-    rightStick: { joystickNumber: 2, buttons: [] }, // Right stick config - deprecated, use pages instead
-    version: '1.0',
+    version: '1.1',
     pages: []
 };
 
@@ -246,57 +249,27 @@ function ensureTemplatePages()
         templateData.pages = [];
     }
 
-    if (templateData.pages.length === 0)
+    // Process existing pages to ensure they have IDs and button arrays
+    templateData.pages.forEach((page, index) =>
     {
-        const leftPage = templateData.leftStick || { device_prefix: 'js1', buttons: [] };
-        if (!leftPage.id)
+        if (!page.id)
         {
-            leftPage.id = generatePageId();
+            page.id = generatePageId();
         }
-        leftPage.name = leftPage.name || 'Left Stick';
-        // Ensure device_prefix exists
-        if (!leftPage.device_prefix && !leftPage.devicePrefix && !leftPage.joystickNumber)
+        if (!Array.isArray(page.buttons))
         {
-            leftPage.device_prefix = 'js1';
+            page.buttons = [];
         }
-        templateData.pages.push(leftPage);
-
-        const rightPage = templateData.rightStick || { device_prefix: 'js2', buttons: [] };
-        if (!rightPage.id)
+        // Only set joystickNumber if neither device_prefix nor joystickNumber exist
+        if (page.joystickNumber === undefined && page.device_prefix === undefined && page.devicePrefix === undefined)
         {
-            rightPage.id = generatePageId();
+            page.device_prefix = index === 0 ? 'js1' : 'js2';
         }
-        rightPage.name = rightPage.name || 'Right Stick';
-        // Ensure device_prefix exists
-        if (!rightPage.device_prefix && !rightPage.devicePrefix && !rightPage.joystickNumber)
+        if (!page.name)
         {
-            rightPage.device_prefix = 'js2';
+            page.name = index === 0 ? 'Left Stick' : 'Right Stick';
         }
-        templateData.pages.push(rightPage);
-    }
-    else
-    {
-        templateData.pages.forEach((page, index) =>
-        {
-            if (!page.id)
-            {
-                page.id = generatePageId();
-            }
-            if (!Array.isArray(page.buttons))
-            {
-                page.buttons = [];
-            }
-            // Only set joystickNumber if neither device_prefix nor joystickNumber exist
-            if (page.joystickNumber === undefined && page.device_prefix === undefined && page.devicePrefix === undefined)
-            {
-                page.device_prefix = index === 0 ? 'js1' : 'js2';
-            }
-            if (!page.name)
-            {
-                page.name = index === 0 ? 'Left Stick' : 'Right Stick';
-            }
-        });
-    }
+    });
 
     syncLegacyStickReferences();
 
@@ -464,25 +437,6 @@ window.initializeTemplateEditor = function ()
     canvas = document.getElementById('editor-canvas');
     ctx = canvas.getContext('2d');
 
-    // Ensure stick structures are initialized properly
-    if (!templateData.leftStick || typeof templateData.leftStick !== 'object')
-    {
-        templateData.leftStick = { joystickNumber: 1, buttons: [] };
-    }
-    if (!templateData.leftStick.buttons || !Array.isArray(templateData.leftStick.buttons))
-    {
-        templateData.leftStick.buttons = [];
-    }
-
-    if (!templateData.rightStick || typeof templateData.rightStick !== 'object')
-    {
-        templateData.rightStick = { joystickNumber: 2, buttons: [] };
-    }
-    if (!templateData.rightStick.buttons || !Array.isArray(templateData.rightStick.buttons))
-    {
-        templateData.rightStick.buttons = [];
-    }
-
     initializeEventListeners();
     loadPersistedTemplate();
 
@@ -577,6 +531,12 @@ function initializeEventListeners()
         {
             e.preventDefault(); // Prevent default tab focus behavior
             navigatePages(e.shiftKey ? -1 : 1); // Shift+Tab goes back, Tab goes forward
+        }
+
+        // Delete key to delete selected button
+        if (e.key === 'Delete')
+        {
+            deleteSelectedButton();
         }
     });
 
@@ -1093,9 +1053,9 @@ function setCurrentButtons(buttons)
 async function newTemplate()
 {
     if ((templateData.name ||
-        templateData.pages.length > 0 ||
-        templateData.leftStick.buttons.length > 0 ||
-        templateData.rightStick.buttons.length > 0))
+        (templateData.pages && templateData.pages.length > 0) ||
+        (templateData.leftStick && templateData.leftStick.buttons && templateData.leftStick.buttons.length > 0) ||
+        (templateData.rightStick && templateData.rightStick.buttons && templateData.rightStick.buttons.length > 0)))
     {
         const showConfirmation = window.showConfirmation;
         if (!showConfirmation)
@@ -1120,10 +1080,7 @@ async function newTemplate()
     // Reset all data
     templateData = {
         name: '',
-        joystickNumber: 2,
-        leftStick: { joystickNumber: 1, buttons: [] },
-        rightStick: { joystickNumber: 2, buttons: [] },
-        version: '1.0',
+        version: '1.1',
         pages: []
     };
 
@@ -1183,6 +1140,31 @@ function redraw()
     // Clear canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Draw instructions if no pages
+    if (!templateData.pages || templateData.pages.length === 0)
+    {
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+
+        ctx.save();
+        ctx.scale(dpr, dpr);
+
+        ctx.fillStyle = '#888';
+        ctx.font = 'bold 24px "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        ctx.fillText('Welcome to the Template Editor', centerX, centerY - 40);
+
+        ctx.font = '18px "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+        ctx.fillStyle = '#666';
+        ctx.fillText('This template is currently empty.', centerX, centerY);
+        ctx.fillText('Click "Add Device" in the sidebar to add your first joystick or gamepad.', centerX, centerY + 30);
+
+        ctx.restore();
+        return;
+    }
+
     // Determine if image should be flipped (page-based mirroring only)
     let shouldFlip = false;
     const currentPage = getCurrentPage();
@@ -1217,6 +1199,31 @@ function redraw()
             ctx.scale(-1, 1);
         }
         ctx.drawImage(loadedImage, 0, 0);
+        ctx.restore();
+    }
+    else if (currentPage)
+    {
+        // Draw placeholder if page exists but no image is loaded
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+
+        // We are already inside ctx.save() with dpr scaling, but also zoom/pan
+        // For instructions we might want them fixed or relative to the "image area"
+        // Let's draw them relative to the viewport for now if no image
+
+        ctx.save();
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); // Reset to just DPR scaling
+
+        ctx.fillStyle = '#555';
+        ctx.font = 'bold 20px "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+        ctx.textAlign = 'center';
+
+        ctx.fillText(`Device: ${currentPage.name || 'Untitled'}`, centerX, centerY - 20);
+        ctx.font = '16px "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+        ctx.fillStyle = '#777';
+        ctx.fillText('No background image loaded for this device.', centerX, centerY + 15);
+        ctx.fillText('You can still place buttons, or add an image in Device Settings.', centerX, centerY + 40);
+
         ctx.restore();
     }
 
@@ -1262,7 +1269,13 @@ window.setLoadedImage = function (img)
 // Helper function to draw only the connecting line for a button
 function drawConnectingLineOnly(button)
 {
-    const isHat = button.buttonType && button.buttonType.startsWith('hat');
+    const isMultiInput = button.buttonType && (
+        button.buttonType.startsWith('hat') ||
+        button.buttonType === 'toggle3way-vertical' ||
+        button.buttonType === 'toggle3way-horizontal' ||
+        button.buttonType === 'rotary3way' ||
+        button.buttonType === 'rotary4way'
+    );
     const alpha = 1.0; // Full opacity for lines in first pass
 
     ctx.save();
@@ -1274,9 +1287,9 @@ function drawConnectingLineOnly(button)
 
     let lineColor = accentPrimary; // Default to accent primary color
 
-    if (isHat)
+    if (isMultiInput)
     {
-        // For hats, check if at least some directions are bound
+        // For multi-input controls, check if at least some directions are bound
         let hasBoundDirections = false;
         if (button.buttonType === 'hat4way')
         {
@@ -1294,21 +1307,43 @@ function drawConnectingLineOnly(button)
         {
             hasBoundDirections = button.inputs && button.inputs.left && button.inputs.right;
         }
+        else if (button.buttonType === 'toggle3way-vertical')
+        {
+            hasBoundDirections = button.inputs && button.inputs.up && button.inputs.middle && button.inputs.down;
+        }
+        else if (button.buttonType === 'toggle3way-horizontal')
+        {
+            hasBoundDirections = button.inputs && button.inputs.left && button.inputs.middle && button.inputs.right;
+        }
+        else if (button.buttonType === 'rotary3way')
+        {
+            hasBoundDirections = button.inputs && button.inputs['1'] && button.inputs['2'] && button.inputs['3'];
+        }
+        else if (button.buttonType === 'rotary4way')
+        {
+            hasBoundDirections = button.inputs && button.inputs['1'] && button.inputs['2'] && button.inputs['3'] && button.inputs['4'];
+        }
 
         lineColor = hasBoundDirections ? accentPrimary : bgLight;
     }
 
     // Use shared drawConnectingLine function
     // Note: Need to scale offset for zoom level in template editor
-    const labelWidth = isHat ? 0 : 140;
-    drawConnectingLine(ctx, button.buttonPos, button.labelPos, labelWidth / 2, lineColor, isHat);
+    const labelWidth = isMultiInput ? 0 : 140;
+    drawConnectingLine(ctx, button.buttonPos, button.labelPos, labelWidth / 2, lineColor, isMultiInput);
     ctx.restore();
 }
 
 function drawButton(button, isTemp = false)
 {
     const alpha = isTemp ? 0.7 : 1.0;
-    const isHat = button.buttonType && button.buttonType.startsWith('hat');
+    const isMultiInput = button.buttonType && (
+        button.buttonType.startsWith('hat') ||
+        button.buttonType === 'toggle3way-vertical' ||
+        button.buttonType === 'toggle3way-horizontal' ||
+        button.buttonType === 'rotary3way' ||
+        button.buttonType === 'rotary4way'
+    );
 
     // Note: Lines are now drawn in a separate pass before this function is called
     // This ensures button frames are always drawn on top of lines
@@ -1316,7 +1351,7 @@ function drawButton(button, isTemp = false)
     // Draw button position marker using shared function
     ctx.save();
     ctx.globalAlpha = alpha;
-    drawButtonMarker(ctx, button.buttonPos, zoom, !isHat, isHat);
+    drawButtonMarker(ctx, button.buttonPos, zoom, !isMultiInput, isMultiInput);
     ctx.restore();
 
     // Draw label box(es) using shared functions
@@ -1374,6 +1409,108 @@ function drawButton(button, isTemp = false)
                 }
             });
         }
+        else if (button.buttonType === 'toggle3way-vertical')
+        {
+            drawToggle3WayBoxes(ctx, button, {
+                mode: 'template',
+                alpha,
+                orientation: 'vertical',
+                isTemplateEditor: true,
+                getContentForDirection: (dir, input) =>
+                {
+                    const contentLines = [];
+                    const match = String(input).match(/button(\d+)/i);
+                    if (match)
+                    {
+                        contentLines.push(`[subtle]Button ${match[1]}`);
+                    }
+                    return contentLines;
+                },
+                colors: {
+                    titleColor: '#aaa',
+                    contentColor: '#ddd',
+                    subtleColor: '#999',
+                    mutedColor: '#666'
+                }
+            });
+        }
+        else if (button.buttonType === 'toggle3way-horizontal')
+        {
+            drawToggle3WayBoxes(ctx, button, {
+                mode: 'template',
+                alpha,
+                orientation: 'horizontal',
+                isTemplateEditor: true,
+                getContentForDirection: (dir, input) =>
+                {
+                    const contentLines = [];
+                    const match = String(input).match(/button(\d+)/i);
+                    if (match)
+                    {
+                        contentLines.push(`[subtle]Button ${match[1]}`);
+                    }
+                    return contentLines;
+                },
+                colors: {
+                    titleColor: '#aaa',
+                    contentColor: '#ddd',
+                    subtleColor: '#999',
+                    mutedColor: '#666'
+                }
+            });
+        }
+        else if (button.buttonType === 'rotary3way')
+        {
+            drawRotaryBoxes(ctx, button, {
+                mode: 'template',
+                alpha,
+                steps: 3,
+                includePush: true,
+                isTemplateEditor: true,
+                getContentForDirection: (dir, input) =>
+                {
+                    const contentLines = [];
+                    const match = String(input).match(/button(\d+)/i);
+                    if (match)
+                    {
+                        contentLines.push(`[subtle]Button ${match[1]}`);
+                    }
+                    return contentLines;
+                },
+                colors: {
+                    titleColor: '#aaa',
+                    contentColor: '#ddd',
+                    subtleColor: '#999',
+                    mutedColor: '#666'
+                }
+            });
+        }
+        else if (button.buttonType === 'rotary4way')
+        {
+            drawRotaryBoxes(ctx, button, {
+                mode: 'template',
+                alpha,
+                steps: 4,
+                includePush: true,
+                isTemplateEditor: true,
+                getContentForDirection: (dir, input) =>
+                {
+                    const contentLines = [];
+                    const match = String(input).match(/button(\d+)/i);
+                    if (match)
+                    {
+                        contentLines.push(`[subtle]Button ${match[1]}`);
+                    }
+                    return contentLines;
+                },
+                colors: {
+                    titleColor: '#aaa',
+                    contentColor: '#ddd',
+                    subtleColor: '#999',
+                    mutedColor: '#666'
+                }
+            });
+        }
         else
         {
             drawSingleButtonLabel(ctx, button, alpha, true);
@@ -1391,16 +1528,28 @@ function drawButton(button, isTemp = false)
         // Highlight the connecting line with hover color
         if (button.labelPos)
         {
-            const isHat = button.buttonType && button.buttonType.startsWith('hat');
-            drawConnectingLine(ctx, button.buttonPos, button.labelPos, isHat ? 0 : ButtonFrameWidth / 2, accentHover, isHat);
+            const isMultiInput = button.buttonType && (
+                button.buttonType.startsWith('hat') ||
+                button.buttonType === 'toggle3way-vertical' ||
+                button.buttonType === 'toggle3way-horizontal' ||
+                button.buttonType === 'rotary3way' ||
+                button.buttonType === 'rotary4way'
+            );
+            drawConnectingLine(ctx, button.buttonPos, button.labelPos, isMultiInput ? 0 : ButtonFrameWidth / 2, accentHover, isMultiInput);
         }
 
         // Highlight the label box border
         if (button.labelPos)
         {
-            const isHat = button.buttonType && button.buttonType.startsWith('hat');
+            const isMultiInput = button.buttonType && (
+                button.buttonType.startsWith('hat') ||
+                button.buttonType === 'toggle3way-vertical' ||
+                button.buttonType === 'toggle3way-horizontal' ||
+                button.buttonType === 'rotary3way' ||
+                button.buttonType === 'rotary4way'
+            );
 
-            if (isHat)
+            if (isMultiInput)
             {
                 // For hats, highlight the center push box
                 const boxWidth = HatFrameWidth;
@@ -1464,6 +1613,14 @@ function onCanvasMouseDown(event)
         const handle = findHandleAtPosition(coords);
         if (handle)
         {
+            const buttons = getCurrentButtons();
+            const button = buttons.find(b => b.id === handle.buttonId);
+            if (button)
+            {
+                const targetPos = handle.type === 'button' ? button.buttonPos : button.labelPos;
+                handle.offsetX = coords.x - targetPos.x;
+                handle.offsetY = coords.y - targetPos.y;
+            }
             draggingHandle = handle;
             selectButton(handle.buttonId);
             return;
@@ -1525,9 +1682,13 @@ function onCanvasMouseMove(event)
     if (draggingHandle)
     {
         const coords = getCanvasCoords(event);
+        // Apply offset to prevent jumping to mouse cursor
+        const targetX = coords.x - (draggingHandle.offsetX || 0);
+        const targetY = coords.y - (draggingHandle.offsetY || 0);
+
         const snappedCoords = {
-            x: snapToGrid(coords.x),
-            y: snapToGrid(coords.y)
+            x: snapToGrid(targetX),
+            y: snapToGrid(targetY)
         };
         const buttons = getCurrentButtons();
         const button = buttons.find(b => b.id === draggingHandle.buttonId);
@@ -2257,35 +2418,11 @@ window.editButtonFromList = function (buttonId)
     {
         updateSimpleInputPreview(tempButton);
     }
-    // If it's a hat, populate the detected inputs
-    else if ((buttonType === 'hat4way' || buttonType === 'hat2way-vertical' || buttonType === 'hat2way-horizontal') && button.inputs)
+    // Multi-input (hat/toggle/rotary) - populate detected inputs
+    else if (button.inputs)
     {
         updateHatDetectionButtons(button.inputs);
-        // Get joystick number for full ID display
-        const currentStickData = currentStick === 'left' ? templateData.leftStick : templateData.rightStick;
-        const jsNum = (currentStickData && currentStickData.joystickNumber) || templateData.joystickNumber || 1;
-
-        // Display hat direction IDs with full ID strings
-        if (button.inputs.up && button.inputs.up.id !== undefined)
-        {
-            document.querySelector('[data-direction="up"].hat-id-display').textContent = `${button.inputs.up.id} (js${jsNum}_button${button.inputs.up.id})`;
-        }
-        if (button.inputs.down && button.inputs.down.id !== undefined)
-        {
-            document.querySelector('[data-direction="down"].hat-id-display').textContent = `${button.inputs.down.id} (js${jsNum}_button${button.inputs.down.id})`;
-        }
-        if (button.inputs.left && button.inputs.left.id !== undefined)
-        {
-            document.querySelector('[data-direction="left"].hat-id-display').textContent = `${button.inputs.left.id} (js${jsNum}_button${button.inputs.left.id})`;
-        }
-        if (button.inputs.right && button.inputs.right.id !== undefined)
-        {
-            document.querySelector('[data-direction="right"].hat-id-display').textContent = `${button.inputs.right.id} (js${jsNum}_button${button.inputs.right.id})`;
-        }
-        if (button.inputs.push && button.inputs.push.id !== undefined)
-        {
-            document.querySelector('[data-direction="push"].hat-id-display').textContent = `${button.inputs.push.id} (js${jsNum}_button${button.inputs.push.id})`;
-        }
+        updateMultiInputDisplays(button.inputs);
     }
     else
     {
@@ -2543,7 +2680,15 @@ function onButtonTypeChange()
         document.getElementById('simple-input-section').style.display = 'block';
         document.getElementById('hat-input-section').style.display = 'none';
     }
-    else if (buttonType === 'hat4way' || buttonType === 'hat2way-vertical' || buttonType === 'hat2way-horizontal')
+    else if (
+        buttonType === 'hat4way' ||
+        buttonType === 'hat2way-vertical' ||
+        buttonType === 'hat2way-horizontal' ||
+        buttonType === 'toggle3way-vertical' ||
+        buttonType === 'toggle3way-horizontal' ||
+        buttonType === 'rotary3way' ||
+        buttonType === 'rotary4way'
+    )
     {
         document.getElementById('simple-input-section').style.display = 'none';
         document.getElementById('hat-input-section').style.display = 'block';
@@ -2563,6 +2708,42 @@ function onButtonTypeChange()
     {
         tempButton.buttonType = buttonType;
     }
+}
+
+function updateMultiInputDisplays(inputs)
+{
+    if (!inputs || typeof inputs !== 'object')
+    {
+        return;
+    }
+
+    document.querySelectorAll('.hat-id-display').forEach(displayEl =>
+    {
+        const dir = displayEl.dataset.direction;
+        if (!dir)
+        {
+            return;
+        }
+
+        const input = inputs[dir];
+        if (!input)
+        {
+            displayEl.textContent = '—';
+            return;
+        }
+
+        if (typeof input === 'string')
+        {
+            const short = (typeof parseInputShortName === 'function') ? parseInputShortName(input) : input;
+            displayEl.textContent = `${short} (${input})`;
+            return;
+        }
+
+        if (typeof input === 'object' && input.id !== undefined)
+        {
+            displayEl.textContent = `Btn ${input.id}`;
+        }
+    });
 }
 
 // Helper function to update visibility of hat direction UI elements
@@ -2784,7 +2965,11 @@ async function startHatInputDetection(direction)
             // Update button to show it's detected
             btn.textContent = `✓ (${displayText})`;
 
-            document.getElementById('hat-detection-status').textContent = `${direction}: ${result.display_name}`;
+            const hatDisplayText = (typeof parseInputShortName === 'function')
+                ? parseInputShortName(adjustedInputString)
+                : (result.display_name || adjustedInputString);
+
+            document.getElementById('hat-detection-status').textContent = `${direction}: ${hatDisplayText}`;
             document.getElementById('hat-detection-status').style.color = '#5cb85c';
 
             // Clear any existing timeout
@@ -2924,7 +3109,10 @@ async function startInputDetection()
             }
 
             // Use shared utility for friendly name (use adjusted string)
-            const inputName = parseInputDisplayName(adjustedInputString);
+            // Prefer short name to avoid device prefix (e.g., "Joystick 1 - Button 13")
+            const inputName = (typeof parseInputShortName === 'function')
+                ? parseInputShortName(adjustedInputString)
+                : parseInputDisplayName(adjustedInputString);
 
             // Update the input field with a friendly name only if empty
             const buttonNameInput = document.getElementById('button-name-input');
@@ -3002,7 +3190,7 @@ async function startInputDetection()
             }
 
             // Show confirmation
-            document.getElementById('input-detection-status').textContent = `Detected: ${result.display_name}`;
+            document.getElementById('input-detection-status').textContent = `Detected: ${inputName}`;
             document.getElementById('input-detection-status').style.color = '#5cb85c';
 
             // Clear any existing timeout
@@ -3301,13 +3489,13 @@ async function saveTemplate()
     // Count buttons from nested structure
     const leftButtons = getCurrentButtons();
     const rightButtons = currentStick === 'left' ?
-        (templateData.rightStick.buttons || templateData.rightStick || []) :
-        (templateData.leftStick.buttons || templateData.leftStick || []);
+        (templateData.rightStick?.buttons || templateData.rightStick || []) :
+        (templateData.leftStick?.buttons || templateData.leftStick || []);
     const totalButtons = leftButtons.length + (Array.isArray(rightButtons) ? rightButtons.length : 0);
 
     if (totalButtons === 0)
     {
-        await showAlert('Please add at least one button to either stick', 'No Buttons Defined');
+        await showAlert('Please add at least one button.', 'No Buttons Defined');
         return;
     }
 
@@ -3381,13 +3569,13 @@ async function saveTemplateAs()
     // Count buttons from nested structure
     const leftButtons = getCurrentButtons();
     const rightButtons = currentStick === 'left' ?
-        (templateData.rightStick.buttons || templateData.rightStick || []) :
-        (templateData.leftStick.buttons || templateData.leftStick || []);
+        (templateData.rightStick?.buttons || templateData.rightStick || []) :
+        (templateData.leftStick?.buttons || templateData.leftStick || []);
     const totalButtons = leftButtons.length + (Array.isArray(rightButtons) ? rightButtons.length : 0);
 
     if (totalButtons === 0)
     {
-        await showAlert('Please add at least one button to either stick', 'No Buttons Defined');
+        await showAlert('Please add at least one button.', 'No Buttons Defined');
         return;
     }
 
@@ -3593,8 +3781,27 @@ function resetHatDetectionButtons()
     document.querySelectorAll('.hat-detect-btn').forEach(btn =>
     {
         const direction = btn.dataset.direction;
-        const emoji = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️', push: '⬇️' }[direction];
-        btn.textContent = `${emoji} Detect ${direction.charAt(0).toUpperCase() + direction.slice(1)}`;
+        const emojiMap = {
+            up: '⬆️',
+            down: '⬇️',
+            left: '⬅️',
+            right: '➡️',
+            middle: '⏺',
+            push: '⏺',
+            '1': '1️⃣',
+            '2': '2️⃣',
+            '3': '3️⃣',
+            '4': '4️⃣'
+        };
+
+        const emoji = emojiMap[direction] || '🎮';
+        const label = (direction === 'middle')
+            ? 'Middle'
+            : (direction === 'push')
+                ? 'Push'
+                : (String(direction).match(/^\d+$/) ? `Position ${direction}` : direction.charAt(0).toUpperCase() + direction.slice(1));
+
+        btn.textContent = `${emoji} Detect ${label}`;
         btn.classList.remove('btn-primary');
         btn.classList.add('btn-secondary');
     });
@@ -3609,7 +3816,19 @@ function updateHatDetectionButtons(inputs)
         const btn = document.querySelector(`[data-direction="${direction}"].hat-detect-btn`);
         if (btn && input)
         {
-            const emoji = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️', push: '⬇️' }[direction];
+            const emojiMap = {
+                up: '⬆️',
+                down: '⬇️',
+                left: '⬅️',
+                right: '➡️',
+                middle: '⏺',
+                push: '⏺',
+                '1': '1️⃣',
+                '2': '2️⃣',
+                '3': '3️⃣',
+                '4': '4️⃣'
+            };
+            const emoji = emojiMap[direction] || '🎮';
 
             // Handle both string format (js1_button3) and object format ({id: 3})
             let displayText = '';
@@ -3833,6 +4052,19 @@ function loadPersistedTemplate()
                 };
                 img.src = templateData.imageDataUrl;
             }
+        }
+        else
+        {
+            // No persisted template found, show unsaved indicator for the fresh state
+            showUnsavedTemplateIndicator();
+
+            // Ensure we have a clean state
+            templateData.pages = [];
+            ensureTemplatePages();
+            refreshTemplatePagesUI(templateData);
+
+            // Reset UI
+            document.getElementById('template-name').value = '';
         }
     } catch (error)
     {

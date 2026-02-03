@@ -175,6 +175,30 @@ fn resolve_xinput_uuid(controller_id: u32) -> String {
     format!("xinput_{}", controller_id)
 }
 
+fn hash_string(input: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    input.hash(&mut hasher);
+    format!("{:x}", hasher.finish())
+}
+
+fn build_hid_uuid(device: &hid_reader::HidDeviceListItem) -> String {
+    let base = format!("{:04x}:{:04x}", device.vendor_id, device.product_id);
+    let path_hash = hash_string(&device.path);
+
+    if let Some(serial) = device
+        .serial_number
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        format!("{}:sn:{}:path:{}", base, serial.trim(), path_hash)
+    } else {
+        format!("{}:path:{}", base, path_hash)
+    }
+}
+
 // Axis state tracking to prevent duplicate detections
 struct AxisState {
     last_value: f32,
@@ -534,10 +558,7 @@ impl InputDetector {
                             modifiers: get_active_modifiers(),
                             is_modifier: false,
                             session_id: self.session_id.clone(),
-                            device_uuid: Some(format!(
-                                "{:04x}:{:04x}",
-                                device.vendor_id, device.product_id
-                            )),
+                            device_uuid: Some(build_hid_uuid(device)),
                             raw_button_code: Some(format!("HID Button {}", button_num)),
                             raw_code_index: Some(button_num),
                             device_name: Some(device_name.to_string()),
@@ -639,10 +660,7 @@ impl InputDetector {
                                         modifiers: get_active_modifiers(),
                                         is_modifier: false,
                                         session_id: self.session_id.clone(),
-                                        device_uuid: Some(format!(
-                                            "{:04x}:{:04x}",
-                                            device.vendor_id, device.product_id
-                                        )),
+                                        device_uuid: Some(build_hid_uuid(device)),
                                         raw_button_code: None,
                                         raw_code_index: Some(axis_index),
                                         device_name: Some(device_name.to_string()),
@@ -696,10 +714,7 @@ impl InputDetector {
                                 modifiers: get_active_modifiers(),
                                 is_modifier: false,
                                 session_id: self.session_id.clone(),
-                                device_uuid: Some(format!(
-                                    "{:04x}:{:04x}",
-                                    device.vendor_id, device.product_id
-                                )),
+                                device_uuid: Some(build_hid_uuid(device)),
                                 raw_button_code: None,
                                 raw_code_index: Some(axis_index),
                                 device_name: Some(device_name.to_string()),
@@ -859,8 +874,8 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
                     "Joystick"
                 };
 
-                // Create UUID from vendor_id:product_id
-                let uuid = format!("{:04x}:{:04x}", device.vendor_id, device.product_id);
+                // Create UUID from vendor_id:product_id plus stable per-device suffix
+                let uuid = build_hid_uuid(device);
 
                 joysticks.push(JoystickInfo {
                     id: joysticks.len() + 1,
@@ -927,7 +942,7 @@ pub fn list_connected_devices() -> Result<Vec<DeviceInfo>, String> {
             continue;
         }
 
-        let uuid = format!("{:04x}:{:04x}", device.vendor_id, device.product_id);
+        let uuid = build_hid_uuid(&device);
         let is_gamepad_device = is_gamepad(&name);
 
         let (button_count, axis_count, hat_count) = if is_gamepad_device {

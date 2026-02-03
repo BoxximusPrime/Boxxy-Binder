@@ -408,6 +408,45 @@
     z-index: 100;
 }
 
+.smart-filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid var(--bg-light);
+}
+
+.smart-filter-options {
+    gap: 0.35rem;
+}
+
+.smart-filter-help {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid var(--bg-lighter);
+    background: rgba(40, 44, 48, 0.6);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: help;
+    padding: 0;
+    transition: all 0.2s ease;
+}
+
+.smart-filter-help:hover {
+    background: rgba(var(--accent-primary-rgb), 0.15);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.tips-hidden .tips-sensitive {
+    display: none;
+}
+
 .toolbar-label {
     font-size: 0.85rem;
     color: var(--text-secondary);
@@ -1043,3 +1082,56 @@ input[type="range"]::-moz-range-track {
 }
 
 /* Divider visibility is controlled via JavaScript alongside the tabs container */
+
+/* ========================================
+   Button Highlighting (from Keybindings Page)
+   ======================================== */
+
+/* Keyboard key highlight animation */
+.keyboard-key.key-highlighted {
+    animation: keyHighlight 5s ease-in-out;
+    box-shadow: 0 0 0 4px var(--accent-primary),
+        0 0 30px rgba(var(--accent-primary-rgb), 0.8) !important;
+    z-index: 1000 !important;
+    background-color: rgba(var(--accent-primary-rgb), 0.2) !important;
+    transform: scale(1.1);
+}
+
+@keyframes keyHighlight {
+    0% {
+        box-shadow: 0 0 0 4px var(--accent-primary),
+            0 0 30px rgba(var(--accent-primary-rgb), 0.8);
+        transform: scale(1.1);
+    }
+
+    25% {
+        box-shadow: 0 0 0 6px var(--accent-primary),
+            0 0 50px rgba(var(--accent-primary-rgb), 1);
+        transform: scale(1.15);
+    }
+
+    50% {
+        box-shadow: 0 0 0 4px var(--accent-primary),
+            0 0 30px rgba(var(--accent-primary-rgb), 0.8);
+        transform: scale(1.1);
+    }
+
+    75% {
+        box-shadow: 0 0 0 6px var(--accent-primary),
+            0 0 50px rgba(var(--accent-primary-rgb), 1);
+        transform: scale(1.15);
+    }
+
+    100% {
+        box-shadow: 0 0 0 4px var(--accent-primary),
+            0 0 30px rgba(var(--accent-primary-rgb), 0.8);
+        transform: scale(1.1);
+    }
+}
+
+/* Action text highlight */
+.key-binding-action.action-highlighted {
+    color: var(--accent-primary) !important;
+    font-weight: 600 !important;
+    text-shadow: 0 0 8px rgba(var(--accent-primary-rgb), 0.8);
+}

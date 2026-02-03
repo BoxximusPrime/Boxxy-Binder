@@ -537,7 +537,7 @@ export function DrawButtonFrame(ctx, x, y, title, contentLines, compact = false,
     ctx.globalAlpha = alpha;
 
     const width = compact ? HatFrameWidth : ButtonFrameWidth;
-    const height = ButtonFrameHeight;
+    const height = compact ? HatFrameHeight : ButtonFrameHeight;
     const boxX = x - width / 2;
     const boxY = y - height / 2;
     const radius = 4;
@@ -594,15 +594,14 @@ export function drawSingleButtonLabel(ctx, button, alpha, isTemplateEditor = fal
  */
 export function getHat4WayPositions(centerX, centerY, hasPush = false, width = HatFrameWidth, height = HatFrameHeight)
 {
-    let offsetY = (height / 2) + (HatSpacing * 2) + (HatSpacing / 2) + (height / 2) + HatSpacing / 2;
-    if (!hasPush) offsetY -= height / 2 + HatSpacing;
-    else offsetY += HatSpacing;
+    const hSpace = width + HatSpacing;
+    const vSpace = height + HatSpacing;
 
     return {
-        'up': { x: centerX, y: centerY - offsetY },
-        'down': { x: centerX, y: centerY + offsetY },
-        'left': { x: centerX - width - HatSpacing, y: centerY },
-        'right': { x: centerX + width + HatSpacing, y: centerY },
+        'up': { x: centerX, y: centerY - vSpace },
+        'down': { x: centerX, y: centerY + vSpace },
+        'left': { x: centerX - hSpace, y: centerY },
+        'right': { x: centerX + hSpace, y: centerY },
         'push': { x: centerX, y: centerY }
     };
 }
@@ -613,14 +612,23 @@ export function getHat4WayPositions(centerX, centerY, hasPush = false, width = H
  */
 export function getHat2WayVerticalPositions(centerX, centerY, hasPush = false, width = HatFrameWidth, height = HatFrameHeight)
 {
-    // For vertical: up and down boxes positioned with spacing between them
-    const verticalOffset = height / 2 + HatSpacing * 2;
+    const vSpace = height + HatSpacing;
 
-    return {
-        'up': { x: centerX, y: centerY - verticalOffset },
-        'down': { x: centerX, y: centerY + verticalOffset },
-        'push': { x: centerX, y: centerY + height + HatSpacing * 2 }
-    };
+    if (hasPush)
+    {
+        return {
+            'up': { x: centerX, y: centerY - vSpace },
+            'push': { x: centerX, y: centerY },
+            'down': { x: centerX, y: centerY + vSpace }
+        };
+    }
+    else
+    {
+        return {
+            'up': { x: centerX, y: centerY - vSpace / 2 },
+            'down': { x: centerX, y: centerY + vSpace / 2 }
+        };
+    }
 }
 
 /**
@@ -629,15 +637,23 @@ export function getHat2WayVerticalPositions(centerX, centerY, hasPush = false, w
  */
 export function getHat2WayHorizontalPositions(centerX, centerY, hasPush = false, width = HatFrameWidth, height = HatFrameHeight)
 {
-    // For horizontal: left and right boxes touching with spacing between
-    // If there's a push button, it goes below at centerY
-    const horizontalOffset = width / 2 + HatSpacing / 2;
+    const hSpace = width + HatSpacing;
 
-    return {
-        'left': { x: centerX - horizontalOffset, y: centerY },
-        'right': { x: centerX + horizontalOffset, y: centerY },
-        'push': { x: centerX, y: centerY + height + HatSpacing }
-    };
+    if (hasPush)
+    {
+        return {
+            'left': { x: centerX - hSpace, y: centerY },
+            'push': { x: centerX, y: centerY },
+            'right': { x: centerX + hSpace, y: centerY }
+        };
+    }
+    else
+    {
+        return {
+            'left': { x: centerX - hSpace / 2, y: centerY },
+            'right': { x: centerX + hSpace / 2, y: centerY }
+        };
+    }
 }
 
 /**
@@ -753,13 +769,10 @@ export function drawHat4WayBoxes(ctx, hat, options = {})
     // Calculate all positions using centralized helper
     const positions = getHat4WayPositions(hat.labelPos.x, hat.labelPos.y, hasPush, hatFrameWidth, hatFrameHeight);
 
-    // Calculate spacing for hat name position
-    // When there's a push button, the up direction is pushed down further, so we need more spacing above
-    let offsetY = hatFrameHeight * 2;
-    if (!hasPush) offsetY -= hatFrameHeight / 2 + HatSpacing;
-
-    const titleGap = -8;
-    const titleY = hat.labelPos.y - offsetY - titleGap;
+    // Title above the top-most box
+    const ys = Object.values(positions).map(p => p.y);
+    const topY = Math.min(...ys);
+    const titleY = topY - hatFrameHeight / 2 - 12;
 
     // Draw hat name above
     ctx.fillStyle = colors.titleColor || '#aaa';
@@ -891,11 +904,10 @@ export function drawHat2WayVerticalBoxes(ctx, hat, options = {})
     const hasPush = hat.inputs && hat.inputs['push'];
     const positions = getHat2WayVerticalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, hatFrameWidth, hatFrameHeight);
 
-    let offsetY = hatFrameHeight * 2;
-    if (!hasPush) offsetY -= hatFrameHeight / 2 + HatSpacing;
-
-    const titleGap = -8;
-    const titleY = hat.labelPos.y - offsetY - titleGap;
+    // Title above the top-most box
+    const ys = Object.values(positions).map(p => p.y);
+    const topY = Math.min(...ys);
+    const titleY = topY - hatFrameHeight / 2 - 12;
 
     // Draw hat name above
     ctx.fillStyle = colors.titleColor || '#aaa';
@@ -983,8 +995,10 @@ export function drawHat2WayHorizontalBoxes(ctx, hat, options = {})
     const hasPush = hat.inputs && hat.inputs['push'];
     const positions = getHat2WayHorizontalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, hatFrameWidth, hatFrameHeight);
 
-    const titleGap = -8;
-    const titleY = hat.labelPos.y - hatFrameHeight - HatSpacing - titleGap;
+    // Title above the top-most box
+    const ys = Object.values(positions).map(p => p.y);
+    const topY = Math.min(...ys);
+    const titleY = topY - hatFrameHeight / 2 - 12;
 
     // Draw hat name above
     ctx.fillStyle = colors.titleColor || '#aaa';

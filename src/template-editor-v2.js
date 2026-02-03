@@ -231,7 +231,6 @@ function renderPageList()
                 <div class="page-card-content">
                     <span class="template-page-name">${page.name || 'Untitled Page'}</span>
                     <span class="template-page-device">${page.device_name || 'Device not selected'}</span>
-                    <div class="template-page-meta">${describeAxisMapping(page)}</div>
                 </div>
             </div>
             <div class="template-page-actions">

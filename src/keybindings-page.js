@@ -513,7 +513,13 @@ async function loadKeybindingsFile()
             window.loadControlSettings(currentKeybindings.device_options);
         }
 
-        // Refresh the visual view if it's loaded and visible
+        // Refresh the visual view if it's loaded (also covers Split View)
+        if (window.initializeVisualView)
+        {
+            // Safe even if already initialized
+            window.initializeVisualView();
+        }
+
         if (window.refreshVisualView)
         {
             await window.refreshVisualView();
@@ -899,11 +905,22 @@ function showUnsavedFileIndicator()
 // Search for a button ID in the main keybindings view
 window.searchMainTabForButtonId = function (buttonId)
 {
+    const bindingsTabContent = document.getElementById('tab-content-bindings');
+    const isSplitModeActive = !!bindingsTabContent?.classList.contains('split-mode');
+    const isCurrentlyBindingsTab = document.body.classList.contains('tab-bindings');
+    const splitBtnActive = !!document.querySelector('.bindings-view-btn[data-view="split"].active');
+
+    const shouldUseSplitView = isSplitModeActive || splitBtnActive || (isCurrentlyBindingsTab && localStorage.getItem('bindingsView') === 'split');
+    const desiredView = shouldUseSplitView ? 'split' : 'list';
+
+    // Ensure the saved view stays consistent before we switch tabs
+    localStorage.setItem('bindingsView', desiredView);
+
     // Switch to the bindings tab
     window.switchTab('bindings');
 
-    // Switch to list view
-    window.switchBindingsView('list');
+    // Force the desired view after switching tabs
+    window.switchBindingsView(desiredView);
 
     // Get the search input element
     const searchInput = document.getElementById('search-input');
@@ -1672,8 +1689,8 @@ function renderKeybindings()
             const onHold = action.on_hold || false;
 
             html += `
-        <div class="action-item ${isCustomized ? 'customized' : ''}">
-          <div class="action-name">
+                <div class="action-item ${isCustomized ? 'customized' : ''}" data-action-map="${actionMap.name}" data-action-name="${action.name}" data-action-display="${encodeURIComponent(displayName)}">
+                    <div class="action-name action-drag-handle" title="Drag to bind in visual view">
             ${isCustomized ? '<span class="customized-indicator" title="Customized binding">★</span>' : ''}
             ${displayName}
           </div>
@@ -1685,6 +1702,7 @@ function renderKeybindings()
             <button class="action-btn btn-primary" onclick="window.clearActionBinding('${actionMap.name}', '${action.name}')" ${action.bindings && action.bindings.length > 0 ? '' : 'disabled'}>Clear</button>
             <button class="action-btn btn-primary" onclick="window.resetActionBinding('${actionMap.name}', '${action.name}')">Reset</button>
             <button class="action-btn btn-success" onclick="window.startBinding('${actionMap.name}', '${action.name}')">Bind</button>
+            <button class="action-btn btn-primary" onclick="window.locateActionBinding('${actionMap.name}', '${action.name}')">Locate</button>
           </div>
         </div>
       `;
@@ -1698,8 +1716,117 @@ function renderKeybindings()
 
     container.innerHTML = html;
 
+    // Enable action drag-and-drop into visual view (split view)
+    setupActionDragToJoystickView();
+
     // Setup scroll listener for sticky header category tracking
     setupScrollCategoryTracker();
+}
+
+let actionDragState = null;
+let actionDragGhostEl = null;
+let actionDragInitialized = false;
+
+function setupActionDragToJoystickView()
+{
+    if (actionDragInitialized) return;
+
+    const container = document.getElementById('action-maps-container');
+    if (!container) return;
+
+    const startDrag = (event, actionItem) =>
+    {
+        const currentView = localStorage.getItem('bindingsView') || 'list';
+        if (currentView !== 'split') return;
+        if (event.button !== 0) return;
+
+        const actionMapName = actionItem.dataset.actionMap;
+        const actionName = actionItem.dataset.actionName;
+        const actionDisplay = actionItem.dataset.actionDisplay
+            ? decodeURIComponent(actionItem.dataset.actionDisplay)
+            : actionName;
+
+        actionDragState = {
+            actionMapName,
+            actionName,
+            actionDisplay
+        };
+
+        actionDragGhostEl = document.createElement('div');
+        actionDragGhostEl.className = 'action-drag-ghost';
+        actionDragGhostEl.textContent = actionDisplay;
+        document.body.appendChild(actionDragGhostEl);
+
+        document.body.classList.add('is-action-dragging');
+        moveDragGhost(event);
+
+        document.addEventListener('mousemove', onDragMove, true);
+        document.addEventListener('mouseup', onDragEnd, true);
+
+        event.preventDefault();
+    };
+
+    const moveDragGhost = (event) =>
+    {
+        if (!actionDragGhostEl) return;
+        const offsetX = 12;
+        const offsetY = 12;
+        actionDragGhostEl.style.left = `${event.clientX + offsetX}px`;
+        actionDragGhostEl.style.top = `${event.clientY + offsetY}px`;
+    };
+
+    const onDragMove = (event) =>
+    {
+        if (!actionDragState) return;
+        moveDragGhost(event);
+        if (window.updateJoystickDragHover)
+        {
+            window.updateJoystickDragHover(event);
+        }
+    };
+
+    const onDragEnd = async (event) =>
+    {
+        if (!actionDragState) return;
+
+        document.removeEventListener('mousemove', onDragMove, true);
+        document.removeEventListener('mouseup', onDragEnd, true);
+
+        if (actionDragGhostEl)
+        {
+            actionDragGhostEl.remove();
+            actionDragGhostEl = null;
+        }
+
+        document.body.classList.remove('is-action-dragging');
+
+        if (window.completeJoystickDragDrop)
+        {
+            await window.completeJoystickDragDrop(actionDragState.actionMapName, actionDragState.actionName, event);
+        }
+        else if (window.clearJoystickDragHover)
+        {
+            window.clearJoystickDragHover();
+        }
+
+        actionDragState = null;
+    };
+
+    container.addEventListener('mousedown', (event) =>
+    {
+        const handle = event.target.closest('.action-drag-handle');
+        if (!handle) return;
+
+        const actionItem = handle.closest('.action-item');
+        if (!actionItem) return;
+
+        // Avoid starting drag when clicking on interactive elements
+        if (event.target.closest('button') || event.target.closest('.binding-tag')) return;
+
+        startDrag(event, actionItem);
+    }, true);
+
+    actionDragInitialized = true;
 }
 
 function renderActionBindings(action)
@@ -1739,8 +1866,10 @@ function renderActionBindings(action)
             displayText += ` [${binding.multi_tap}x Tap]`;
         }
 
+        const actionDisplayName = action.ui_label || action.display_name || action.name;
+
         return `
-            <span class="binding-tag ${inputType.toLowerCase()}">
+            <span class="binding-tag ${inputType.toLowerCase()}" onclick="window.highlightButtonInVisualView(event, '${binding.input.replace(/'/g, "\\'")}', '${actionDisplayName.replace(/'/g, "\\'")}')" style="cursor: pointer;" title="Click to highlight in visual view">
                 <span class="binding-tag-text">${displayText}</span>
                 <button class="binding-tag-remove" onclick="window.removeBindingTag(event, '${action.name.replace(/'/g, "\\'")}', '${binding.input.replace(/'/g, "\\'")}')" title="Remove this binding">×</button>
             </span>
@@ -2836,10 +2965,10 @@ function applyJoystickMapping(inputString, deviceUuid)
 
         if (overriddenInput !== tempInput)
         {
-            const overrideMatch = overriddenInput.match(/^(js|gp\d+)_/);
+            const overrideMatch = overriddenInput.match(/^(js|gp)(\d+)_/);
             if (overrideMatch)
             {
-                finalPrefix = overrideMatch[1];
+                finalPrefix = `${overrideMatch[1]}${overrideMatch[2]}`;
                 console.log(`[KEYBINDINGS] Applied custom prefix override: ${autoDetectedPrefix} -> ${finalPrefix}`);
             }
         }
@@ -3059,6 +3188,14 @@ async function applyBinding(actionMapName, actionName, mappedInput, multiTap = n
     await refreshBindings();
     console.log('Bindings refreshed and saved to localStorage');
 
+    // Refresh visual view if in split view or visual view mode
+    const currentBindingsView = localStorage.getItem('bindingsView') || 'list';
+    if ((currentBindingsView === 'split' || currentBindingsView === 'visual') && window.refreshVisualView)
+    {
+        console.log('Refreshing visual view after binding update...');
+        await window.refreshVisualView(true); // true = preserve pan/zoom
+    }
+
     // Close modal after a short delay
     setTimeout(() =>
     {
@@ -3102,6 +3239,129 @@ async function removeBindingTag(event, actionName, inputToClear)
         // Refresh the keybindings to update the UI
         await refreshBindings();
     }
+}
+
+/**
+ * Highlight a button in the visual view when clicking on a binding tag
+ * This works in both split view and regular keybindings view
+ * @param {Event} event - The click event
+ * @param {string} bindingInput - The binding input string (e.g., "js1_button13")
+ * @param {string} actionName - The action display name for visual feedback
+ */
+function highlightButtonInVisualView(event, bindingInput, actionName)
+{
+    // Don't trigger if clicking the X button
+    if (event.target.classList.contains('binding-tag-remove'))
+    {
+        return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    console.log('Highlighting button in visual view:', bindingInput, actionName);
+
+    // Check if we're in split view by looking at the saved view state
+    highlightBindingInVisualView(bindingInput, actionName);
+
+    // Show a brief toast notification
+    if (window.toast && window.toast.info)
+    {
+        window.toast.info(`Highlighting: ${actionName}`);
+    }
+}
+
+function highlightBindingInVisualView(bindingInput, actionName)
+{
+    const invokeHighlight = () =>
+    {
+        if (window.highlightButtonInJoystickViewer)
+        {
+            window.highlightButtonInJoystickViewer(bindingInput, actionName);
+        } else
+        {
+            console.error('highlightButtonInJoystickViewer function not found');
+        }
+    };
+
+    const currentView = localStorage.getItem('bindingsView') || 'list';
+    const isSplitView = currentView === 'split';
+
+    if (isSplitView)
+    {
+        console.log('Already in split view, highlighting directly');
+        invokeHighlight();
+        return;
+    }
+
+    console.log('Not in split view, switching to visual view');
+    if (window.switchBindingsView)
+    {
+        window.switchBindingsView('visual');
+    }
+
+    setTimeout(invokeHighlight, 300);
+}
+
+function locateActionBinding(actionMapName, actionName)
+{
+    if (!currentKeybindings) return;
+
+    const actionMap = currentKeybindings.action_maps.find(am => am.name === actionMapName);
+    if (!actionMap) return;
+
+    const action = actionMap.actions.find(a => a.name === actionName);
+    if (!action) return;
+
+    const actionDisplayName = action.ui_label || action.display_name || action.name;
+    const bindings = Array.isArray(action.bindings) ? action.bindings : [];
+
+    const isUnboundPlaceholder = (bindingInput, binding) =>
+    {
+        const isEmptyBinding = !!bindingInput.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/);
+        return binding.is_default && isEmptyBinding && binding.display_name === 'Unbound';
+    };
+
+    const candidates = bindings
+        .map(binding =>
+        {
+            const bindingInput = (binding.input || '').trim();
+            if (!bindingInput) return null;
+            if (isUnboundPlaceholder(bindingInput, binding)) return null;
+
+            let priority = 4;
+            if (bindingInput.match(/^js\d+_/i)) priority = 0;
+            else if (bindingInput.match(/^gp\d+_/i)) priority = 1;
+            else if (bindingInput.match(/^mouse\d+_/i)) priority = 2;
+            else if (bindingInput.match(/^kb\d+_/i)) priority = 3;
+
+            return {
+                bindingInput,
+                priority,
+                isDefault: !!binding.is_default
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) =>
+        {
+            if (a.priority !== b.priority) return a.priority - b.priority;
+            if (a.isDefault !== b.isDefault) return a.isDefault ? 1 : -1;
+            return 0;
+        });
+
+    if (candidates.length === 0)
+    {
+        if (window.toast && window.toast.warning)
+        {
+            window.toast.warning(`No bindings to locate for ${actionDisplayName}.`);
+        } else if (window.showAlert)
+        {
+            window.showAlert(`No bindings to locate for ${actionDisplayName}.`, 'Locate Binding');
+        }
+        return;
+    }
+
+    highlightBindingInVisualView(candidates[0].bindingInput, actionDisplayName);
 }
 
 /**
@@ -3395,6 +3655,7 @@ async function swapJoystickPrefixes()
 window.clearAllActionMapBindings = clearAllActionMapBindings;
 window.resetAllActionMapBindings = resetAllActionMapBindings;
 window.swapJoystickPrefixes = swapJoystickPrefixes;
+window.highlightButtonInVisualView = highlightButtonInVisualView;
 
 // Make conflict functions globally available
 window.showConflictModal = showConflictModal;
@@ -3416,6 +3677,7 @@ window.loadCategoryMappings = loadCategoryMappings;
 window.refreshBindings = refreshBindings;
 window.stopDetection = stopDetection;
 window.removeBindingTag = removeBindingTag;
+window.locateActionBinding = locateActionBinding;
 window.buildDeviceUuidMapping = buildDeviceUuidMapping;
 
 // Make state variables globally available

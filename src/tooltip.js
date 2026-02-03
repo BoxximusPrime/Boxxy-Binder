@@ -17,6 +17,7 @@ export class Tooltip
     {
         // Don't show if tooltips are globally disabled
         if (!Tooltip.enabled) return;
+        if (this.element?.classList?.contains('tips-sensitive') && document.body.classList.contains('tips-hidden')) return;
         this.tooltip = document.createElement('div');
         this.tooltip.className = 'custom-tooltip';
         this.tooltip.textContent = this.text;

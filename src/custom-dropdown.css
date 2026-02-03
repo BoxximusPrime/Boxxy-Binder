@@ -96,6 +96,7 @@
 
 .custom-dropdown-option:hover {
     background-color: var(--bg-medium);
+    color: #ffffff;
 }
 
 .custom-dropdown-option.selected {

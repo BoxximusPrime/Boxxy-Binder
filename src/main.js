@@ -55,6 +55,29 @@ window.addEventListener('unhandledrejection', async (event) =>
   }
 });
 
+// Global handler for external links to open in default browser
+document.addEventListener('click', async (e) =>
+{
+  const anchor = e.target.closest('a');
+  if (anchor && (anchor.target === '_blank' || anchor.classList.contains('external-link')))
+  {
+    // Only intercept if it's an http/https link
+    if (anchor.href.startsWith('http'))
+    {
+      e.preventDefault();
+      try
+      {
+        await invoke('open_url', { url: anchor.href });
+      } catch (err)
+      {
+        console.error('Failed to open external link:', err);
+        // Fallback
+        window.open(anchor.href, '_blank');
+      }
+    }
+  }
+});
+
 // Helper function to log error messages (exported for use by other modules)
 window.logError = async (message, stack = null) =>
 {
@@ -237,7 +260,7 @@ window.showAlert = showAlert;
 
 function initializeWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.11.1';
+  const CURRENT_VERSION = '1.1.0';
   const WHATS_NEW_KEY = 'whatsNew';
 
   // Check if the stored version matches the current version
@@ -252,7 +275,7 @@ function initializeWhatsNewModal()
 
 function showWhatsNewModal()
 {
-  const CURRENT_VERSION = '0.11.1';
+  const CURRENT_VERSION = '1.1.0';
   const WHATS_NEW_KEY = 'whatsNew';
 
   const modal = document.getElementById('whats-new-modal');
@@ -355,6 +378,7 @@ window.addEventListener("DOMContentLoaded", async () =>
 
   initializeEventListeners();
   initializeTabSystem();
+  initializeSplitResizer();
   initializeWhatsNewModal();
   initializeFontSizeScaling();
 
@@ -371,6 +395,22 @@ window.addEventListener("DOMContentLoaded", async () =>
     {
       Tooltip.enabled = tooltipsToggle.checked;
       localStorage.setItem('tooltips-enabled', tooltipsToggle.checked);
+    });
+  }
+
+  // Initialize tips visibility setting from localStorage
+  const savedTipsDisabled = localStorage.getItem('tips-disabled') === 'true';
+  document.body.classList.toggle('tips-hidden', savedTipsDisabled);
+
+  const disableTipsToggle = document.getElementById('disable-tips-toggle');
+  if (disableTipsToggle)
+  {
+    disableTipsToggle.checked = savedTipsDisabled;
+    disableTipsToggle.addEventListener('change', () =>
+    {
+      const isDisabled = disableTipsToggle.checked;
+      document.body.classList.toggle('tips-hidden', isDisabled);
+      localStorage.setItem('tips-disabled', isDisabled);
     });
   }
 
@@ -403,6 +443,12 @@ window.addEventListener("DOMContentLoaded", async () =>
   const tabSettings = document.getElementById('tab-settings');
   if (tabSettings) { new Tooltip(tabSettings, 'Settings & Debug Options'); }
 
+  const smartFilterHelp = document.getElementById('smart-filter-help');
+  if (smartFilterHelp)
+  {
+    new Tooltip(smartFilterHelp, 'Smart filters are keyword-based, so results can be imperfect. Use them as a hint, not a guarantee.');
+  }
+
   // Action buttons in keybindings sidebar
   const newKeybindingBtn = document.getElementById('new-keybinding-btn');
   if (newKeybindingBtn) { new Tooltip(newKeybindingBtn, 'Start with a fresh keybinding set'); }
@@ -425,6 +471,12 @@ window.addEventListener("DOMContentLoaded", async () =>
 
   const visualViewBtn = document.getElementById('bindings-view-visual');
   if (visualViewBtn) { new Tooltip(visualViewBtn, 'View keybindings on a visual joystick layout'); }
+
+  const splitViewBtn = document.getElementById('bindings-view-split');
+  if (splitViewBtn) { new Tooltip(splitViewBtn, 'View both keybindings and the visual view'); }
+
+  const controlsViewBtn = document.getElementById('bindings-view-controls');
+  if (controlsViewBtn) { new Tooltip(controlsViewBtn, 'Edit controller settings for inversion, and curves'); }
 
   // Filter checkbox tooltips
   const customizedWrapper = document.getElementById('customized-only-wrapper');
@@ -523,6 +575,15 @@ window.addEventListener("DOMContentLoaded", async () =>
   }
 
   await loadPersistedKeybindings();
+
+  // If split view was the last active view, refresh it now that keybindings are loaded
+  const currentTab = localStorage.getItem('currentTab') || 'welcome';
+  const currentBindingsView = localStorage.getItem('bindingsView') || 'list';
+  if (currentTab === 'bindings' && currentBindingsView === 'split' && window.refreshVisualView)
+  {
+    console.log('Refreshing split view after loading keybindings...');
+    await window.refreshVisualView(true); // true = preserve pan/zoom
+  }
 });
 
 function initializeTabSystem()
@@ -563,11 +624,81 @@ function initializeTabSystem()
 }
 
 /**
+ * Initialize the resizer for split view
+ */
+function initializeSplitResizer()
+{
+  const resizer = document.getElementById('bindings-split-resizer');
+  const leftPane = document.getElementById('bindings-list-view');
+  const rightPane = document.getElementById('bindings-visual-view');
+  const wrapper = document.getElementById('bindings-views-wrapper');
+
+  if (!resizer || !leftPane || !rightPane || !wrapper) return;
+
+  let isDragging = false;
+
+  // Load saved width from localStorage
+  const savedWidth = localStorage.getItem('splitViewWidth');
+  if (savedWidth)
+  {
+    leftPane.style.flex = 'none';
+    leftPane.style.width = savedWidth;
+  }
+
+  resizer.addEventListener('mousedown', (e) =>
+  {
+    isDragging = true;
+    resizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    // Prevent text selection while dragging
+    document.body.style.userSelect = 'none';
+  });
+
+  document.addEventListener('mousemove', (e) =>
+  {
+    if (!isDragging) return;
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const newWidth = e.clientX - wrapperRect.left;
+
+    // Constraints
+    const minWidth = 200;
+    const maxWidth = wrapperRect.width - 200;
+
+    if (newWidth >= minWidth && newWidth <= maxWidth)
+    {
+      leftPane.style.flex = 'none';
+      leftPane.style.width = `${newWidth}px`;
+      localStorage.setItem('splitViewWidth', `${newWidth}px`);
+
+      // Trigger a resize event for the visual view if it's active
+      if (window.refreshVisualView)
+      {
+        window.refreshVisualView();
+      }
+    }
+  });
+
+  document.addEventListener('mouseup', () =>
+  {
+    if (isDragging)
+    {
+      isDragging = false;
+      resizer.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  });
+}
+
+/**
  * Switch between list, visual, and controls views within the Bindings tab
  */
 function switchBindingsView(viewName)
 {
   if (!viewName) return;
+
+  const bindingsTabContent = document.getElementById('tab-content-bindings');
 
   // Update active button
   document.querySelectorAll('.bindings-view-btn').forEach(btn =>
@@ -575,28 +706,59 @@ function switchBindingsView(viewName)
     btn.classList.toggle('active', btn.dataset.view === viewName);
   });
 
+  // Toggle split mode class (affects layout + visibility)
+  if (bindingsTabContent)
+  {
+    bindingsTabContent.classList.toggle('split-mode', viewName === 'split');
+  }
+
   // Update active view container
   document.querySelectorAll('.bindings-view-container').forEach(container =>
   {
     const isListView = container.id === 'bindings-list-view' && viewName === 'list';
     const isVisualView = container.id === 'bindings-visual-view' && viewName === 'visual';
+    const isSplitListView = container.id === 'bindings-list-view' && viewName === 'split';
+    const isSplitVisualView = container.id === 'bindings-visual-view' && viewName === 'split';
     const isControlsView = container.id === 'bindings-controls-view' && viewName === 'controls';
-    container.classList.toggle('active', isListView || isVisualView || isControlsView);
+    container.classList.toggle('active', isListView || isVisualView || isControlsView || isSplitListView || isSplitVisualView);
+
+    // Reset inline styles when not in split mode to allow CSS to take over
+    if (viewName !== 'split')
+    {
+      container.style.flex = '';
+      container.style.width = '';
+    }
+    else if (container.id === 'bindings-list-view')
+    {
+      // Re-apply saved width if switching back to split mode
+      const savedWidth = localStorage.getItem('splitViewWidth');
+      if (savedWidth)
+      {
+        container.style.flex = 'none';
+        container.style.width = savedWidth;
+      }
+    }
   });
 
   // Save to localStorage
   localStorage.setItem('bindingsView', viewName);
 
   // If switching to visual view, initialize and refresh it
-  if (viewName === 'visual')
+  if (viewName === 'visual' || viewName === 'split')
   {
     if (window.initializeVisualView)
     {
       window.initializeVisualView();
     }
+    if (window.restoreViewerTransformForCurrentView)
+    {
+      window.restoreViewerTransformForCurrentView();
+    }
     if (window.refreshVisualView)
     {
-      window.refreshVisualView();
+      // For split view, preserve the current pan/zoom. For visual view, allow reset.
+      const preserveView = viewName === 'split';
+      window.refreshVisualView(preserveView);
     }
   }
 
@@ -642,6 +804,7 @@ function initializeSettingsPage()
   const resetCacheBtn = document.getElementById('reset-cache-btn');
   const manualUpdateCheckBtn = document.getElementById('manual-update-check-btn');
   const starfieldToggle = document.getElementById('starfield-toggle');
+  const skipBindingRemovalCheckbox = document.getElementById('skip-binding-removal-confirmation');
   const chooseSCFolderBtn = document.getElementById('choose-sc-folder-btn');
   const scInstallPathDisplay = document.getElementById('sc-install-path-display');
   const scInstallationsList = document.getElementById('sc-installations-list');
@@ -742,6 +905,18 @@ function initializeSettingsPage()
     starfieldToggle.addEventListener('change', (e) =>
     {
       window.toggleStarfield(e.target.checked);
+    });
+  }
+
+  // Keybinding removal confirmation toggle
+  if (skipBindingRemovalCheckbox)
+  {
+    const savedSkipConfirm = localStorage.getItem('skipBindingRemovalConfirm') === 'true';
+    skipBindingRemovalCheckbox.checked = savedSkipConfirm;
+
+    skipBindingRemovalCheckbox.addEventListener('change', (e) =>
+    {
+      localStorage.setItem('skipBindingRemovalConfirm', e.target.checked);
     });
   }
 
@@ -1254,11 +1429,22 @@ window.safeUpdateTemplateIndicator = function (name)
 // Search for a button ID in the main keybindings view
 window.searchMainTabForButtonId = function (buttonId)
 {
+  const bindingsTabContent = document.getElementById('tab-content-bindings');
+  const isSplitModeActive = !!bindingsTabContent?.classList.contains('split-mode');
+  const isCurrentlyBindingsTab = document.body.classList.contains('tab-bindings');
+  const splitBtnActive = !!document.querySelector('.bindings-view-btn[data-view="split"].active');
+
+  const shouldUseSplitView = isSplitModeActive || splitBtnActive || (isCurrentlyBindingsTab && localStorage.getItem('bindingsView') === 'split');
+  const desiredView = shouldUseSplitView ? 'split' : 'list';
+
+  // Ensure the saved view stays consistent before we switch tabs
+  localStorage.setItem('bindingsView', desiredView);
+
   // Switch to the bindings tab
   switchTab('bindings');
 
-  // Switch to list view
-  switchBindingsView('list');
+  // Force the desired view after switching tabs
+  switchBindingsView(desiredView);
 
   // Get the search input element
   const searchInput = document.getElementById('search-input');
@@ -1392,6 +1578,13 @@ window.clearActionBinding = async function (actionMapName, actionName)
     updateUnsavedIndicator();
 
     await window.refreshBindings();
+
+    // Refresh visual view if in split view or visual view mode
+    const currentBindingsView = localStorage.getItem('bindingsView') || 'list';
+    if ((currentBindingsView === 'split' || currentBindingsView === 'visual') && window.refreshVisualView)
+    {
+      await window.refreshVisualView(true); // true = preserve pan/zoom
+    }
   } catch (error)
   {
     console.error('Error clearing action binding:', error);
@@ -1467,20 +1660,24 @@ window.removeBinding = async function (actionMapName, actionName, inputToClear)
 {
   console.log('removeBinding called with:', { actionMapName, actionName, inputToClear });
 
-  // Show custom confirmation dialog BEFORE doing anything
-  const confirmed = await showConfirmation(
-    'Clear this binding?',
-    'Clear Binding',
-    'Clear',
-    'Cancel',
-    'btn-danger'
-  );
-
-  // If user cancelled, stop immediately
-  if (!confirmed)
+  const skipConfirmation = localStorage.getItem('skipBindingRemovalConfirm') === 'true';
+  if (!skipConfirmation)
   {
-    console.log('User cancelled binding removal');
-    return false;
+    // Show custom confirmation dialog BEFORE doing anything
+    const confirmed = await showConfirmation(
+      'Clear this binding?',
+      'Clear Binding',
+      'Clear',
+      'Cancel',
+      'btn-danger'
+    );
+
+    // If user cancelled, stop immediately
+    if (!confirmed)
+    {
+      console.log('User cancelled binding removal');
+      return false;
+    }
   }
 
   console.log('User confirmed, proceeding with removal');
@@ -1501,6 +1698,13 @@ window.removeBinding = async function (actionMapName, actionName, inputToClear)
 
     // Refresh bindings
     await window.refreshBindings();
+
+    // Refresh visual view if in split view or visual view mode
+    const currentBindingsView = localStorage.getItem('bindingsView') || 'list';
+    if ((currentBindingsView === 'split' || currentBindingsView === 'visual') && window.refreshVisualView)
+    {
+      await window.refreshVisualView(true); // true = preserve pan/zoom
+    }
 
     return true;
   } catch (error)

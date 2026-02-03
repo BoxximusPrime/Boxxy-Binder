@@ -254,37 +254,38 @@ class CharacterManager
             return;
         }
 
-        listEl.innerHTML = this.masterCharacters.map(char =>
+        listEl.innerHTML = this.masterCharacters.slice().sort((a, b) => a.name.localeCompare(b.name)).map(char =>
         {
             const syncStatus = this.getMasterCharacterSyncStatus(char);
             const hasNewerVersion = this.hasNewerVersionInInstallations(char);
 
             return `
-      <div class="character-card">
-        <div class="character-icon">👤</div>
-        <div class="character-info">
-          <h4 class="character-name">${char.name}</h4>
-          <div class="character-meta">
-            <span>📅 ${this.formatDate(char.modified)}</span>
-            <span>💾 ${this.formatFileSize(char.size)}</span>
-          </div>
-          ${syncStatus ? `<div class="character-sync-status">${syncStatus}</div>` : ''}
-        </div>
-        <div class="character-actions">
-          ${hasNewerVersion ? `
-            <button class="btn btn-primary btn-sm" onclick="characterManager.updateFromNewest('${char.name}')" title="Update library with newest version">
-              🔄 Update
-            </button>
-          ` : ''}
-          <button class="btn btn-secondary btn-sm" onclick="characterManager.exportCharacter('${char.name}')" title="Export to all installations">
-            📤 Export All
-          </button>
-          <button class="btn btn-danger btn-sm" onclick="characterManager.deleteCharacter('${char.name}')" title="Delete from library">
-            🗑️
-          </button>
-        </div>
-      </div>
-    `;
+            <div class="character-card">
+                <div class="character-icon">👤</div>
+                <div class="character-info">
+                    <h4 class="character-name">${char.name}</h4>
+                    <div class="character-meta-row">
+                        ${syncStatus ? `<div class="character-line character-sync-status">${syncStatus}</div>` : ''}
+                        <div class="character-line character-meta">
+                            <span class="character-date">📅 ${this.formatDate(char.modified)}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="character-actions">
+                    ${hasNewerVersion ? `
+                        <button class="btn btn-primary btn-sm" onclick="characterManager.updateFromNewest('${char.name}')" title="Update library with newest version">
+                            🔄 Update
+                        </button>
+                    ` : ''}
+                    <button class="btn btn-secondary btn-sm" onclick="characterManager.exportCharacter('${char.name}')" title="Export to all installations">
+                        📤 Export All
+                    </button>
+                    <button class="btn btn-danger btn-sm btn-delete" onclick="characterManager.deleteCharacter('${char.name}')" title="Delete from library">
+                        🗑️
+                    </button>
+                </div>
+            </div>
+        `;
         }).join('');
     }
 
@@ -542,7 +543,7 @@ class CharacterManager
           </div>
         ` : `
           <div class="installation-characters-list">
-            ${characters.map(char => this.renderInstallationCharacter(char, installName)).join('')}
+            ${characters.slice().sort((a, b) => a.name.localeCompare(b.name)).map(char => this.renderInstallationCharacter(char, installName)).join('')}
           </div>
         `}
       </div>
@@ -574,33 +575,36 @@ class CharacterManager
         }
 
         return `
-      <div class="character-card">
-        <div class="character-icon">👤</div>
-        <div class="character-info">
-          <h4 class="character-name">${char.name}</h4>
-          <div class="character-meta">
-            <span>📅 ${this.formatDate(char.modified)}</span>
-            <span>💾 ${this.formatFileSize(char.size)}</span>
-            <span class="character-status ${status}">${statusText}</span>
-          </div>
-        </div>
-        <div class="character-actions">
-          ${status === 'newer' || status === 'missing' ? `
-            <button class="btn btn-primary btn-sm" onclick="characterManager.importToLibrary('${char.name}', '${installName}')" title="Import to library">
-              📥 Import
-            </button>
-          ` : ''}
-          ${masterChar ? `
-            <button class="btn btn-secondary btn-sm" onclick="characterManager.deployToInstallation('${char.name}', '${installName}')" title="Deploy from library">
-              📤 Deploy
-            </button>
-          ` : ''}
-          <button class="btn btn-danger btn-sm" onclick="characterManager.deleteFromInstallation('${char.name}', '${installName}')" title="Delete from installation">
-            🗑️ Delete
-          </button>
-        </div>
-      </div>
-    `;
+            <div class="character-card">
+                <div class="character-icon">👤</div>
+                <div class="character-info">
+                    <h4 class="character-name">${char.name}</h4>
+                    <div class="character-meta-row">
+                        <div class="character-line character-status-row">
+                            <span class="character-status ${status}">${statusText}</span>
+                        </div>
+                        <div class="character-line character-meta">
+                            <span class="character-date">📅 ${this.formatDate(char.modified)}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="character-actions">
+                    ${status === 'newer' || status === 'missing' ? `
+                        <button class="btn btn-primary btn-sm" onclick="characterManager.importToLibrary('${char.name}', '${installName}')" title="Import to library">
+                            📥 Import
+                        </button>
+                    ` : ''}
+                    ${masterChar ? `
+                        <button class="btn btn-secondary btn-sm" onclick="characterManager.deployToInstallation('${char.name}', '${installName}')" title="Deploy from library">
+                            📤 Deploy
+                        </button>
+                    ` : ''}
+                    <button class="btn btn-danger btn-sm btn-delete" onclick="characterManager.deleteFromInstallation('${char.name}', '${installName}')" title="Delete from installation">
+                        🗑️
+                    </button>
+                </div>
+            </div>
+        `;
     }
 
     async deployToInstallation(characterName, installName)

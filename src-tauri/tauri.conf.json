@@ -1,11 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Boxxy Binder",
-  "version": "0.11.1",
+  "version": "1.1.0",
   "identifier": "com.boxxy.boxxy-binder",
   "build": {
-    "frontendDist": "../src",
-    "devUrl": "http://localhost:5173"
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "withGlobalTauri": true,

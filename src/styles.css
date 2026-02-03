@@ -1028,6 +1028,7 @@ p[style*="color: red"] {
   border-bottom: 2px solid var(--bg-darkest);
   padding: 0;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .bindings-sub-nav-left {
@@ -1155,6 +1156,51 @@ p[style*="color: red"] {
 
 .bindings-view-container.active {
   display: flex;
+}
+
+/* Bindings Views Wrapper (for Split View mode) */
+.bindings-views-wrapper {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Split mode: show List + Visual side-by-side */
+#tab-content-bindings.split-mode .bindings-views-wrapper {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  padding: 10px;
+  background: var(--bg-darkest);
+}
+
+#tab-content-bindings.split-mode #bindings-list-view,
+#tab-content-bindings.split-mode #bindings-visual-view {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  border: 1px solid var(--bg-light);
+  border-radius: 8px;
+  background: var(--bg-dark);
+}
+
+#tab-content-bindings.split-mode #bindings-controls-view {
+  display: none !important;
+}
+
+/* Ensure inner panels can shrink without overflow explosions */
+#tab-content-bindings.split-mode .main-content,
+#tab-content-bindings.split-mode .viewer-content {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* On narrower screens, stack split panes vertically */
+@media (max-width: 1200px) {
+  #tab-content-bindings.split-mode .bindings-views-wrapper {
+    flex-direction: column;
+  }
 }
 
 /* Ensure Visual View content fills container */
@@ -1541,6 +1587,25 @@ input[type="checkbox"]:disabled:hover {
   color: var(--text-primary);
 }
 
+.split-view-tip {
+  display: none;
+  margin-left: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+#tab-content-bindings.split-mode .split-view-tip {
+  display: inline;
+}
+
+.tips-hidden .split-view-tip,
+.tips-hidden .quick-tips,
+.tips-hidden .dm-info-box,
+.tips-hidden .tips-callout {
+  display: none !important;
+}
+
 .search-container {
   position: relative;
   display: inline-block;
@@ -1700,12 +1765,119 @@ input[type="checkbox"]:disabled:hover {
   background-color: rgba(255, 255, 255, 0.1);
 }
 
+#tab-content-bindings.split-mode .action-item.action-drop-hover {
+  border-color: rgba(var(--accent-primary-rgb), 0.7);
+  background-color: rgba(var(--accent-primary-rgb), 0.15);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-primary-rgb), 0.35);
+  position: relative;
+}
+
+#tab-content-bindings.split-mode .action-item.action-drop-hover .action-buttons {
+  margin-right: calc(7.5rem + 10px);
+}
+
+#tab-content-bindings.split-mode .action-item.action-drop-hover::after {
+  content: 'Release to bind';
+  position: absolute;
+  right: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.75rem;
+  color: var(--accent-primary);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(var(--accent-primary-rgb), 0.45);
+  padding: 0.2rem 0.45rem;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
 .action-name {
   font-weight: 400;
   grid-column: 1;
   grid-row: 1;
   font-size: 0.95rem;
   line-height: 1.4;
+}
+
+#tab-content-bindings.split-mode .action-drag-handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.35rem;
+  border-radius: 6px;
+  cursor: grab;
+  transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+#tab-content-bindings.split-mode .action-drag-handle::before {
+  content: '⋮⋮';
+  font-size: 0.9rem;
+  letter-spacing: -2px;
+  color: var(--text-muted);
+}
+
+#tab-content-bindings.split-mode .action-item:hover .action-drag-handle {
+  background-color: rgba(var(--accent-primary-rgb), 0.12);
+  color: var(--accent-primary);
+  box-shadow: inset 0 0 0 1px rgba(var(--accent-primary-rgb), 0.35);
+}
+
+body.is-action-dragging #tab-content-bindings.split-mode .action-drag-handle {
+  cursor: grabbing;
+}
+
+/* ========================================
+   Input Drag (Reverse Bind)
+   ======================================== */
+
+.input-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  transform: translate(0, 0);
+  background: rgba(20, 24, 30, 0.9);
+  color: var(--accent-primary);
+  border: 1px solid rgba(var(--accent-primary-rgb), 0.6);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 100000;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+}
+
+body.is-input-dragging {
+  user-select: none;
+  cursor: grabbing;
+}
+
+/* ========================================
+   Action Drag (Split View)
+   ======================================== */
+
+.action-drag-ghost {
+  position: fixed;
+  top: 0;
+  left: 0;
+  transform: translate(0, 0);
+  background: rgba(20, 24, 30, 0.9);
+  color: var(--accent-primary);
+  border: 1px solid rgba(var(--accent-primary-rgb), 0.6);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 100000;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  white-space: nowrap;
+}
+
+body.is-action-dragging {
+  user-select: none;
+  cursor: grabbing;
 }
 
 .action-buttons {
@@ -3180,7 +3352,7 @@ input[type="checkbox"]:disabled:hover {
 
 /* Tab Content Container */
 .tab-content-container {
-  display: flex;
+  display: block;
   flex: 1;
   overflow: hidden;
 }
@@ -3191,10 +3363,27 @@ input[type="checkbox"]:disabled:hover {
   overflow-y: auto;
   overflow-x: hidden;
   flex-direction: column;
+  height: 100%;
 }
 
 .tab-content.active {
   display: flex;
+}
+
+/* Split view mode: layout sub-nav on top, then views side-by-side below */
+#tab-content-bindings.active.split-mode {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+#tab-content-bindings.split-mode .bindings-views-wrapper {
+  display: flex;
+  flex-direction: row;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Sub-Header for Tab Pages */
@@ -3327,9 +3516,13 @@ input[type="checkbox"]:disabled:hover {
 }
 
 .help-section {
+  background-color: var(--bg-dark);
+  border: 1px solid var(--bg-lighter);
+  padding: 1.5rem;
   margin-bottom: 2.5rem;
   padding-bottom: 2rem;
-  border-bottom: 1px solid var(--bg-lighter);
+  margin-left: 4em;
+  margin-right: 4em;
 }
 
 .help-section:last-child {
@@ -3365,6 +3558,12 @@ input[type="checkbox"]:disabled:hover {
   margin-bottom: 0.75rem;
   line-height: 1.8;
   font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.help-section ol li::marker {
+  color: var(--accent-primary);
+  font-weight: bold;
 }
 
 .help-section strong {
@@ -3406,7 +3605,7 @@ input[type="checkbox"]:disabled:hover {
    ============================================================================ */
 
 .whats-new-modal-content {
-  max-width: 700px !important;
+  max-width: 850px !important;
   max-height: 85vh !important;
 }
 
@@ -3423,9 +3622,13 @@ input[type="checkbox"]:disabled:hover {
   border-bottom: none;
 }
 
+.whats-new-section h3:first-of-type {
+  margin-top: 0;
+}
+
 .whats-new-section h3 {
   color: var(--accent-primary);
-  margin-top: 0;
+  margin-top: 40px;
   margin-bottom: 1rem;
   font-size: 1.3rem;
 }
@@ -4156,4 +4359,80 @@ input[type="checkbox"]:disabled:hover {
   opacity: 0;
   padding: 0 1.5rem;
   border-top: none;
+}
+
+/* Split View Layout */
+.bindings-views-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+  overflow: hidden;
+}
+
+#tab-content-bindings.split-mode .bindings-views-wrapper {
+  flex-direction: row;
+}
+
+#tab-content-bindings.split-mode #bindings-list-view,
+#tab-content-bindings.split-mode #bindings-visual-view {
+  display: flex !important;
+  flex: 1;
+  min-width: 200px;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Resizer Handle */
+.split-resizer {
+  display: none;
+  width: 8px;
+  background: var(--bg-secondary);
+  cursor: col-resize;
+  transition: background 0.2s;
+  z-index: 10;
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  position: relative;
+}
+
+#tab-content-bindings.split-mode .split-resizer {
+  display: block;
+}
+
+.split-resizer:hover,
+.split-resizer.dragging {
+  background: var(--accent-primary);
+}
+
+/* Add a visual handle to the resizer */
+.split-resizer::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 2px;
+  height: 30px;
+  background: var(--border-color);
+  border-radius: 2px;
+  box-shadow: 0 -5px 0 var(--border-color), 0 5px 0 var(--border-color);
+}
+
+.split-resizer:hover::after,
+.split-resizer.dragging::after {
+  background: var(--bg-darkest);
+  box-shadow: 0 -5px 0 var(--bg-darkest), 0 5px 0 var(--bg-darkest);
+}
+
+/* Ensure content inside split views scrolls correctly */
+#tab-content-bindings.split-mode .main-content,
+#tab-content-bindings.split-mode .viewer-content {
+  height: 100%;
+  overflow: hidden;
+}
+
+#tab-content-bindings.split-mode .bindings-panel,
+#tab-content-bindings.split-mode .joystick-display {
+  flex: 1;
+  overflow-y: auto;
 }

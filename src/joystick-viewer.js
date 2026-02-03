@@ -21,7 +21,14 @@ import
     drawHat2WayHorizontalBoxes,
     roundRect
 } from './button-renderer.js';
-import { toStarCitizenFormat } from './input-utils.js';
+import
+{
+    drawToggle3WayBoxes,
+    drawRotaryBoxes,
+    getToggle3WayPositions,
+    getRotaryPositions
+} from './input-type-renderer.js';
+import { toStarCitizenFormat, getInputType } from './input-utils.js';
 
 // ========================================
 // Configurable Display Settings
@@ -60,18 +67,45 @@ let canvas, ctx;
 // UI state
 let selectedButton = null;
 let selectedBox = null; // Track the currently selected/clicked box for highlighting
+let isPulsing = false; // Whether the current highlight should pulse
+let highlightTimeout = null; // Timeout for clearing external highlights
 let clickableBoxes = []; // Track clickable binding boxes for mouse events
+let dragHoverBox = null; // Track drag-hover box during action drag-and-drop
+let inputDragState = null; // Track input drag state for reverse drag
+let isInputDragging = false;
+let inputDragGhostEl = null;
+let inputDragStart = null;
+let inputDragSuppressClick = false;
+let actionDropTarget = null;
+
+// Live input highlight state
+let liveInputBox = null;
+let liveInputHighlightTimeout = null;
+let viewerInputUnlisten = null;
+let viewerDetectionLoop = null;
+let isViewerInputDetectionActive = false;
 
 // View transform
 let zoom = 1.0;
 let pan = { x: 0, y: 0 };
 let isPanning = false;
 let lastPanPosition = { x: 0, y: 0 };
+let panMouseButton = null;
+let panSuppressContextMenu = false;
+let panSuppressContextMenuUntil = 0;
+let panPointerId = null;
+let panContextMenuTimeout = null;
 
 // Filter state
 let currentPageIndex = 0; // Currently viewing page index
 let hideDefaultBindings = false; // Filter to hide default bindings
 let modifierFilter = 'all'; // Current modifier filter: 'all', 'lalt', 'lctrl', etc.
+let smartFilter = 'all'; // Smart filter: 'all', 'on-foot', 'spaceship', 'turret', 'vehicle'
+
+// Smart filter category mappings
+let categoryFriendlyNames = {};
+let categoryMappingsLoaded = false;
+let actionMapCategoryCache = new Map();
 
 // Export bounds tracking
 let drawBounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
@@ -270,6 +304,129 @@ function normalizeTemplateData(templateData)
 }
 
 // ========================================
+// Smart Filter Category Helpers
+// ========================================
+
+async function loadCategoryMappingsIfNeeded()
+{
+    if (categoryMappingsLoaded) return;
+
+    try
+    {
+        const response = await fetch(new URL('../Categories.json', import.meta.url).href);
+        if (!response.ok)
+        {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        categoryFriendlyNames = await response.json();
+    }
+    catch (error)
+    {
+        console.error('Error loading Categories.json for viewer:', error);
+        categoryFriendlyNames = {};
+    }
+    finally
+    {
+        categoryMappingsLoaded = true;
+    }
+}
+
+function normalizeCategoryToken(value)
+{
+    if (!value || typeof value !== 'string') return null;
+    const normalized = value.trim().toLowerCase();
+    return normalized || null;
+}
+
+function addCategoryTokens(targetSet, value)
+{
+    if (Array.isArray(value))
+    {
+        value.forEach(item =>
+        {
+            const token = normalizeCategoryToken(item);
+            if (token) targetSet.add(token);
+        });
+        return;
+    }
+
+    const token = normalizeCategoryToken(value);
+    if (token) targetSet.add(token);
+}
+
+function buildActionMapCategoryCache()
+{
+    actionMapCategoryCache = new Map();
+
+    if (!currentBindings || !currentBindings.action_maps) return;
+
+    currentBindings.action_maps.forEach(actionMap =>
+    {
+        const tokens = new Set();
+        const lookupKeys = [];
+
+        if (actionMap.ui_category) lookupKeys.push(actionMap.ui_category);
+        if (actionMap.name) lookupKeys.push(actionMap.name);
+        if (actionMap.display_name) lookupKeys.push(actionMap.display_name);
+        if (actionMap.ui_label) lookupKeys.push(actionMap.ui_label);
+
+        lookupKeys.forEach(key =>
+        {
+            if (!key || typeof key !== 'string') return;
+
+            let mapped = categoryFriendlyNames[key];
+            if (!mapped)
+            {
+                mapped = categoryFriendlyNames[key.toLowerCase()];
+            }
+            if (mapped)
+            {
+                addCategoryTokens(tokens, mapped);
+            }
+        });
+
+        const smartTags = new Set();
+        const tokenList = Array.from(tokens);
+
+        if (tokenList.includes('on foot')) smartTags.add('on-foot');
+        if (tokenList.includes('turrets') || tokenList.includes('turret')) smartTags.add('turret');
+        if (tokenList.includes('vehicle')) smartTags.add('vehicle');
+
+        const mapName = (actionMap.name || '').toLowerCase();
+        if (actionMap.ui_category === '@ui_CCSpaceFlight' || mapName.startsWith('spaceship_'))
+        {
+            smartTags.add('spaceship');
+        }
+
+        actionMapCategoryCache.set(actionMap.name, {
+            tokens: tokenList,
+            smartTags: Array.from(smartTags)
+        });
+    });
+}
+
+function getActionMapCategoryMeta(actionMap)
+{
+    if (!actionMap || !actionMap.name) return { tokens: [], smartTags: [] };
+    return actionMapCategoryCache.get(actionMap.name) || { tokens: [], smartTags: [] };
+}
+
+function restoreSmartFilterSelection()
+{
+    const savedFilter = localStorage.getItem('viewerSmartFilter');
+    if (savedFilter)
+    {
+        smartFilter = savedFilter;
+    }
+
+    const radio = document.querySelector(`input[name="smart-filter"][value="${smartFilter}"]`);
+    if (radio)
+    {
+        radio.checked = true;
+    }
+}
+
+// ========================================
 // Initialization
 // ========================================
 
@@ -283,6 +440,8 @@ window.initializeVisualView = function ()
 
     // Load display configuration from localStorage
     loadDisplayConfig();
+
+    restoreSmartFilterSelection();
 
     initializeEventListeners();
     loadCurrentBindings();
@@ -314,7 +473,10 @@ window.initializeVisualView = function ()
             if (getCurrentTemplate() && window.viewerImage)
             {
                 console.log('Redrawing canvas with updated bindings');
-                centerViewOnImage();
+                if (!shouldPreserveViewerTransform())
+                {
+                    centerViewOnImage();
+                }
                 resizeViewerCanvas();
                 drawButtons(window.viewerImage);
             }
@@ -359,6 +521,9 @@ window.initializeVisualView = function ()
             }
         }
     });
+
+    // Start live input detection for the currently shown device
+    startViewerInputDetection();
 };
 
 function initializeEventListeners()
@@ -439,6 +604,31 @@ function initializeEventListeners()
         });
     });
 
+    // Smart filter radios
+    document.querySelectorAll('input[name="smart-filter"]').forEach(radio =>
+    {
+        radio.addEventListener('change', (e) =>
+        {
+            smartFilter = e.target.value;
+            localStorage.setItem('viewerSmartFilter', smartFilter);
+
+            // Redraw canvas
+            if (window.viewerImage)
+            {
+                resizeViewerCanvas();
+            }
+
+            if (selectedButton)
+            {
+                const bindings = searchBindings(extractButtonIdentifier(
+                    selectedButton.buttonData,
+                    selectedButton.buttonData.direction || null
+                ));
+                showBindingInfo(selectedButton.buttonData, bindings);
+            }
+        });
+    });
+
     const selectTemplateBtn = document.getElementById('select-template-btn');
     if (selectTemplateBtn) selectTemplateBtn.addEventListener('click', openTemplateModal);
 
@@ -469,18 +659,181 @@ function initializeEventListeners()
         canvas.addEventListener('mouseup', onCanvasMouseUp);
         canvas.addEventListener('contextmenu', onCanvasContextMenu);
         canvas.addEventListener('wheel', onCanvasWheel, { passive: false });
+        canvas.addEventListener('pointerdown', onCanvasPointerDown);
+        canvas.addEventListener('pointermove', onCanvasPointerMove);
+        canvas.addEventListener('pointerup', onCanvasPointerUp);
+        canvas.addEventListener('pointercancel', onCanvasPointerCancel);
     }
+}
+
+// ========================================
+// Live Input Detection (Viewer Highlight)
+// ========================================
+
+function startViewerInputDetection()
+{
+    if (isViewerInputDetectionActive) return;
+
+    isViewerInputDetectionActive = true;
+
+    if (window.__TAURI__?.event?.listen)
+    {
+        window.__TAURI__.event.listen('input-detected', (event) =>
+        {
+            if (!isViewerInputDetectionActive) return;
+            if (!event || !event.payload) return;
+            handleViewerInputDetected(event.payload);
+        }).then(unlisten =>
+        {
+            viewerInputUnlisten = unlisten;
+        }).catch(error =>
+        {
+            console.error('[Joystick Viewer] Failed to listen for input-detected events:', error);
+        });
+    }
+
+    runViewerDetectionLoop();
+}
+
+function stopViewerInputDetection()
+{
+    isViewerInputDetectionActive = false;
+    if (viewerDetectionLoop)
+    {
+        clearTimeout(viewerDetectionLoop);
+        viewerDetectionLoop = null;
+    }
+    if (viewerInputUnlisten)
+    {
+        viewerInputUnlisten();
+        viewerInputUnlisten = null;
+    }
+}
+
+async function runViewerDetectionLoop()
+{
+    if (!isViewerInputDetectionActive) return;
+
+    try
+    {
+        await invoke('wait_for_inputs_with_events', {
+            sessionId: 'viewer-live-highlight',
+            initialTimeoutSecs: 60,
+            collectDurationSecs: 60
+        });
+    } catch (error)
+    {
+        console.warn('[Joystick Viewer] Live input detection loop error:', error);
+    }
+
+    if (isViewerInputDetectionActive)
+    {
+        viewerDetectionLoop = setTimeout(runViewerDetectionLoop, 10);
+    }
+}
+
+function handleViewerInputDetected(inputData)
+{
+    if (!inputData || !inputData.input_string) return;
+    if (!window.viewerImage || !getCurrentTemplate()) return;
+
+    const inputType = getInputType(inputData.input_string);
+    if (inputType !== 'button') return;
+
+    let mappedInput = inputData.input_string;
+    if (inputData.device_uuid && typeof window.applyDevicePrefixOverride === 'function')
+    {
+        mappedInput = window.applyDevicePrefixOverride(inputData.input_string, inputData.device_uuid);
+    }
+
+    const currentPrefix = getCurrentDevicePrefix().toLowerCase();
+    const prefixMatch = mappedInput.match(/^(js|gp)\d+/i);
+    if (!prefixMatch) return;
+
+    const inputPrefix = prefixMatch[0].toLowerCase();
+    if (inputPrefix !== currentPrefix) return;
+
+    const matchingBox = findMatchingBoxForInput(mappedInput);
+    if (matchingBox)
+    {
+        highlightLiveInputBox(matchingBox);
+    }
+}
+
+function findMatchingBoxForInput(bindingInput)
+{
+    const targetInput = bindingInput.toLowerCase().trim();
+
+    for (const box of clickableBoxes)
+    {
+        if (box.bindings && Array.isArray(box.bindings))
+        {
+            const hasMatch = box.bindings.some(binding =>
+            {
+                if (binding && typeof binding === 'object')
+                {
+                    if (binding.inputRaw && binding.inputRaw.toLowerCase().trim() === targetInput) return true;
+                    if (binding.input && binding.input.toLowerCase().trim() === targetInput) return true;
+                }
+                if (typeof binding === 'string' && binding.toLowerCase().trim() === targetInput) return true;
+                return false;
+            });
+
+            if (hasMatch) return box;
+        }
+
+        if (box.buttonData)
+        {
+            try
+            {
+                const info = extractButtonIdentifier(box.buttonData);
+                if (info.inputString && info.inputString.toLowerCase() === targetInput) return box;
+                if (info.buttonNum !== null && info.jsPrefix)
+                {
+                    const constructedInput = `${info.jsPrefix}button${info.buttonNum}`.toLowerCase();
+                    if (constructedInput === targetInput) return box;
+                }
+            } catch (e)
+            {
+                // Ignore errors during extraction
+            }
+        }
+    }
+
+    return null;
+}
+
+function highlightLiveInputBox(box)
+{
+    liveInputBox = box;
+
+    if (liveInputHighlightTimeout)
+    {
+        clearTimeout(liveInputHighlightTimeout);
+    }
+
+    liveInputHighlightTimeout = setTimeout(() =>
+    {
+        liveInputBox = null;
+        resizeViewerCanvas();
+        liveInputHighlightTimeout = null;
+    }, 350);
+
+    resizeViewerCanvas();
 }
 
 async function loadCurrentBindings()
 {
     try
     {
+        await loadCategoryMappingsIfNeeded();
+
         // Always get fresh merged bindings from backend (AllBinds + user customizations)
         // No need to cache - backend is the single source of truth
         console.log('Loading bindings from backend');
         currentBindings = await invoke('get_merged_bindings');
         console.log('Loaded bindings from backend with', currentBindings.action_maps?.length, 'action maps');
+        buildActionMapCategoryCache();
     } catch (error)
     {
         console.log('Error loading merged bindings:', error);
@@ -489,7 +842,7 @@ async function loadCurrentBindings()
 }
 
 // Refresh visual view bindings when switching back to this tab
-window.refreshVisualView = async function ()
+window.refreshVisualView = async function (preserveView = false)
 {
     try
     {
@@ -497,7 +850,13 @@ window.refreshVisualView = async function ()
         // Redraw canvas if template is loaded
         if (window.viewerImage && getCurrentTemplate())
         {
-            centerViewOnImage();
+            const shouldPreserve = preserveView || shouldPreserveViewerTransform();
+
+            // Only center the view if not preserving the current pan/zoom
+            if (!shouldPreserve)
+            {
+                centerViewOnImage();
+            }
             resizeViewerCanvas();
         }
         // Also refresh keyboard view if visible
@@ -578,6 +937,7 @@ function restoreViewState()
 {
     try
     {
+        const currentBindingsView = localStorage.getItem('bindingsView') || 'list';
         // Restore current page index (use viewer-specific key)
         const savedPageIndex = localStorage.getItem('viewerCurrentPageIndex');
         if (savedPageIndex !== null)
@@ -605,29 +965,83 @@ function restoreViewState()
             }
         }
 
-        // Restore pan and zoom using ViewerState helper (use viewer-specific key)
-        const savedPan = ViewerState.load('viewerPan');
-        const savedZoom = localStorage.getItem('viewerZoom');
-
-        if (savedPan)
-        {
-            pan.x = savedPan.x || 0;
-            pan.y = savedPan.y || 0;
-        }
-
-        if (savedZoom)
-        {
-            zoom = parseFloat(savedZoom);
-            if (isNaN(zoom) || zoom < 0.1 || zoom > 5)
-            {
-                zoom = 1.0; // Reset to default if invalid
-            }
-        }
+        restoreViewerTransformForView(currentBindingsView, true);
     }
     catch (error)
     {
         console.error('Error restoring view state:', error);
     }
+}
+
+function getViewerTransformStorageKeys(viewName)
+{
+    const normalizedView = viewName === 'split' ? 'split' : 'visual';
+    return {
+        panKey: `viewerPan_${normalizedView}`,
+        zoomKey: `viewerZoom_${normalizedView}`
+    };
+}
+
+function restoreViewerTransformForView(viewName, allowLegacy = false)
+{
+    const { panKey, zoomKey } = getViewerTransformStorageKeys(viewName);
+
+    let savedPan = ViewerState.load(panKey);
+    let savedZoom = localStorage.getItem(zoomKey);
+    let usedLegacy = false;
+
+    if ((!savedPan && !savedZoom) && allowLegacy)
+    {
+        savedPan = ViewerState.load('viewerPan');
+        savedZoom = localStorage.getItem('viewerZoom');
+        usedLegacy = Boolean(savedPan || savedZoom);
+    }
+
+    if (savedPan)
+    {
+        pan.x = savedPan.x || 0;
+        pan.y = savedPan.y || 0;
+    }
+
+    if (savedZoom)
+    {
+        zoom = parseFloat(savedZoom);
+        if (isNaN(zoom) || zoom < 0.1 || zoom > 5)
+        {
+            zoom = 1.0; // Reset to default if invalid
+        }
+    }
+
+    if (usedLegacy)
+    {
+        ViewerState.save(panKey, pan);
+        localStorage.setItem(zoomKey, zoom.toString());
+    }
+}
+
+window.restoreViewerTransformForCurrentView = function ()
+{
+    const currentView = localStorage.getItem('bindingsView') || 'list';
+    restoreViewerTransformForView(currentView, true);
+};
+
+function shouldPreserveViewerTransform()
+{
+    const currentView = localStorage.getItem('bindingsView') || 'list';
+    const { panKey, zoomKey } = getViewerTransformStorageKeys(currentView);
+    const savedPan = ViewerState.load(panKey);
+    const savedZoom = localStorage.getItem(zoomKey);
+
+    if (savedPan || savedZoom)
+    {
+        return true;
+    }
+
+    // Fallback to legacy keys
+    const legacyPan = ViewerState.load('viewerPan');
+    const legacyZoom = localStorage.getItem('viewerZoom');
+
+    return Boolean(legacyPan || legacyZoom);
 }
 
 function updateHideDefaultsButton()
@@ -1146,7 +1560,10 @@ function loadPageImage()
             window.viewerImage = img;
             window.viewerImageFlipped = imageFlipped;
 
-            centerViewOnImage();
+            if (!shouldPreserveViewerTransform())
+            {
+                centerViewOnImage();
+            }
 
             // Resize canvas to container and draw
             resizeViewerCanvas();
@@ -1219,13 +1636,79 @@ function resizeViewerCanvas()
     // Draw highlight border around selected box if any
     if (selectedBox)
     {
-        const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim();
+        if (isPulsing)
+        {
+            const highlightColor = '#ffffff'; // Pure white for pulsing
+
+            // Pulse effect based on time
+            const pulse = (Math.sin(Date.now() / 200) + 1) / 2; // 0 to 1
+            const glowSize = 10 + (pulse * 15);
+            const alpha = 0.6 + (pulse * 0.4);
+
+            ctx.save();
+
+            // Outer glow
+            ctx.shadowBlur = glowSize;
+            ctx.shadowColor = highlightColor;
+            ctx.strokeStyle = highlightColor;
+            ctx.lineWidth = 5;
+
+            // Draw multiple rings for "obviousness"
+            for (let i = 0; i < 3; i++)
+            {
+                const offset = i * 3;
+                roundRect(ctx, selectedBox.x - 5 - offset, selectedBox.y - 5 - offset, selectedBox.width + 10 + (offset * 2), selectedBox.height + 10 + (offset * 2), 10);
+                ctx.globalAlpha = alpha / (i + 1);
+                ctx.stroke();
+            }
+
+            ctx.restore();
+
+            // Request next frame for animation
+            requestAnimationFrame(resizeViewerCanvas);
+        }
+        else
+        {
+            // Static selection - match template-editor.js style
+            ctx.save();
+            const accentHover = getComputedStyle(document.documentElement).getPropertyValue('--accent-hover').trim();
+            ctx.strokeStyle = accentHover;
+            ctx.lineWidth = 3;
+
+            // Draw a single clean outline around the box
+            // We add a small padding (2px) to make it look like a selection frame
+            roundRect(ctx, selectedBox.x - 2, selectedBox.y - 2, selectedBox.width + 4, selectedBox.height + 4, 4);
+            ctx.stroke();
+
+            ctx.restore();
+        }
+    }
+
+    // Draw live input highlight (short pulse on detected button)
+    if (liveInputBox)
+    {
+        ctx.save();
+        const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim() || '#4a9eff';
         ctx.strokeStyle = accentPrimary;
         ctx.lineWidth = 3;
-        ctx.setLineDash([5, 5]);
-        roundRect(ctx, selectedBox.x - 3, selectedBox.y - 3, selectedBox.width + 6, selectedBox.height + 6, 6);
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = accentPrimary;
+        roundRect(ctx, liveInputBox.x - 3, liveInputBox.y - 3, liveInputBox.width + 6, liveInputBox.height + 6, 6);
         ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    // Draw drag-hover outline (action drag over input)
+    if (dragHoverBox)
+    {
+        ctx.save();
+        const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim() || '#4a9eff';
+        ctx.strokeStyle = accentPrimary;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([6, 4]);
+        roundRect(ctx, dragHoverBox.x - 3, dragHoverBox.y - 3, dragHoverBox.width + 6, dragHoverBox.height + 6, 6);
+        ctx.stroke();
+        ctx.restore();
     }
 
     ctx.restore();
@@ -1280,10 +1763,56 @@ function drawButtons(img, mode = DrawMode.NORMAL)
         {
             drawHat2WayHorizontal(button, mode);
         }
+        else if (button.buttonType === 'toggle3way-vertical')
+        {
+            drawToggle3WayVertical(button, mode);
+        }
+        else if (button.buttonType === 'toggle3way-horizontal')
+        {
+            drawToggle3WayHorizontal(button, mode);
+        }
+        else if (button.buttonType === 'rotary3way')
+        {
+            drawRotary3Way(button, mode);
+        }
+        else if (button.buttonType === 'rotary4way')
+        {
+            drawRotary4Way(button, mode);
+        }
         else
         {
             drawSingleButton(button, mode);
         }
+    });
+}
+
+function bindingsToContentLines(bindings)
+{
+    const safeBindings = Array.isArray(bindings) ? bindings : [];
+    if (safeBindings.length === 0)
+    {
+        const hiddenCount = bindings && typeof bindings.hiddenCount === 'number' ? bindings.hiddenCount : 0;
+        if (hiddenCount > 0)
+        {
+            const label = hiddenCount === 1 ? '1 hidden' : `${hiddenCount} hidden`;
+            return [`[muted]${label}`];
+        }
+        return [];
+    }
+
+    return safeBindings.map(binding =>
+    {
+        let actionLabel = binding.actionLabel || binding.action;
+        if (binding.multiTap && binding.multiTap > 1)
+        {
+            actionLabel += ` (${binding.multiTap}x)`;
+        }
+
+        if (binding.isDefault && !displayConfig.greenDefaults)
+        {
+            return `[muted]${actionLabel}`;
+        }
+        return `[action]${actionLabel}`;
     });
 }
 
@@ -1292,7 +1821,13 @@ function drawConnectingLineForButton(button, mode = DrawMode.NORMAL)
 {
     if (mode === DrawMode.BOUNDS_ONLY) return; // Skip lines in bounds-only mode
 
-    const isHat = button.buttonType && button.buttonType.startsWith('hat');
+    const isMultiInput = button.buttonType && (
+        button.buttonType.startsWith('hat') ||
+        button.buttonType === 'toggle3way-vertical' ||
+        button.buttonType === 'toggle3way-horizontal' ||
+        button.buttonType === 'rotary3way' ||
+        button.buttonType === 'rotary4way'
+    );
     let bindings;
 
     if (button.buttonType === 'hat4way')
@@ -1307,6 +1842,18 @@ function drawConnectingLineForButton(button, mode = DrawMode.NORMAL)
     {
         bindings = findAllBindingsForHatDirection(button, 'left');
     }
+    else if (button.buttonType === 'toggle3way-vertical')
+    {
+        bindings = findAllBindingsForHatDirection(button, 'up');
+    }
+    else if (button.buttonType === 'toggle3way-horizontal')
+    {
+        bindings = findAllBindingsForHatDirection(button, 'left');
+    }
+    else if (button.buttonType === 'rotary3way' || button.buttonType === 'rotary4way')
+    {
+        bindings = findAllBindingsForHatDirection(button, '1');
+    }
     else
     {
         bindings = findAllBindingsForButton(button);
@@ -1316,7 +1863,214 @@ function drawConnectingLineForButton(button, mode = DrawMode.NORMAL)
     const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim();
     const lineColor = bindings.length > 0 ? accentPrimary : textMuted;
 
-    drawConnectingLine(ctx, button.buttonPos, button.labelPos, displayConfig.frameWidth / 2, lineColor, isHat);
+    drawConnectingLine(ctx, button.buttonPos, button.labelPos, displayConfig.frameWidth / 2, lineColor, isMultiInput);
+}
+
+function drawToggle3WayVertical(toggle, mode = DrawMode.NORMAL)
+{
+    const directions = ['up', 'middle', 'down'];
+    const positions = getToggle3WayPositions(toggle.labelPos.x, toggle.labelPos.y, 'vertical', displayConfig.hatWidth, displayConfig.hatHeight);
+
+    if (mode === DrawMode.BOUNDS_ONLY)
+    {
+        updateBounds(toggle.buttonPos.x, toggle.buttonPos.y, 12, 12);
+        directions.forEach(dir =>
+        {
+            if (toggle.inputs && toggle.inputs[dir])
+            {
+                const pos = positions[dir];
+                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+            }
+        });
+        return;
+    }
+
+    drawButtonMarker(ctx, toggle.buttonPos, 1, false, true);
+
+    const onClickableBox = (box) =>
+    {
+        if (mode === DrawMode.NORMAL)
+        {
+            clickableBoxes.push(box);
+        }
+    };
+
+    const bindingsByDirection = {};
+    directions.forEach(dir =>
+    {
+        if (toggle.inputs && toggle.inputs[dir])
+        {
+            bindingsByDirection[dir] = findAllBindingsForHatDirection(toggle, dir);
+        }
+    });
+
+    drawToggle3WayBoxes(ctx, toggle, {
+        mode,
+        alpha: 1,
+        orientation: 'vertical',
+        getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || []),
+        colors: {
+            titleColor: '#aaa',
+            contentColor: '#ddd',
+            subtleColor: '#999',
+            mutedColor: '#888',
+            actionColor: '#7dd3c0'
+        },
+        onClickableBox,
+        bindingsByDirection,
+        buttonDataForDirection: (dir) => ({ ...toggle, direction: dir }),
+        hatFrameWidth: displayConfig.hatWidth,
+        hatFrameHeight: displayConfig.hatHeight,
+        numLines: displayConfig.numLines,
+        titleFontSize: displayConfig.titleSize + 'px',
+        contentFontSize: displayConfig.contentSize + 'px'
+    });
+}
+
+function drawToggle3WayHorizontal(toggle, mode = DrawMode.NORMAL)
+{
+    const directions = ['left', 'middle', 'right'];
+    const positions = getToggle3WayPositions(toggle.labelPos.x, toggle.labelPos.y, 'horizontal', displayConfig.hatWidth, displayConfig.hatHeight);
+
+    if (mode === DrawMode.BOUNDS_ONLY)
+    {
+        updateBounds(toggle.buttonPos.x, toggle.buttonPos.y, 12, 12);
+        directions.forEach(dir =>
+        {
+            if (toggle.inputs && toggle.inputs[dir])
+            {
+                const pos = positions[dir];
+                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+            }
+        });
+        return;
+    }
+
+    drawButtonMarker(ctx, toggle.buttonPos, 1, false, true);
+
+    const onClickableBox = (box) =>
+    {
+        if (mode === DrawMode.NORMAL)
+        {
+            clickableBoxes.push(box);
+        }
+    };
+
+    const bindingsByDirection = {};
+    directions.forEach(dir =>
+    {
+        if (toggle.inputs && toggle.inputs[dir])
+        {
+            bindingsByDirection[dir] = findAllBindingsForHatDirection(toggle, dir);
+        }
+    });
+
+    drawToggle3WayBoxes(ctx, toggle, {
+        mode,
+        alpha: 1,
+        orientation: 'horizontal',
+        getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || []),
+        colors: {
+            titleColor: '#aaa',
+            contentColor: '#ddd',
+            subtleColor: '#999',
+            mutedColor: '#888',
+            actionColor: '#7dd3c0'
+        },
+        onClickableBox,
+        bindingsByDirection,
+        buttonDataForDirection: (dir) => ({ ...toggle, direction: dir }),
+        hatFrameWidth: displayConfig.hatWidth,
+        hatFrameHeight: displayConfig.hatHeight,
+        numLines: displayConfig.numLines,
+        titleFontSize: displayConfig.titleSize + 'px',
+        contentFontSize: displayConfig.contentSize + 'px'
+    });
+}
+
+function drawRotary3Way(rotary, mode = DrawMode.NORMAL)
+{
+    drawRotaryInternal(rotary, mode, 3);
+}
+
+function drawRotary4Way(rotary, mode = DrawMode.NORMAL)
+{
+    drawRotaryInternal(rotary, mode, 4);
+}
+
+function drawRotaryInternal(rotary, mode, steps)
+{
+    const baseDirections = [];
+    for (let i = 1; i <= steps; i++) baseDirections.push(String(i));
+    const includePush = true;
+    const hasPush = includePush && rotary.inputs && rotary.inputs.push;
+
+    const positions = getRotaryPositions(rotary.labelPos.x, rotary.labelPos.y, steps, hasPush, displayConfig.hatWidth, displayConfig.hatHeight);
+
+    if (mode === DrawMode.BOUNDS_ONLY)
+    {
+        updateBounds(rotary.buttonPos.x, rotary.buttonPos.y, 12, 12);
+        baseDirections.forEach(dir =>
+        {
+            if (rotary.inputs && rotary.inputs[dir])
+            {
+                const pos = positions[dir];
+                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+            }
+        });
+        if (hasPush)
+        {
+            const pos = positions.push;
+            updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+        }
+        return;
+    }
+
+    drawButtonMarker(ctx, rotary.buttonPos, 1, false, true);
+
+    const onClickableBox = (box) =>
+    {
+        if (mode === DrawMode.NORMAL)
+        {
+            clickableBoxes.push(box);
+        }
+    };
+
+    const bindingsByDirection = {};
+    baseDirections.forEach(dir =>
+    {
+        if (rotary.inputs && rotary.inputs[dir])
+        {
+            bindingsByDirection[dir] = findAllBindingsForHatDirection(rotary, dir);
+        }
+    });
+    if (hasPush)
+    {
+        bindingsByDirection.push = findAllBindingsForHatDirection(rotary, 'push');
+    }
+
+    drawRotaryBoxes(ctx, rotary, {
+        mode,
+        alpha: 1,
+        steps,
+        includePush: true,
+        getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || []),
+        colors: {
+            titleColor: '#aaa',
+            contentColor: '#ddd',
+            subtleColor: '#999',
+            mutedColor: '#888',
+            actionColor: '#7dd3c0'
+        },
+        onClickableBox,
+        bindingsByDirection,
+        buttonDataForDirection: (dir) => ({ ...rotary, direction: dir }),
+        hatFrameWidth: displayConfig.hatWidth,
+        hatFrameHeight: displayConfig.hatHeight,
+        numLines: displayConfig.numLines,
+        titleFontSize: displayConfig.titleSize + 'px',
+        contentFontSize: displayConfig.contentSize + 'px'
+    });
 }
 
 function drawSingleButton(button, mode = DrawMode.NORMAL)
@@ -1420,28 +2174,8 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
         alpha: 1,
         getContentForDirection: (dir, input) =>
         {
-            // Get bindings for this direction
             const bindings = bindingsByDirection[dir] || [];
-
-            // Convert bindings to content lines array
-            return bindings.map(binding =>
-            {
-                // Prepare action label with multi-tap indicator if present
-                let actionLabel = binding.actionLabel || binding.action;
-                if (binding.multiTap && binding.multiTap > 1)
-                {
-                    actionLabel += ` (${binding.multiTap}x)`;
-                }
-
-                // Apply styling based on binding type
-                // If greenDefaults is enabled, show all bindings in green; otherwise defaults are muted (grey)
-                if (binding.isDefault && !displayConfig.greenDefaults)
-                {
-                    return `[muted]${actionLabel}`;
-                }
-                // Use [action] prefix for bound actions to apply green color
-                return `[action]${actionLabel}`;
-            });
+            return bindingsToContentLines(bindings);
         },
         colors: {
             titleColor: '#aaa',
@@ -1527,21 +2261,7 @@ function drawHat2WayVertical(hat, mode = DrawMode.NORMAL)
         getContentForDirection: (dir, input) =>
         {
             const bindings = bindingsByDirection[dir] || [];
-            return bindings.map(binding =>
-            {
-                let actionLabel = binding.actionLabel || binding.action;
-                if (binding.multiTap && binding.multiTap > 1)
-                {
-                    actionLabel += ` (${binding.multiTap}x)`;
-                }
-
-                // If greenDefaults is enabled, show all bindings in green; otherwise defaults are muted (grey)
-                if (binding.isDefault && !displayConfig.greenDefaults)
-                {
-                    return `[muted]${actionLabel}`;
-                }
-                return `[action]${actionLabel}`;
-            });
+            return bindingsToContentLines(bindings);
         },
         colors: {
             titleColor: '#aaa',
@@ -1623,21 +2343,7 @@ function drawHat2WayHorizontal(hat, mode = DrawMode.NORMAL)
         getContentForDirection: (dir, input) =>
         {
             const bindings = bindingsByDirection[dir] || [];
-            return bindings.map(binding =>
-            {
-                let actionLabel = binding.actionLabel || binding.action;
-                if (binding.multiTap && binding.multiTap > 1)
-                {
-                    actionLabel += ` (${binding.multiTap}x)`;
-                }
-
-                // If greenDefaults is enabled, show all bindings in green; otherwise defaults are muted (grey)
-                if (binding.isDefault && !displayConfig.greenDefaults)
-                {
-                    return `[muted]${actionLabel}`;
-                }
-                return `[action]${actionLabel}`;
-            });
+            return bindingsToContentLines(bindings);
         },
         colors: {
             titleColor: '#aaa',
@@ -1677,29 +2383,11 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
         }
     };
 
-    // Convert bindings to content lines array for improved rendering
-    const contentLines = bindings.map(binding =>
-    {
-        // Prepare action label with multi-tap indicator if present
-        let actionLabel = binding.actionLabel || binding.action;
-        if (binding.multiTap && binding.multiTap > 1)
-        {
-            actionLabel += ` (${binding.multiTap}x)`;
-        }
-
-        // Apply styling based on binding type
-        // If greenDefaults is enabled, show all bindings in green; otherwise defaults are muted (grey)
-        if (binding.isDefault && !displayConfig.greenDefaults)
-        {
-            return `[muted]${actionLabel}`;
-        }
-        // Use [action] prefix for bound actions to apply green color
-        return `[action]${actionLabel}`;
-    });
+    const contentLines = bindingsToContentLines(bindings);
 
     // Use improved rendering function from button-renderer.js with display config
     drawButtonBox(ctx, x, y, label, contentLines, compact, {
-        hasBinding: bindings.length > 0,
+        hasBinding: contentLines.length > 0,
         buttonData: buttonData,
         mode: mode,
         onClickableBox: onClickableBox,
@@ -1727,6 +2415,90 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
 // ========================================
 
 // Helper to extract button ID or input string from button data
+/**
+ * Specialized version of extractButtonIdentifier for searching across templates
+ * This allows passing a specific devicePrefix instead of relying on global state
+ */
+function extractButtonIdentifierForSearch(button, devicePrefix, direction = null)
+{
+    const jsPrefix = `${devicePrefix}_`;
+    let buttonNum = null;
+    let inputString = null;
+
+    // For hat direction, get the specific input for that direction
+    if (direction && button.inputs && button.inputs[direction])
+    {
+        const dirInput = button.inputs[direction];
+        if (typeof dirInput === 'string')
+        {
+            let processedInput = dirInput;
+            if (!processedInput.match(/^(js|gp)\d+_/i))
+            {
+                processedInput = `${devicePrefix}_${processedInput}`;
+            }
+            inputString = normalizeInputStringForStick(processedInput, jsPrefix);
+        }
+        else if (typeof dirInput === 'object' && dirInput.id !== undefined)
+        {
+            buttonNum = dirInput.id;
+        }
+        return { buttonNum, inputString, jsPrefix };
+    }
+
+    if (button.buttonId !== undefined && button.buttonId !== null)
+    {
+        buttonNum = button.buttonId;
+    }
+    else if (button.inputs && button.inputs.main)
+    {
+        const main = button.inputs.main;
+        if (typeof main === 'object' && main.id !== undefined)
+        {
+            if (main.type === 'axis')
+            {
+                const directionSuffix = main.direction ? `_${main.direction}` : '';
+                const axisString = `${devicePrefix}_axis${main.id}${directionSuffix}`;
+                inputString = normalizeInputStringForStick(axisString, jsPrefix);
+            }
+            else
+            {
+                buttonNum = main.id;
+            }
+        }
+        else if (typeof main === 'string')
+        {
+            if (main.match(/^(x|y|z|rotx|roty|rotz|slider1|slider2)$/i))
+            {
+                inputString = `${jsPrefix}${main.toLowerCase()}`;
+            }
+            else
+            {
+                const withPrefix = main.includes('_') ? main : `${devicePrefix}_${main}`;
+                inputString = normalizeInputStringForStick(withPrefix, jsPrefix);
+            }
+        }
+    }
+    else if (button.inputType === 'axis' && button.inputId !== undefined && button.inputId !== null)
+    {
+        if (typeof button.inputId === 'string' && button.inputId.match(/^(x|y|z|rotx|roty|rotz|slider1|slider2)$/i))
+        {
+            inputString = `${jsPrefix}${button.inputId.toLowerCase()}`;
+        }
+        else
+        {
+            const directionSuffix = button.axisDirection ? `_${button.axisDirection}` : '';
+            const axisString = `${devicePrefix}_axis${button.inputId}${directionSuffix}`;
+            inputString = normalizeInputStringForStick(axisString, jsPrefix);
+        }
+    }
+    else if (button.inputType === 'button' && button.inputId !== undefined && button.inputId !== null)
+    {
+        buttonNum = button.inputId;
+    }
+
+    return { buttonNum, inputString, jsPrefix };
+}
+
 function extractButtonIdentifier(button, direction = null)
 {
     const jsNum = getCurrentJoystickNumber();
@@ -1867,12 +2639,19 @@ function searchBindings(buttonIdentifier)
 {
     if (!currentBindings) return [];
 
+    if (actionMapCategoryCache.size === 0)
+    {
+        buildActionMapCategoryCache();
+    }
+
     const { buttonNum, inputString, jsNum, jsPrefix } = buttonIdentifier;
     const allBindings = [];
 
     // Search through all action maps for ALL bindings that use this button
     for (const actionMap of currentBindings.action_maps)
     {
+        const actionMapMeta = getActionMapCategoryMeta(actionMap);
+
         for (const action of actionMap.actions)
         {
             if (!action.bindings || action.bindings.length === 0) continue;
@@ -1979,7 +2758,8 @@ function searchBindings(buttonIdentifier)
                             isDefault: binding.is_default,
                             modifiers: modifiers,
                             multiTap: binding.multi_tap,
-                            activationMode: binding.activation_mode || null
+                            activationMode: binding.activation_mode || null,
+                            smartTags: actionMapMeta.smartTags
                         });
                     }
                 }
@@ -2007,6 +2787,17 @@ function searchBindings(buttonIdentifier)
             b.modifiers && b.modifiers.includes(modifierFilter)
         );
     }
+
+    if (smartFilter !== 'all')
+    {
+        filteredBindings = filteredBindings.filter(b =>
+            b.smartTags && b.smartTags.includes(smartFilter)
+        );
+    }
+
+    const hiddenCount = Math.max(0, allBindings.length - filteredBindings.length);
+    filteredBindings.hiddenCount = hiddenCount;
+    filteredBindings.totalCount = allBindings.length;
 
     return filteredBindings;
 }
@@ -2045,6 +2836,102 @@ function getCanvasCoords(event)
     return { x: imgX, y: imgY };
 }
 
+function findClickableBoxAtPoint(imgX, imgY)
+{
+    for (const box of clickableBoxes)
+    {
+        if (imgX >= box.x && imgX <= box.x + box.width &&
+            imgY >= box.y && imgY <= box.y + box.height)
+        {
+            return box;
+        }
+    }
+    return null;
+}
+
+function updateDragHoverFromEvent(event)
+{
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const isInside = event.clientX >= rect.left && event.clientX <= rect.right &&
+        event.clientY >= rect.top && event.clientY <= rect.bottom;
+
+    if (!isInside)
+    {
+        if (dragHoverBox)
+        {
+            dragHoverBox = null;
+            resizeViewerCanvas();
+        }
+        return;
+    }
+
+    const coords = getCanvasCoords(event);
+    const hoverBox = findClickableBoxAtPoint(coords.x, coords.y);
+
+    if (hoverBox !== dragHoverBox)
+    {
+        dragHoverBox = hoverBox;
+        resizeViewerCanvas();
+    }
+}
+
+function clearDragHover()
+{
+    if (dragHoverBox)
+    {
+        dragHoverBox = null;
+        resizeViewerCanvas();
+    }
+}
+
+window.updateJoystickDragHover = updateDragHoverFromEvent;
+window.clearJoystickDragHover = clearDragHover;
+
+window.completeJoystickDragDrop = async function (actionMapName, actionName, event)
+{
+    if (!dragHoverBox)
+    {
+        clearDragHover();
+        return false;
+    }
+
+    const inputString = getButtonIdString(dragHoverBox.buttonData);
+    if (!inputString || inputString === 'Unknown')
+    {
+        clearDragHover();
+        return false;
+    }
+
+    try
+    {
+        if (window.applyBinding)
+        {
+            await window.applyBinding(actionMapName, actionName, inputString, null, null);
+            if (window.showSuccessMessage)
+            {
+                window.showSuccessMessage(`Bound ${actionName} → ${inputString}`);
+            }
+        }
+        else
+        {
+            console.warn('applyBinding not available for drag-drop binding');
+        }
+    }
+    catch (error)
+    {
+        console.error('Error binding action from drag-drop:', error);
+        if (window.showAlert) await window.showAlert(`Error binding action: ${error}`, 'Error');
+    }
+    finally
+    {
+        clearDragHover();
+    }
+
+    return true;
+};
+
 function onCanvasMouseDown(event)
 {
     // Middle click (button 1) or right click (button 2) for panning
@@ -2052,7 +2939,167 @@ function onCanvasMouseDown(event)
     {
         isPanning = true;
         lastPanPosition = { x: event.clientX, y: event.clientY };
+        panMouseButton = event.button;
+        panSuppressContextMenu = event.button === 2;
         canvas.style.cursor = 'grabbing';
+        window.addEventListener('mousemove', onPanMouseMove, true);
+        window.addEventListener('mouseup', onPanMouseUp, true);
+        window.addEventListener('contextmenu', onPanContextMenu, true);
+        if (panContextMenuTimeout)
+        {
+            clearTimeout(panContextMenuTimeout);
+            panContextMenuTimeout = null;
+        }
+        event.preventDefault();
+        return;
+    }
+
+    // Left click: potential drag from input box
+    if (event.button === 0)
+    {
+        const currentView = localStorage.getItem('bindingsView') || 'list';
+        if (currentView !== 'split') return;
+
+        const coords = getCanvasCoords(event);
+        const hoverBox = findClickableBoxAtPoint(coords.x, coords.y);
+        if (hoverBox)
+        {
+            inputDragState = {
+                box: hoverBox,
+                startX: event.clientX,
+                startY: event.clientY
+            };
+            inputDragStart = { x: event.clientX, y: event.clientY };
+            event.preventDefault();
+        }
+    }
+}
+
+function onCanvasPointerDown(event)
+{
+    // Middle click (button 1) or right click (button 2) for panning
+    if (event.button === 1 || event.button === 2)
+    {
+        isPanning = true;
+        lastPanPosition = { x: event.clientX, y: event.clientY };
+        panMouseButton = event.button;
+        panSuppressContextMenu = event.button === 2;
+        panPointerId = event.pointerId;
+        canvas.style.cursor = 'grabbing';
+        if (canvas.setPointerCapture)
+        {
+            canvas.setPointerCapture(event.pointerId);
+        }
+        window.addEventListener('contextmenu', onPanContextMenu, true);
+        if (panContextMenuTimeout)
+        {
+            clearTimeout(panContextMenuTimeout);
+            panContextMenuTimeout = null;
+        }
+        event.preventDefault();
+    }
+}
+
+function onCanvasPointerMove(event)
+{
+    if (isPanning && panPointerId === event.pointerId)
+    {
+        onPanMouseMove(event);
+        event.preventDefault();
+    }
+}
+
+function onCanvasPointerUp(event)
+{
+    if (isPanning && panPointerId === event.pointerId)
+    {
+        stopPanning();
+        event.preventDefault();
+    }
+}
+
+function onCanvasPointerCancel(event)
+{
+    if (isPanning && panPointerId === event.pointerId)
+    {
+        stopPanning();
+    }
+}
+
+function onPanMouseMove(event)
+{
+    if (!isPanning) return;
+
+    if (panSuppressContextMenu)
+    {
+        event.preventDefault();
+    }
+
+    const deltaX = event.clientX - lastPanPosition.x;
+    const deltaY = event.clientY - lastPanPosition.y;
+
+    pan.x += deltaX;
+    pan.y += deltaY;
+
+    lastPanPosition = { x: event.clientX, y: event.clientY };
+    resizeViewerCanvas();
+}
+
+function stopPanning()
+{
+    if (!isPanning) return;
+
+    isPanning = false;
+    panMouseButton = null;
+    if (panPointerId !== null && canvas && canvas.releasePointerCapture)
+    {
+        try
+        {
+            if (canvas.hasPointerCapture && canvas.hasPointerCapture(panPointerId))
+            {
+                canvas.releasePointerCapture(panPointerId);
+            }
+        }
+        catch (error)
+        {
+            console.warn('Failed to release pointer capture:', error);
+        }
+    }
+    panPointerId = null;
+    if (panSuppressContextMenu)
+    {
+        panSuppressContextMenuUntil = Date.now() + 500;
+    }
+    panSuppressContextMenu = false;
+    canvas.style.cursor = 'default';
+
+    window.removeEventListener('mousemove', onPanMouseMove, true);
+    window.removeEventListener('mouseup', onPanMouseUp, true);
+    if (panContextMenuTimeout)
+    {
+        clearTimeout(panContextMenuTimeout);
+    }
+    panContextMenuTimeout = setTimeout(() =>
+    {
+        window.removeEventListener('contextmenu', onPanContextMenu, true);
+        panContextMenuTimeout = null;
+    }, 600);
+
+    // Save pan state to localStorage
+    ViewerState.saveViewState();
+}
+
+function onPanMouseUp(event)
+{
+    if (!isPanning) return;
+    if (panMouseButton !== null && event.button !== panMouseButton && event.buttons !== 0) return;
+    stopPanning();
+}
+
+function onPanContextMenu(event)
+{
+    if (panSuppressContextMenu || Date.now() < panSuppressContextMenuUntil)
+    {
         event.preventDefault();
     }
 }
@@ -2060,7 +3107,7 @@ function onCanvasMouseDown(event)
 function onCanvasContextMenu(event)
 {
     // Prevent right-click context menu when over canvas
-    if (isPanning || event.button === 2)
+    if (isPanning || panSuppressContextMenu || Date.now() < panSuppressContextMenuUntil || event.button === 2)
     {
         event.preventDefault();
     }
@@ -2070,11 +3117,19 @@ function onCanvasMouseUp(event)
 {
     if (isPanning)
     {
-        isPanning = false;
-        canvas.style.cursor = 'default';
+        stopPanning();
+        return;
+    }
 
-        // Save pan state to localStorage
-        ViewerState.saveViewState();
+    if (isInputDragging)
+    {
+        finalizeInputDrag(event);
+        return;
+    }
+
+    if (inputDragState)
+    {
+        inputDragState = null;
     }
 }
 
@@ -2110,9 +3165,22 @@ function zoomBy(delta, event = null)
 // Canvas click handler
 function onCanvasClick(event)
 {
+    if (inputDragSuppressClick)
+    {
+        inputDragSuppressClick = false;
+        return;
+    }
+
     const coords = getCanvasCoords(event);
     const imgX = coords.x;
     const imgY = coords.y;
+
+    // Clear any existing highlight timeout if user clicks manually
+    if (highlightTimeout)
+    {
+        clearTimeout(highlightTimeout);
+        highlightTimeout = null;
+    }
 
     // Check if click is within any clickable box (boxes are in image coordinates)
     for (const box of clickableBoxes)
@@ -2121,6 +3189,7 @@ function onCanvasClick(event)
             imgY >= box.y && imgY <= box.y + box.height)
         {
             selectedBox = box;
+            isPulsing = false; // Static outline for manual clicks
             showBindingInfo(box.buttonData, box.bindings);
             resizeViewerCanvas();
             return;
@@ -2128,9 +3197,7 @@ function onCanvasClick(event)
     }
 
     // Click outside any box - hide info panel and deselect
-    selectedBox = null;
     hideBindingInfo();
-    resizeViewerCanvas();
 } function onCanvasMouseMove(event)
 {
     if (isPanning)
@@ -2143,6 +3210,23 @@ function onCanvasClick(event)
 
         lastPanPosition = { x: event.clientX, y: event.clientY };
         resizeViewerCanvas();
+        return;
+    }
+
+    if (inputDragState && !isInputDragging)
+    {
+        const dx = event.clientX - inputDragState.startX;
+        const dy = event.clientY - inputDragState.startY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        if (distance > 5)
+        {
+            startInputDrag(event);
+        }
+    }
+
+    if (isInputDragging)
+    {
+        updateInputDrag(event);
         return;
     }
 
@@ -2163,6 +3247,127 @@ function onCanvasClick(event)
     }
 
     canvas.style.cursor = isOverBox ? 'pointer' : 'default';
+}
+
+function startInputDrag(event)
+{
+    if (!inputDragState || !inputDragState.box) return;
+
+    isInputDragging = true;
+    inputDragSuppressClick = true;
+
+    const inputString = getButtonIdString(inputDragState.box.buttonData);
+    inputDragGhostEl = document.createElement('div');
+    inputDragGhostEl.className = 'input-drag-ghost';
+    inputDragGhostEl.textContent = inputString;
+    document.body.appendChild(inputDragGhostEl);
+
+    document.body.classList.add('is-input-dragging');
+    updateInputDrag(event);
+
+    document.addEventListener('mousemove', onInputDragMove, true);
+    document.addEventListener('mouseup', onInputDragEnd, true);
+}
+
+function onInputDragMove(event)
+{
+    if (!isInputDragging) return;
+    updateInputDrag(event);
+}
+
+function onInputDragEnd(event)
+{
+    if (!isInputDragging) return;
+    finalizeInputDrag(event);
+}
+
+function updateInputDrag(event)
+{
+    if (!inputDragGhostEl) return;
+
+    const offsetX = 12;
+    const offsetY = 12;
+    inputDragGhostEl.style.left = `${event.clientX + offsetX}px`;
+    inputDragGhostEl.style.top = `${event.clientY + offsetY}px`;
+
+    updateActionDropHover(event);
+}
+
+function updateActionDropHover(event)
+{
+    const element = document.elementFromPoint(event.clientX, event.clientY);
+    const actionItem = element ? element.closest('.action-item') : null;
+
+    if (actionItem !== actionDropTarget)
+    {
+        if (actionDropTarget)
+        {
+            actionDropTarget.classList.remove('action-drop-hover');
+        }
+
+        actionDropTarget = actionItem;
+        if (actionDropTarget)
+        {
+            actionDropTarget.classList.add('action-drop-hover');
+        }
+    }
+}
+
+async function finalizeInputDrag(event)
+{
+    try
+    {
+        if (actionDropTarget && inputDragState && inputDragState.box)
+        {
+            const actionMapName = actionDropTarget.dataset.actionMap;
+            const actionName = actionDropTarget.dataset.actionName;
+            const inputString = getButtonIdString(inputDragState.box.buttonData);
+
+            if (actionMapName && actionName && inputString && inputString !== 'Unknown')
+            {
+                if (window.applyBinding)
+                {
+                    await window.applyBinding(actionMapName, actionName, inputString, null, null);
+                    if (window.showSuccessMessage)
+                    {
+                        window.showSuccessMessage(`Bound ${actionName} ← ${inputString}`);
+                    }
+                }
+            }
+        }
+    }
+    catch (error)
+    {
+        console.error('Error binding from input drag:', error);
+        if (window.showAlert) await window.showAlert(`Error binding action: ${error}`, 'Error');
+    }
+    finally
+    {
+        cleanupInputDrag();
+    }
+}
+
+function cleanupInputDrag()
+{
+    document.removeEventListener('mousemove', onInputDragMove, true);
+    document.removeEventListener('mouseup', onInputDragEnd, true);
+
+    if (inputDragGhostEl)
+    {
+        inputDragGhostEl.remove();
+        inputDragGhostEl = null;
+    }
+
+    if (actionDropTarget)
+    {
+        actionDropTarget.classList.remove('action-drop-hover');
+        actionDropTarget = null;
+    }
+
+    document.body.classList.remove('is-input-dragging');
+    isInputDragging = false;
+    inputDragState = null;
+    inputDragStart = null;
 }
 
 function formatActivationModeLabel(mode)
@@ -2279,6 +3484,16 @@ window.hideBindingInfo = function ()
         panel.style.display = 'none';
     }
     selectedButton = null;
+    selectedBox = null;
+    isPulsing = false;
+
+    if (highlightTimeout)
+    {
+        clearTimeout(highlightTimeout);
+        highlightTimeout = null;
+    }
+
+    resizeViewerCanvas();
 };
 
 // Helper function to escape strings for HTML attributes
@@ -2392,8 +3607,11 @@ const ViewerState = {
 
     saveViewState()
     {
-        this.save('viewerPan', pan);
-        localStorage.setItem('viewerZoom', zoom.toString());
+        const currentView = localStorage.getItem('bindingsView') || 'list';
+        const { panKey, zoomKey } = getViewerTransformStorageKeys(currentView);
+
+        this.save(panKey, pan);
+        localStorage.setItem(zoomKey, zoom.toString());
         localStorage.setItem('viewerCurrentPageIndex', currentPageIndex.toString());
         localStorage.setItem('viewerHideDefaultBindings', hideDefaultBindings.toString());
         localStorage.setItem('viewerModifierFilter', modifierFilter);
@@ -4475,6 +5693,393 @@ function resetKeyboardView()
     keyboardZoom = 1.0;
     keyboardPan = { x: 0, y: 0 };
     updateKeyboardTransform();
+}
+
+// ========================================
+// Button Highlighting (from Keybindings Page)
+// ========================================
+
+/**
+ * Highlight a button in the visual view when clicked from keybindings page
+ * @param {string} bindingInput - The binding input string (e.g., "js1_button13", "kb1_f", "gp1_a")
+ * @param {string} actionName - The action display name for console logging
+ */
+window.highlightButtonInJoystickViewer = function (bindingInput, actionName)
+{
+    console.log('[Joystick Viewer] Highlighting button:', bindingInput, 'for action:', actionName);
+
+    // Clear any existing highlight timeout
+    if (highlightTimeout)
+    {
+        clearTimeout(highlightTimeout);
+        highlightTimeout = null;
+    }
+
+    // Check what type of input this is
+    const isJoystickInput = bindingInput.match(/^(js|gp)\d+_/i);
+    const isKeyboardInput = bindingInput.match(/^kb\d+_/i);
+    const isMouseInput = bindingInput.match(/^mouse\d+_/i);
+
+    if (isKeyboardInput)
+    {
+        // Keyboard input - highlight in keyboard view
+        highlightKeyInKeyboardView(bindingInput, actionName);
+        return;
+    }
+
+    if (isMouseInput)
+    {
+        console.log('[Joystick Viewer] Mouse input highlighting not yet implemented:', bindingInput);
+        return;
+    }
+
+    if (!isJoystickInput)
+    {
+        console.warn('[Joystick Viewer] Unknown input type for highlighting:', bindingInput);
+        return;
+    }
+
+    // Helper to find matching box in current clickableBoxes
+    const findMatchingBox = () =>
+    {
+        for (const box of clickableBoxes)
+        {
+            if (box.bindings && Array.isArray(box.bindings))
+            {
+                const hasMatch = box.bindings.some(binding =>
+                {
+                    // Normalize target input
+                    const targetInput = bindingInput.toLowerCase().trim();
+
+                    // 1. Check inputRaw (e.g., "js1_button1")
+                    if (binding.inputRaw && binding.inputRaw.toLowerCase().trim() === targetInput) return true;
+
+                    // 2. Check input (display name, e.g., "Joystick 1 - Button 1")
+                    if (binding.input && binding.input.toLowerCase().trim() === targetInput) return true;
+
+                    // 3. Check if the binding is a string and matches
+                    if (typeof binding === 'string' && binding.toLowerCase().trim() === targetInput) return true;
+
+                    return false;
+                });
+
+                if (hasMatch) return box;
+            }
+
+            // Also check if the box represents the button itself, even if unbound
+            if (box.buttonData)
+            {
+                try
+                {
+                    const info = extractButtonIdentifier(box.buttonData);
+                    const targetInput = bindingInput.toLowerCase().trim();
+
+                    // Check exact inputString match
+                    if (info.inputString && info.inputString.toLowerCase() === targetInput) return true;
+
+                    // Check button number match (e.g., js2_button18)
+                    if (info.buttonNum !== null && info.jsPrefix)
+                    {
+                        const constructedInput = `${info.jsPrefix}button${info.buttonNum}`.toLowerCase();
+                        if (constructedInput === targetInput) return true;
+                    }
+                } catch (e)
+                {
+                    // Ignore errors during extraction
+                }
+            }
+        }
+        return null;
+    };
+
+    // 1. Try to find in current view
+    let matchingBox = findMatchingBox();
+
+    // 2. If not found, search other pages and templates
+    if (!matchingBox)
+    {
+        console.log('[Joystick Viewer] Button not found on current page, searching other pages and templates...');
+
+        const targetInput = bindingInput.toLowerCase().trim();
+        let foundTemplateIndex = -1;
+        let foundPageIndex = -1;
+
+        // Helper to check a list of buttons for a match
+        const checkButtons = (buttons, devicePrefix) =>
+        {
+            if (!buttons) return false;
+            const jsPrefix = `${devicePrefix}_`;
+
+            for (const button of buttons)
+            {
+                // Check main button input
+                const info = extractButtonIdentifierForSearch(button, devicePrefix);
+                if (info.inputString && info.inputString.toLowerCase() === targetInput) return true;
+                if (info.buttonNum !== null && info.jsPrefix)
+                {
+                    const constructedInput = `${info.jsPrefix}button${info.buttonNum}`.toLowerCase();
+                    if (constructedInput === targetInput) return true;
+                }
+
+                // Check hat directions
+                if (button.inputs)
+                {
+                    const directions = ['up', 'down', 'left', 'right', 'push'];
+                    for (const dir of directions)
+                    {
+                        if (button.inputs[dir])
+                        {
+                            const hatInfo = extractButtonIdentifierForSearch(button, devicePrefix, dir);
+                            if (hatInfo.inputString && hatInfo.inputString.toLowerCase() === targetInput) return true;
+                            if (hatInfo.buttonNum !== null && hatInfo.jsPrefix)
+                            {
+                                const constructedHatInput = `${hatInfo.jsPrefix}button${hatInfo.buttonNum}`.toLowerCase();
+                                if (constructedHatInput === targetInput) return true;
+                            }
+                        }
+                    }
+                }
+            }
+            return false;
+        };
+
+        // Search all templates and their pages
+        for (let t = 0; t < loadedTemplates.length; t++)
+        {
+            const template = loadedTemplates[t].template;
+
+            // Check pages in this template
+            if (template.pages && template.pages.length > 0)
+            {
+                for (let p = 0; p < template.pages.length; p++)
+                {
+                    // Skip if it's the current template and current page (already checked)
+                    if (t === currentTemplateIndex && p === currentPageIndex) continue;
+
+                    const page = template.pages[p];
+                    const devicePrefix = page.device_prefix || page.devicePrefix || `js${page.joystickNumber || 1}`;
+
+                    if (checkButtons(page.buttons, devicePrefix))
+                    {
+                        foundTemplateIndex = t;
+                        foundPageIndex = p;
+                        break;
+                    }
+                }
+            } else
+            {
+                // Legacy structure
+                // Skip if it's the current template (already checked current page)
+                if (t === currentTemplateIndex)
+                {
+                    // Check other pages in current legacy template
+                    const otherPage = currentPageIndex === 0 ? 1 : 0;
+                    const stick = otherPage === 0 ? template.leftStick : template.rightStick;
+                    const devicePrefix = stick?.device_prefix || stick?.devicePrefix || `js${otherPage + 1}`;
+
+                    if (checkButtons(stick?.buttons || stick, devicePrefix))
+                    {
+                        foundTemplateIndex = t;
+                        foundPageIndex = otherPage;
+                        break;
+                    }
+                    continue;
+                }
+
+                // Check other legacy templates
+                // 1. Check main buttons
+                if (checkButtons(template.buttons, template.device_prefix || template.devicePrefix || 'js1'))
+                {
+                    foundTemplateIndex = t;
+                    foundPageIndex = 0;
+                    break;
+                }
+                // 2. Check left stick
+                const leftStick = template.leftStick;
+                if (checkButtons(leftStick?.buttons || leftStick, leftStick?.device_prefix || leftStick?.devicePrefix || 'js1'))
+                {
+                    foundTemplateIndex = t;
+                    foundPageIndex = 0;
+                    break;
+                }
+                // 3. Check right stick
+                const rightStick = template.rightStick;
+                if (checkButtons(rightStick?.buttons || rightStick, rightStick?.device_prefix || rightStick?.devicePrefix || 'js2'))
+                {
+                    foundTemplateIndex = t;
+                    foundPageIndex = 1;
+                    break;
+                }
+            }
+
+            if (foundTemplateIndex !== -1) break;
+        }
+
+        // If found, switch to it
+        if (foundTemplateIndex !== -1)
+        {
+            console.log(`[Joystick Viewer] Found button on template ${foundTemplateIndex}, page ${foundPageIndex}. Switching...`);
+
+            // 1. Switch template if needed
+            if (foundTemplateIndex !== currentTemplateIndex)
+            {
+                switchTemplate(foundTemplateIndex);
+                // Force UI update for tabs
+                updateTemplateTabs();
+            }
+
+            // 2. Switch page if needed
+            // We need to wait a bit for the template to load if we switched
+            const switchPageAction = () =>
+            {
+                if (foundPageIndex !== currentPageIndex)
+                {
+                    switchPage(foundPageIndex);
+                }
+
+                // 3. Highlight the box
+                setTimeout(() =>
+                {
+                    matchingBox = findMatchingBox();
+                    if (matchingBox)
+                    {
+                        highlightBox(matchingBox);
+                    } else
+                    {
+                        console.warn('[Joystick Viewer] Switched page but still could not find matching box');
+                        // One last try with a longer delay
+                        setTimeout(() =>
+                        {
+                            matchingBox = findMatchingBox();
+                            if (matchingBox) highlightBox(matchingBox);
+                        }, 300);
+                    }
+                }, 200);
+            };
+
+            if (foundTemplateIndex !== currentTemplateIndex)
+            {
+                // Longer delay for template switch as it involves image loading
+                setTimeout(switchPageAction, 400);
+            } else
+            {
+                switchPageAction();
+            }
+            return;
+        }
+    }
+
+    if (matchingBox)
+    {
+        highlightBox(matchingBox);
+    }
+    else
+    {
+        console.warn('[Joystick Viewer] No matching button found for input:', bindingInput);
+        // Force a redraw just in case
+        if (clickableBoxes.length === 0) resizeViewerCanvas();
+    }
+};
+
+function highlightBox(box)
+{
+    console.log('[Joystick Viewer] Found matching box to highlight:', box);
+
+    // Set the selected box for highlighting
+    selectedBox = box;
+    isPulsing = true; // Enable pulsing for external highlights
+
+    // Redraw the canvas to show the highlight
+    resizeViewerCanvas();
+
+    // Pan to center the highlighted box in view
+    panToBox(box);
+
+    // Clear the highlight after 5 seconds
+    highlightTimeout = setTimeout(() =>
+    {
+        selectedBox = null;
+        isPulsing = false;
+        resizeViewerCanvas();
+        highlightTimeout = null;
+        console.log('[Joystick Viewer] Highlight cleared');
+    }, 5000);
+}
+
+/**
+ * Highlight a key in the keyboard view
+ * @param {string} bindingInput - The keyboard binding input string (e.g., "kb1_f")
+ * @param {string} actionName - The action display name
+ */
+function highlightKeyInKeyboardView(bindingInput, actionName)
+{
+    console.log('[Keyboard View] Highlighting key:', bindingInput, 'for action:', actionName);
+
+    // Extract the key from the binding (e.g., "kb1_f" -> "f")
+    const match = bindingInput.match(/^kb\d+_(.+)$/i);
+    if (!match)
+    {
+        console.warn('[Keyboard View] Could not parse key from binding:', bindingInput);
+        return;
+    }
+
+    const keyCode = match[1]; // e.g., "f", "lalt", "space", etc.
+
+    // Find the key element in the keyboard layout
+    const keyElement = document.querySelector(`.keyboard-key[data-key="${keyCode}"], .keyboard-key[data-key="${keyCode.toUpperCase()}"]`);
+
+    if (keyElement)
+    {
+        // Add highlight class
+        keyElement.classList.add('key-highlighted');
+
+        // Also highlight the action text if present
+        const actionTextElements = keyElement.querySelectorAll('.key-binding-action');
+        actionTextElements.forEach(el => el.classList.add('action-highlighted'));
+
+        // Clear highlight after 5 seconds
+        highlightTimeout = setTimeout(() =>
+        {
+            keyElement.classList.remove('key-highlighted');
+            actionTextElements.forEach(el => el.classList.remove('action-highlighted'));
+            highlightTimeout = null;
+            console.log('[Keyboard View] Highlight cleared');
+        }, 5000);
+    }
+    else
+    {
+        console.warn('[Keyboard View] Key element not found for:', keyCode);
+    }
+}
+
+/**
+ * Pan the canvas to center a box in view
+ * @param {Object} box - The box to pan to (with x, y, width, height properties)
+ */
+function panToBox(box)
+{
+    if (!box || !canvas) return;
+
+    const container = document.getElementById('viewer-canvas-container');
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+
+    // Calculate the center of the box in canvas coordinates
+    const boxCenterX = box.x + box.width / 2;
+    const boxCenterY = box.y + box.height / 2;
+
+    // Calculate the center of the viewport
+    const viewportCenterX = rect.width / 2;
+    const viewportCenterY = rect.height / 2;
+
+    // Calculate the pan needed to center the box
+    // We need to account for current zoom
+    pan.x = viewportCenterX - (boxCenterX * zoom);
+    pan.y = viewportCenterY - (boxCenterY * zoom);
+
+    // Redraw with new pan
+    resizeViewerCanvas();
 }
 
 // Initialize on DOM ready

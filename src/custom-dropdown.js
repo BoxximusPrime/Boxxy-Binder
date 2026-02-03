@@ -48,6 +48,10 @@ export class CustomDropdown
         // Set initial button text
         this.updateButtonText();
 
+        // Store bound event listeners for removal
+        this._outsideClickListener = (e) => this.handleOutsideClick(e);
+        this._keyboardListener = (e) => this.handleKeyboard(e);
+
         // Append to wrapper
         this.wrapper.appendChild(this.button);
         this.wrapper.appendChild(this.menu);
@@ -69,8 +73,8 @@ export class CustomDropdown
             this.toggle();
         });
 
-        document.addEventListener('click', (e) => this.handleOutsideClick(e));
-        document.addEventListener('keydown', (e) => this.handleKeyboard(e));
+        document.addEventListener('click', this._outsideClickListener);
+        document.addEventListener('keydown', this._keyboardListener);
     }
 
     populateFromSelect()
@@ -287,7 +291,7 @@ export class CustomDropdown
 
     handleOutsideClick(e)
     {
-        if (!this.wrapper.contains(e.target) && this.isOpen)
+        if (this.wrapper && !this.wrapper.contains(e.target) && this.isOpen)
         {
             this.close();
         }
@@ -334,6 +338,16 @@ export class CustomDropdown
 
     destroy()
     {
+        // Remove global event listeners
+        if (this._outsideClickListener)
+        {
+            document.removeEventListener('click', this._outsideClickListener);
+        }
+        if (this._keyboardListener)
+        {
+            document.removeEventListener('keydown', this._keyboardListener);
+        }
+
         // Clean up event listeners
         if (this.hideTooltipTimeout)
         {
@@ -363,5 +377,7 @@ export class CustomDropdown
         this.menu = null;
         this.wrapper = null;
         this.items = null;
+        this._outsideClickListener = null;
+        this._keyboardListener = null;
     }
 }

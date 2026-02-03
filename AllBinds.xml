@@ -117,62 +117,8 @@
 							UIShowCurve="1" UIShowInvert="1" />
 						<optiongroup name="turret_aim_yaw" UILabel="@ui_COTurretAimYaw"
 							UIShowCurve="1" UIShowInvert="1" />
-						<optiongroup name="turret_vj_mode" UILabel="@ui_CO_Turret_VJMode"
-							UIShowCurve="1" UIShowInvert="1">
-							<optiongroup name="turret_vj_mode_pitch"
-								UILabel="@ui_CO_Turret_VJoyModePitch" UIShowCurve="1"
-								UIShowInvert="1" />
-							<optiongroup name="turret_vj_mode_yaw"
-								UILabel="@ui_CO_Turret_VJoyModeYaw" UIShowCurve="1" UIShowInvert="1" />
-						</optiongroup>
-						<optiongroup name="turret_relative_mode" UILabel="@ui_COTurretRelativeMode"
-							UIShowCurve="1" UIShowInvert="1">
-							<optiongroup name="turret_relative_mode_pitch"
-								UILabel="@ui_CO_TurretRelativeModePitch" UIShowCurve="1"
-								UIShowInvert="1" />
-							<optiongroup name="turret_relative_mode_yaw"
-								UILabel="@ui_CO_TurretRelativeModeYaw" UIShowCurve="1"
-								UIShowInvert="1" />
-						</optiongroup>
 						<optiongroup name="turret_limiter_relative"
 							UILabel="@ui_CO_TurretLimiterRelative" UIShowInvert="1" />
-					</optiongroup>
-					<optiongroup name="any_vehicle" UILabel="@ui_COAnyVehicle" UIShowCurve="-1"
-						UIShowInvert="-1">
-						<optiongroup name="av_vj_mode" UILabel="@ui_COVJMode" UIShowCurve="1"
-							UIShowInvert="-1">
-							<optiongroup name="av_vj_mode_pitch" UILabel="@ui_COVJModePitch"
-								UIShowCurve="1" UIShowInvert="1" />
-							<optiongroup name="av_vj_mode_yaw" UILabel="@ui_COVJModeYaw"
-								UIShowCurve="1" UIShowInvert="1" />
-							<optiongroup name="av_vj_mode_roll" UILabel="@ui_COVJModeRoll"
-								UIShowCurve="1" UIShowInvert="1" />
-						</optiongroup>
-						<optiongroup name="av_vj_mode_fixed" UILabel="@ui_COVJFixedMode"
-							UIShowCurve="1" UIShowInvert="-1">
-							<optiongroup name="av_vj_fixed_mode_pitch"
-								UILabel="@ui_COVJFixedModePitch" UIShowCurve="1" UIShowInvert="1" />
-							<optiongroup name="av_vj_fixed_mode_yaw" UILabel="@ui_COVJFixedModeYaw"
-								UIShowCurve="1" UIShowInvert="1" />
-							<optiongroup name="av_vj_fixed_mode_roll"
-								UILabel="@ui_COVJFixedModeRoll" UIShowCurve="1" UIShowInvert="1" />
-						</optiongroup>
-						<optiongroup name="av_relative_mode" UILabel="@ui_CORelativeMode"
-							UIShowCurve="1" UIShowInvert="-1">
-							<optiongroup name="av_relative_mode_pitch"
-								UILabel="@ui_CORelativeModePitch" UIShowCurve="1" UIShowInvert="1" />
-							<optiongroup name="av_relative_mode_yaw" UILabel="@ui_CORelativeModeYaw"
-								UIShowCurve="1" UIShowInvert="1" />
-							<optiongroup name="av_relative_mode_roll"
-								UILabel="@ui_CORelativeModeRoll" UIShowCurve="1" UIShowInvert="1" />
-						</optiongroup>
-						<optiongroup name="av_aim_mode" UILabel="@ui_COAimMode" UIShowCurve="1"
-							UIShowInvert="-1">
-							<optiongroup name="av_aim_mode_pitch" UILabel="@ui_COAimModePitch"
-								UIShowCurve="1" UIShowInvert="1" />
-							<optiongroup name="av_aim_mode_yaw" UILabel="@ui_COAimModeYaw"
-								UIShowCurve="1" UIShowInvert="1" />
-						</optiongroup>
 					</optiongroup>
 					<optiongroup name="manned_ground_vehicle" UILabel="@ui_COMannedGroundVehicle"
 						UIShowCurve="-1" UIShowInvert="-1">
@@ -314,13 +260,6 @@
 								UIShowCurve="1" UIShowInvert="1" invert_cvar="cl_invertController" />
 							<optiongroup name="flight_view_yaw" UILabel="@ui_COFlightViewX"
 								UIShowCurve="1" UIShowInvert="1" />
-						</optiongroup>
-						<optiongroup name="flight_throttle" UILabel="@ui_COThrottleSensitivity"
-							UIShowCurve="1" UIShowInvert="-1">
-							<optiongroup name="flight_thrust_abs_half" invert="1"
-								UILabel="@ui_COFlightThrustAbsHalf" UIShowCurve="1" UIShowInvert="1" />
-							<optiongroup name="flight_thrust_abs_full" invert="0"
-								UILabel="@ui_COFlightThrustAbsFull" UIShowCurve="1" UIShowInvert="1" />
 						</optiongroup>
 					</optiongroup>
 					<optiongroup name="turret" UILabel="@ui_COTurret" UIShowCurve="1"
@@ -610,6 +549,15 @@
 		<action name="v_operator_mode_cycle_back" activationMode="tap" keyboard=" " gamepad=" "
 			joystick=" " UILabel="@ui_v_operator_mode_toggle_prev"
 			UIDescription="@ui_v_operator_mode_toggle_prev_desc" Category="ShipSystems" />
+		<action name="v_light_amplification_toggle" activationMode="tap" keyboard="ralt+l"
+			gamepad=" " joystick=" " UILabel="@ui_v_light_amplification_toggle"
+			UIDescription="@ui_v_light_amplification_toggle_desc" />
+		<action name="v_light_amplification_on" activationMode="tap" keyboard=" " gamepad=" "
+			joystick=" " UILabel="@ui_v_light_amplification_on"
+			UIDescription="@ui_v_light_amplification_on_desc" />
+		<action name="v_light_amplification_off" activationMode="tap" keyboard=" " gamepad=" "
+			joystick=" " UILabel="@ui_v_light_amplification_off"
+			UIDescription="@ui_v_light_amplification_off_desc" />
 	</actionmap>
 	<actionmap name="spaceship_general" version="2" UILabel="@ui_CGSpaceFlightCockpit"
 		UICategory="@ui_CCSpaceFlight">

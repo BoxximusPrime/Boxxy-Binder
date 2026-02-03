@@ -518,13 +518,13 @@ fn export_keybindings(
                     // Build Product string in Star Citizen format
                     // Format: " DeviceName    {GUID}"
                     let product_string = if let Some(ref uuid) = device.uuid {
-                        // Convert uuid format "vendor_id:product_id" (e.g., "231d:0200")
+                        // Convert uuid format "vendor_id:product_id[:...]" (e.g., "231d:0200" or "231d:0200:sn:...")
                         // to SC GUID format: {PPPPVVVV-0000-0000-0000-504944564944}
                         // Example: vendor=0x231D, product=0x0200 -> {0200231D-...}
                         info!("Device UUID: {}", uuid);
                         let parts: Vec<&str> = uuid.split(':').collect();
                         info!("Split parts: {:?}", parts);
-                        if parts.len() == 2 {
+                        if parts.len() >= 2 {
                             // Pad each part to 4 hex digits and uppercase
                             let vendor_hex = format!("{:0>4}", parts[0].to_uppercase());
                             let product_hex = format!("{:0>4}", parts[1].to_uppercase());
