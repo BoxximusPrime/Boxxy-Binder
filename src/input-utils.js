@@ -4,6 +4,16 @@
 
 import { convertToSCAxisFormat, shouldInvertAxis, getAxisMapping } from './axis-mapping.js';
 
+export function ensureSliderNumber(inputString)
+{
+    if (typeof inputString !== 'string' || !inputString)
+    {
+        return inputString;
+    }
+
+    return inputString.replace(/(^|[_+])slider(?=($|[_+]))/gi, '$1slider1');
+}
+
 /**
  * Parse a Star Citizen input string and return a friendly display name
  * @param {string} inputString - SC format like "js1_button3", "gp1_button3", "js1_hat1_up", "js2_axis1", "js2_axis1_positive"
@@ -202,6 +212,41 @@ export function processDetectedInput(result)
 }
 
 /**
+ * Normalize HID axis names to Star Citizen axis tokens.
+ * This handles common aliases like Slider/Dial/Wheel that SC expects as slider1/slider2.
+ * @param {string} hidAxisName - HID axis name from descriptor (e.g., "X", "Rz", "Slider")
+ * @returns {string|null} - SC axis token (e.g., "x", "rotz", "slider1") or null
+ */
+export function normalizeHidAxisNameToSCAxisName(hidAxisName)
+{
+    if (!hidAxisName || typeof hidAxisName !== 'string')
+    {
+        return null;
+    }
+
+    const normalized = hidAxisName.toLowerCase().replace(/\s+/g, '');
+
+    const map = {
+        'x': 'x',
+        'y': 'y',
+        'z': 'z',
+        'rx': 'rotx',
+        'ry': 'roty',
+        'rz': 'rotz',
+        'rotationx': 'rotx',
+        'rotationy': 'roty',
+        'rotationz': 'rotz',
+        'slider': 'slider1',
+        'slider1': 'slider1',
+        'dial': 'slider2',
+        'slider2': 'slider2',
+        'wheel': 'slider2'
+    };
+
+    return ensureSliderNumber(map[normalized] || normalized);
+}
+
+/**
  * Convert any input string to Star Citizen format
  * For axes: converts "js1_axis3_positive" or "gp1_axis3_positive" to "js1_z" or "gp1_z"
  * For buttons/hats: returns unchanged
@@ -216,9 +261,9 @@ export function toStarCitizenFormat(inputString)
     {
         const jsInstance = getJoystickInstance(inputString);
         const mapping = getAxisMapping(jsInstance);
-        return convertToSCAxisFormat(inputString, mapping);
+        return ensureSliderNumber(convertToSCAxisFormat(inputString, mapping));
     }
 
     // Buttons and hats are already in correct format (both js and gp prefixes are valid)
-    return inputString;
+    return ensureSliderNumber(inputString);
 }

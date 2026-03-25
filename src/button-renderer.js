@@ -151,15 +151,16 @@ export function drawConnectingLine(ctx, buttonPos, labelPos, boxHalfWidth, lineC
 /**
  * Draw a single button marker (the circle on the image)
  */
-export function drawButtonMarker(ctx, buttonPos, zoom, hasBinding = false, isHat = false)
+export function drawButtonMarker(ctx, buttonPos, zoom, hasBinding = false, isHat = false, isSelected = false)
 {
     const handleSize = isHat ? 6 : (7 / zoom);
     // Get CSS variable colors
     const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim();
     const bgLight = getComputedStyle(document.documentElement).getPropertyValue('--bg-light').trim();
+    const buttonBorder = getComputedStyle(document.documentElement).getPropertyValue('--button-border').trim() || bgLight;
     ctx.fillStyle = hasBinding ? accentPrimary : bgLight;
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 2 / zoom;
+    ctx.strokeStyle = isSelected ? accentPrimary : buttonBorder;
+    ctx.lineWidth = (isSelected ? 3 : 2) / zoom;
     ctx.beginPath();
     ctx.arc(buttonPos.x, buttonPos.y, handleSize, 0, Math.PI * 2);
     ctx.fill();
@@ -492,11 +493,14 @@ export function buildButtonLabelContent(button)
         }
         else
         {
-            // Try to match Star Citizen axis format: js1_x, js1_y, js1_z, js1_rotx, js1_roty, js1_rotz, js1_slider
-            const scAxisMatch = button.inputs.main.match(/_(x|y|z|rotx|roty|rotz|slider)$/i);
+            // Try to match Star Citizen axis format: js1_x, js1_y, js1_z, js1_rotx, js1_roty, js1_rotz, js1_slider1
+            const scAxisMatch = button.inputs.main.match(/_(x|y|z|rotx|roty|rotz|slider1|slider2)$/i);
             if (scAxisMatch)
             {
-                const axisName = scAxisMatch[1].toUpperCase();
+                const axisKey = scAxisMatch[1].toLowerCase();
+                const axisName = axisKey === 'slider1' ? 'Slider 1'
+                    : axisKey === 'slider2' ? 'Slider 2'
+                        : axisKey.toUpperCase();
                 contentLines.push(`[subtle]Axis ${axisName}`);
             }
         }

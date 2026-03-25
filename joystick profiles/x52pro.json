@@ -452,10 +452,10 @@
         },
         "buttonType": "simple",
         "inputs": {
-          "main": "js1_slider"
+          "main": "js1_slider1"
         },
         "inputType": "axis",
-        "inputId": "slider"
+        "inputId": "slider1"
       },
       {
         "id": 1763628155037,
@@ -963,10 +963,10 @@
           },
           "buttonType": "simple",
           "inputs": {
-            "main": "js1_slider"
+            "main": "js1_slider1"
           },
           "inputType": "axis",
-          "inputId": "slider"
+          "inputId": "slider1"
         },
         {
           "id": 1763628155037,

@@ -70,8 +70,8 @@
             "y": 210
           },
           "labelPos": {
-            "x": 880,
-            "y": 100
+            "x": 870,
+            "y": 140
           },
           "buttonType": "simple",
           "inputs": {
@@ -134,8 +134,8 @@
             "y": 350
           },
           "labelPos": {
-            "x": 880,
-            "y": 340
+            "x": 870,
+            "y": 420
           },
           "buttonType": "hat4way",
           "inputs": {
@@ -267,7 +267,7 @@
           },
           "labelPos": {
             "x": 140,
-            "y": 150
+            "y": 140
           },
           "buttonType": "simple",
           "inputs": {
@@ -301,7 +301,7 @@
             "y": 680
           },
           "labelPos": {
-            "x": 220,
+            "x": 240,
             "y": 1130
           },
           "buttonType": "simple",
@@ -319,7 +319,7 @@
             "y": 680
           },
           "labelPos": {
-            "x": 450,
+            "x": 440,
             "y": 1130
           },
           "buttonType": "simple",
@@ -337,7 +337,7 @@
             "y": 680
           },
           "labelPos": {
-            "x": 680,
+            "x": 670,
             "y": 1130
           },
           "buttonType": "simple",
@@ -382,24 +382,6 @@
           },
           "inputType": "button",
           "inputId": 2
-        },
-        {
-          "id": 1770008943323,
-          "name": "Pinky Button",
-          "buttonPos": {
-            "x": 487,
-            "y": 537.5
-          },
-          "labelPos": {
-            "x": 860,
-            "y": 590
-          },
-          "buttonType": "simple",
-          "inputs": {
-            "main": "js2_button5"
-          },
-          "inputType": "button",
-          "inputId": 5
         }
       ]
     },
@@ -423,7 +405,7 @@
       "mirror_from_page_id": "",
       "buttons": [
         {
-          "id": 1770008969509.1714,
+          "id": 1763518327107.358,
           "name": "Left Hat",
           "buttonPos": {
             "x": 584,
@@ -443,7 +425,7 @@
           }
         },
         {
-          "id": 1770008969509.9502,
+          "id": 1763518327107.339,
           "name": "Right Hat",
           "buttonPos": {
             "x": 474,
@@ -462,15 +444,15 @@
           }
         },
         {
-          "id": 1770008969509.757,
+          "id": 1763518327107.6726,
           "name": "Red Button",
           "buttonPos": {
             "x": 454,
             "y": 210
           },
           "labelPos": {
-            "x": 144,
-            "y": 100
+            "x": 154,
+            "y": 140
           },
           "buttonType": "simple",
           "inputs": {
@@ -478,7 +460,7 @@
           }
         },
         {
-          "id": 1770008969509.745,
+          "id": 1763518327107.3613,
           "name": "Trigger",
           "buttonPos": {
             "x": 554,
@@ -494,7 +476,7 @@
           }
         },
         {
-          "id": 1770008969509.4204,
+          "id": 1763518327107.5686,
           "name": "Rocker Switch Up",
           "buttonPos": {
             "x": 554,
@@ -510,7 +492,7 @@
           }
         },
         {
-          "id": 1770008969509.3838,
+          "id": 1763518327107.0605,
           "name": "Rocker Switch Down",
           "buttonPos": {
             "x": 554,
@@ -526,15 +508,15 @@
           }
         },
         {
-          "id": 1770008969509.8394,
+          "id": 1763518327107.8643,
           "name": "Side Hat",
           "buttonPos": {
             "x": 464,
             "y": 350
           },
           "labelPos": {
-            "x": 144,
-            "y": 340
+            "x": 154,
+            "y": 420
           },
           "buttonType": "hat4way",
           "inputs": {
@@ -546,7 +528,7 @@
           }
         },
         {
-          "id": 1770008969509.8306,
+          "id": 1763518327107.3967,
           "name": "F3",
           "buttonPos": {
             "x": 464,
@@ -562,7 +544,7 @@
           }
         },
         {
-          "id": 1770008969509.6594,
+          "id": 1763518327107.2952,
           "name": "F1",
           "buttonPos": {
             "x": 554,
@@ -578,7 +560,7 @@
           }
         },
         {
-          "id": 1770008969509.5325,
+          "id": 1763518327107.8804,
           "name": "F2",
           "buttonPos": {
             "x": 644,
@@ -594,7 +576,7 @@
           }
         },
         {
-          "id": 1770008969509.0674,
+          "id": 1763518327107.1377,
           "name": "Right Encoder Up",
           "buttonPos": {
             "x": 454,
@@ -610,7 +592,7 @@
           }
         },
         {
-          "id": 1770008969509.241,
+          "id": 1763518327107.7559,
           "name": "Right Encoder Down",
           "buttonPos": {
             "x": 454,
@@ -626,7 +608,7 @@
           }
         },
         {
-          "id": 1770008969509.5198,
+          "id": 1763518327107.6118,
           "name": "Left Encoder Up",
           "buttonPos": {
             "x": 654,
@@ -642,7 +624,7 @@
           }
         },
         {
-          "id": 1770008969509.3887,
+          "id": 1763518327107.2407,
           "name": "Left Encoder Down",
           "buttonPos": {
             "x": 654,
@@ -658,7 +640,7 @@
           }
         },
         {
-          "id": 1770008969509.2173,
+          "id": 1763518327107.3486,
           "name": "Side Button",
           "buttonPos": {
             "x": 624,
@@ -666,7 +648,7 @@
           },
           "labelPos": {
             "x": 884,
-            "y": 150
+            "y": 140
           },
           "buttonType": "simple",
           "inputs": {
@@ -674,7 +656,7 @@
           }
         },
         {
-          "id": 1770008969509.822,
+          "id": 1763518327107.6765,
           "name": "Middle Hat",
           "buttonPos": {
             "x": 524,
@@ -693,14 +675,14 @@
           }
         },
         {
-          "id": 1770008969509.3196,
+          "id": 1763518327107.717,
           "name": "Y Axis",
           "buttonPos": {
             "x": 554,
             "y": 680
           },
           "labelPos": {
-            "x": 804,
+            "x": 814,
             "y": 1130
           },
           "buttonType": "simple",
@@ -711,14 +693,14 @@
           "inputId": "y"
         },
         {
-          "id": 1770008969509.996,
+          "id": 1763518327107.7021,
           "name": "X Axis",
           "buttonPos": {
             "x": 554,
             "y": 680
           },
           "labelPos": {
-            "x": 574,
+            "x": 584,
             "y": 1130
           },
           "buttonType": "simple",
@@ -729,14 +711,14 @@
           "inputId": "x"
         },
         {
-          "id": 1770008969509.9026,
+          "id": 1763518327107.189,
           "name": "Rot Z",
           "buttonPos": {
             "x": 554,
             "y": 680
           },
           "labelPos": {
-            "x": 344,
+            "x": 354,
             "y": 1130
           },
           "buttonType": "simple",
@@ -747,7 +729,7 @@
           "inputId": "rotz"
         },
         {
-          "id": 1770008969509.9094,
+          "id": 1763518327107.101,
           "name": "Slider",
           "buttonPos": {
             "x": 554,
@@ -765,7 +747,7 @@
           "inputId": "z"
         },
         {
-          "id": 1770008969509.4663,
+          "id": 1763518327107.721,
           "name": "Trigger Stage 2",
           "buttonPos": {
             "x": 544,
@@ -781,24 +763,6 @@
           },
           "inputType": "button",
           "inputId": 2
-        },
-        {
-          "id": 1770008969509.3416,
-          "name": "Pinky Button",
-          "buttonPos": {
-            "x": 537,
-            "y": 537.5
-          },
-          "labelPos": {
-            "x": 164,
-            "y": 590
-          },
-          "buttonType": "simple",
-          "inputs": {
-            "main": "js2_button5"
-          },
-          "inputType": "button",
-          "inputId": 5
         }
       ]
     }

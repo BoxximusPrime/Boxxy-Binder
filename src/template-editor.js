@@ -34,10 +34,12 @@ import
 import { initializeTemplatePagesUI, refreshTemplatePagesUI } from './template-editor-v2.js';
 
 import
-    {
-        drawToggle3WayBoxes,
-        drawRotaryBoxes
-    } from './input-type-renderer.js';
+{
+    drawToggle3WayBoxes,
+    drawRotaryBoxes,
+    getToggle3WayPositions,
+    getRotaryPositions
+} from './input-type-renderer.js';
 
 /**
  * Migrate template from v1.0 to v1.1
@@ -178,8 +180,78 @@ function migrateTemplateToV11(template)
     return template;
 }
 
+function ensureTemplateSliderNumber(inputString)
+{
+    if (typeof inputString !== 'string' || !inputString)
+    {
+        return inputString;
+    }
+
+    return inputString.replace(/(^|[_+])slider(?=($|[_+]))/gi, '$1slider1');
+}
+
+function normalizeTemplateButtonInputs(button)
+{
+    if (!button || typeof button !== 'object')
+    {
+        return;
+    }
+
+    if (button.inputs && typeof button.inputs === 'object')
+    {
+        Object.keys(button.inputs).forEach(key =>
+        {
+            if (typeof button.inputs[key] === 'string')
+            {
+                button.inputs[key] = ensureTemplateSliderNumber(button.inputs[key]);
+            }
+        });
+    }
+
+    if (button.inputType === 'axis' && typeof button.inputId === 'string')
+    {
+        button.inputId = ensureTemplateSliderNumber(button.inputId);
+    }
+}
+
+function normalizeTemplateSliderIds(template)
+{
+    if (!template || typeof template !== 'object')
+    {
+        return template;
+    }
+
+    if (Array.isArray(template.buttons))
+    {
+        template.buttons.forEach(normalizeTemplateButtonInputs);
+    }
+
+    if (Array.isArray(template.pages))
+    {
+        template.pages.forEach(page =>
+        {
+            if (Array.isArray(page?.buttons))
+            {
+                page.buttons.forEach(normalizeTemplateButtonInputs);
+            }
+        });
+    }
+
+    if (Array.isArray(template.leftStick?.buttons))
+    {
+        template.leftStick.buttons.forEach(normalizeTemplateButtonInputs);
+    }
+
+    if (Array.isArray(template.rightStick?.buttons))
+    {
+        template.rightStick.buttons.forEach(normalizeTemplateButtonInputs);
+    }
+
+    return template;
+}
+
 // Lazy imports - will be loaded when needed
-let parseInputDisplayName, parseInputShortName, getInputType, toStarCitizenFormat;
+let parseInputDisplayName, parseInputShortName, getInputType, toStarCitizenFormat, normalizeHidAxisNameToSCAxisName, ensureSliderNumber;
 
 // Load utilities when template editor initializes
 async function loadUtilities()
@@ -191,6 +263,8 @@ async function loadUtilities()
         parseInputShortName = utils.parseInputShortName;
         getInputType = utils.getInputType;
         toStarCitizenFormat = utils.toStarCitizenFormat;
+        normalizeHidAxisNameToSCAxisName = utils.normalizeHidAxisNameToSCAxisName;
+        ensureSliderNumber = utils.ensureSliderNumber;
     }
 }
 
@@ -886,14 +960,17 @@ function getInputDisplayInfo(button, jsNumOverride = null)
                 info.shortLabel = 'Axis';
             }
         }
-        else if (normalized.match(/^(js|gp)\d+_(x|y|z|rotx|roty|rotz|slider)$/))
+        else if (normalized.match(/^(js|gp)\d+_(x|y|z|rotx|roty|rotz|slider1|slider2)$/))
         {
             // Star Citizen axis names (e.g., js1_x, js1_y, js1_rotx)
             info.type = 'axis';
-            const scAxisMatch = normalized.match(/_(x|y|z|rotx|roty|rotz|slider)$/);
+            const scAxisMatch = normalized.match(/_(x|y|z|rotx|roty|rotz|slider1|slider2)$/);
             if (scAxisMatch)
             {
-                const axisName = scAxisMatch[1].toUpperCase();
+                const axisKey = scAxisMatch[1].toLowerCase();
+                const axisName = axisKey === 'slider1' ? 'Slider 1'
+                    : axisKey === 'slider2' ? 'Slider 2'
+                        : axisKey.toUpperCase();
                 info.shortLabel = `Axis ${axisName}`;
             }
             else
@@ -1351,7 +1428,8 @@ function drawButton(button, isTemp = false)
     // Draw button position marker using shared function
     ctx.save();
     ctx.globalAlpha = alpha;
-    drawButtonMarker(ctx, button.buttonPos, zoom, !isMultiInput, isMultiInput);
+    const isSelected = selectedButtonId !== null && String(button.id) === String(selectedButtonId);
+    drawButtonMarker(ctx, button.buttonPos, zoom, !isMultiInput, isMultiInput, isSelected);
     ctx.restore();
 
     // Draw label box(es) using shared functions
@@ -1518,12 +1596,19 @@ function drawButton(button, isTemp = false)
     }
 
     // Highlight if selected
-    if (button.id === selectedButtonId && !isTemp)
+    if (isSelected && !isTemp)
     {
         ctx.save();
-        const accentHover = getComputedStyle(document.documentElement).getPropertyValue('--accent-hover').trim();
-        ctx.strokeStyle = accentHover;
+        const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim();
+        ctx.strokeStyle = accentPrimary;
         ctx.lineWidth = 3;
+
+        // Explicitly highlight selected button marker so selected singular buttons
+        // always show a themed border on the marker itself.
+        const markerRadius = isMultiInput ? 6 : (7 / zoom);
+        ctx.beginPath();
+        ctx.arc(button.buttonPos.x, button.buttonPos.y, markerRadius + (2 / zoom), 0, Math.PI * 2);
+        ctx.stroke();
 
         // Highlight the connecting line with hover color
         if (button.labelPos)
@@ -1535,12 +1620,14 @@ function drawButton(button, isTemp = false)
                 button.buttonType === 'rotary3way' ||
                 button.buttonType === 'rotary4way'
             );
-            drawConnectingLine(ctx, button.buttonPos, button.labelPos, isMultiInput ? 0 : ButtonFrameWidth / 2, accentHover, isMultiInput);
+            drawConnectingLine(ctx, button.buttonPos, button.labelPos, isMultiInput ? 0 : ButtonFrameWidth / 2, accentPrimary, isMultiInput);
         }
 
         // Highlight the label box border
         if (button.labelPos)
         {
+            ctx.lineWidth = 1.5;
+            ctx.strokeStyle = accentPrimary;
             const isMultiInput = button.buttonType && (
                 button.buttonType.startsWith('hat') ||
                 button.buttonType === 'toggle3way-vertical' ||
@@ -1551,14 +1638,12 @@ function drawButton(button, isTemp = false)
 
             if (isMultiInput)
             {
-                // For hats, highlight the center push box
-                const boxWidth = HatFrameWidth;
-                const boxHeight = HatFrameHeight;
-                const x = button.labelPos.x - boxWidth / 2;
-                const y = button.labelPos.y - boxHeight / 2;
-
-                roundRect(ctx, x, y, boxWidth, boxHeight, 4);
-                ctx.stroke();
+                const groupBounds = getGroupedFrameBounds(button);
+                if (groupBounds)
+                {
+                    roundRect(ctx, groupBounds.x, groupBounds.y, groupBounds.width, groupBounds.height, 6);
+                    ctx.stroke();
+                }
             }
             else
             {
@@ -1575,6 +1660,114 @@ function drawButton(button, isTemp = false)
 
         ctx.restore();
     }
+}
+
+function getGroupedFrameBounds(button)
+{
+    if (!button || !button.labelPos)
+    {
+        return null;
+    }
+
+    const frames = [];
+    const addFrame = (centerPos, width = HatFrameWidth, height = HatFrameHeight) =>
+    {
+        if (!centerPos)
+        {
+            return;
+        }
+        frames.push({
+            x: centerPos.x - width / 2,
+            y: centerPos.y - height / 2,
+            width,
+            height
+        });
+    };
+
+    if (button.buttonType === 'hat4way')
+    {
+        const hasPush = !!button.inputs?.push;
+        const positions = getHat4WayPositions(button.labelPos.x, button.labelPos.y, hasPush);
+        ['up', 'down', 'left', 'right', 'push'].forEach(dir =>
+        {
+            if (button.inputs && button.inputs[dir])
+            {
+                addFrame(positions[dir]);
+            }
+        });
+    }
+    else if (button.buttonType === 'hat2way-vertical')
+    {
+        const hasPush = !!button.inputs?.push;
+        const positions = getHat2WayVerticalPositions(button.labelPos.x, button.labelPos.y, hasPush);
+        ['up', 'down', 'push'].forEach(dir =>
+        {
+            if (button.inputs && button.inputs[dir])
+            {
+                addFrame(positions[dir]);
+            }
+        });
+    }
+    else if (button.buttonType === 'hat2way-horizontal')
+    {
+        const hasPush = !!button.inputs?.push;
+        const positions = getHat2WayHorizontalPositions(button.labelPos.x, button.labelPos.y, hasPush);
+        ['left', 'right', 'push'].forEach(dir =>
+        {
+            if (button.inputs && button.inputs[dir])
+            {
+                addFrame(positions[dir]);
+            }
+        });
+    }
+    else if (button.buttonType === 'toggle3way-vertical')
+    {
+        const positions = getToggle3WayPositions(button.labelPos.x, button.labelPos.y, 'vertical');
+        ['up', 'middle', 'down'].forEach(dir => addFrame(positions[dir]));
+    }
+    else if (button.buttonType === 'toggle3way-horizontal')
+    {
+        const positions = getToggle3WayPositions(button.labelPos.x, button.labelPos.y, 'horizontal');
+        ['left', 'middle', 'right'].forEach(dir => addFrame(positions[dir]));
+    }
+    else if (button.buttonType === 'rotary3way')
+    {
+        const hasPush = !!button.inputs?.push;
+        const positions = getRotaryPositions(button.labelPos.x, button.labelPos.y, 3, hasPush);
+        ['1', '2', '3'].forEach(dir => addFrame(positions[dir]));
+        if (hasPush)
+        {
+            addFrame(positions.push);
+        }
+    }
+    else if (button.buttonType === 'rotary4way')
+    {
+        const hasPush = !!button.inputs?.push;
+        const positions = getRotaryPositions(button.labelPos.x, button.labelPos.y, 4, hasPush);
+        ['1', '2', '3', '4'].forEach(dir => addFrame(positions[dir]));
+        if (hasPush)
+        {
+            addFrame(positions.push);
+        }
+    }
+
+    if (frames.length === 0)
+    {
+        return null;
+    }
+
+    const minX = Math.min(...frames.map(frame => frame.x));
+    const minY = Math.min(...frames.map(frame => frame.y));
+    const maxX = Math.max(...frames.map(frame => frame.x + frame.width));
+    const maxY = Math.max(...frames.map(frame => frame.y + frame.height));
+    const padding = 6;
+
+    return {
+        x: minX - padding,
+        y: minY - padding,
+        width: (maxX - minX) + (padding * 2),
+        height: (maxY - minY) + (padding * 2)
+    };
 }
 
 // Note: drawSingleButtonLabel and drawHat4WayLabels are now imported from button-renderer.js
@@ -2915,16 +3108,18 @@ async function startHatInputDetection(direction)
                 }
                 else
                 {
-                    // Convert HID axis name to lowercase SC format (Rz -> rotz, X -> x, etc.)
-                    const scAxisName = hidName === 'rx' ? 'rotx' :
-                        hidName === 'ry' ? 'roty' :
-                            hidName === 'rz' ? 'rotz' : hidName;
+                    // Convert HID axis name to SC format, including aliases like Slider -> slider1.
+                    const scAxisName = normalizeHidAxisNameToSCAxisName(result.hid_axis_name);
 
                     // Replace axis number format with axis name format
                     adjustedInputString = adjustedInputString.replace(/axis\d+(?:_(positive|negative))?/, scAxisName);
                     console.log(`Hat ${direction}: Converted to SC format using HID axis name "${result.hid_axis_name}":`, adjustedInputString);
                 }
             }
+
+            adjustedInputString = typeof ensureSliderNumber === 'function'
+                ? ensureSliderNumber(adjustedInputString)
+                : ensureTemplateSliderNumber(adjustedInputString);
 
             // Store the adjusted Star Citizen input string in tempButton
             if (tempButton)
@@ -3087,10 +3282,8 @@ async function startInputDetection()
                 }
                 else
                 {
-                    // Convert HID axis name to lowercase SC format (Rz -> rotz, X -> x, etc.)
-                    const scAxisName = hidName === 'rx' ? 'rotx' :
-                        hidName === 'ry' ? 'roty' :
-                            hidName === 'rz' ? 'rotz' : hidName;
+                    // Convert HID axis name to SC format, including aliases like Slider -> slider1.
+                    const scAxisName = normalizeHidAxisNameToSCAxisName(result.hid_axis_name);
 
                     // Replace axis number format with axis name format
                     adjustedInputString = adjustedInputString.replace(/axis\d+(?:_(positive|negative))?/, scAxisName);
@@ -3107,6 +3300,10 @@ async function startInputDetection()
                     console.log('Converted to Star Citizen format using default mapping:', adjustedInputString);
                 }
             }
+
+            adjustedInputString = typeof ensureSliderNumber === 'function'
+                ? ensureSliderNumber(adjustedInputString)
+                : ensureTemplateSliderNumber(adjustedInputString);
 
             // Use shared utility for friendly name (use adjusted string)
             // Prefer short name to avoid device prefix (e.g., "Joystick 1 - Button 13")
@@ -3140,7 +3337,7 @@ async function startInputDetection()
 
                 const buttonMatch = adjustedInputString.match(/button(\d+)/);
                 const axisNumericMatch = adjustedInputString.match(/axis(\d+)(?:_(positive|negative))?/);
-                const axisSCMatch = adjustedInputString.match(/^(js|gp)\d+_(x|y|z|rotx|roty|rotz|slider)$/);
+                const axisSCMatch = adjustedInputString.match(/^(js|gp)\d+_(x|y|z|rotx|roty|rotz|slider1|slider2)$/);
                 const hatMatch = adjustedInputString.match(/hat(\d+)_(up|down|left|right)/);
 
                 if (hatMatch)
@@ -3175,7 +3372,9 @@ async function startInputDetection()
                     // Star Citizen axis format (e.g., js1_x, js1_y)
                     delete tempButton.buttonId;
                     tempButton.inputType = 'axis';
-                    tempButton.inputId = axisSCMatch[2]; // Store the axis name (x, y, z, etc.)
+                    tempButton.inputId = typeof ensureSliderNumber === 'function'
+                        ? ensureSliderNumber(axisSCMatch[2])
+                        : ensureTemplateSliderNumber(axisSCMatch[2]);
                     delete tempButton.axisDirection;
                 }
                 else
@@ -3637,7 +3836,7 @@ async function loadTemplate()
         if (!filePath) return; // User cancelled
 
         const templateJson = await invoke('load_template', { filePath });
-        const data = JSON.parse(templateJson);
+        const data = normalizeTemplateSliderIds(JSON.parse(templateJson));
 
         // Migrate template if needed (v1.0 -> v1.1)
         if (data.version === '1.0' || !data.version)
@@ -3897,7 +4096,7 @@ function loadPersistedTemplate()
         const savedTemplate = localStorage.getItem('editorCurrentTemplate');
         if (savedTemplate)
         {
-            const data = JSON.parse(savedTemplate);
+            const data = normalizeTemplateSliderIds(JSON.parse(savedTemplate));
 
             // Migrate template if needed (v1.0 -> v1.1)
             if (data.version === '1.0' || !data.version)

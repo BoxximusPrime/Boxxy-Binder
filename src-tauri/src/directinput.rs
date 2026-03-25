@@ -199,6 +199,14 @@ fn build_hid_uuid(device: &hid_reader::HidDeviceListItem) -> String {
     }
 }
 
+fn get_base_hid_usage_id(axis_field_id: u32) -> u32 {
+    if axis_field_id > 0xFFFF {
+        axis_field_id >> 16
+    } else {
+        axis_field_id
+    }
+}
+
 // Axis state tracking to prevent duplicate detections
 struct AxisState {
     last_value: f32,
@@ -336,26 +344,29 @@ impl InputDetector {
                             state.raw.Gamepad.wButtons & !prev_state.raw.Gamepad.wButtons;
 
                         if buttons_pressed != 0 {
-                            let button_num = match buttons_pressed {
-                                0x1000 => Some(1),  // A
-                                0x2000 => Some(2),  // B
-                                0x4000 => Some(3),  // X
-                                0x8000 => Some(4),  // Y
-                                0x0100 => Some(5),  // LB
-                                0x0200 => Some(6),  // RB
-                                0x0010 => Some(7),  // Back
-                                0x0020 => Some(8),  // Start
-                                0x0040 => Some(9),  // LS
-                                0x0080 => Some(10), // RS
-                                0x0001 => Some(11), // DPad Up
-                                0x0002 => Some(12), // DPad Down
-                                0x0004 => Some(13), // DPad Left
-                                0x0008 => Some(14), // DPad Right
-                                _ => None,
-                            };
+                            let button_masks = [
+                                (0x1000u16, 1u32),  // A
+                                (0x2000u16, 2u32),  // B
+                                (0x4000u16, 3u32),  // X
+                                (0x8000u16, 4u32),  // Y
+                                (0x0100u16, 5u32),  // LB
+                                (0x0200u16, 6u32),  // RB
+                                (0x0010u16, 7u32),  // Back
+                                (0x0020u16, 8u32),  // Start
+                                (0x0040u16, 9u32),  // LS
+                                (0x0080u16, 10u32), // RS
+                                (0x0001u16, 11u32), // DPad Up
+                                (0x0002u16, 12u32), // DPad Down
+                                (0x0004u16, 13u32), // DPad Left
+                                (0x0008u16, 14u32), // DPad Right
+                            ];
 
-                            if let Some(btn) = button_num {
-                                let sc_instance = controller_id as usize + 1;
+                            let sc_instance = controller_id as usize + 1;
+                            for (mask, btn) in button_masks {
+                                if buttons_pressed & mask == 0 {
+                                    continue;
+                                }
+
                                 detected_inputs.push(DetectedInput {
                                     input_string: format!("gp{}_button{}", sc_instance, btn),
                                     display_name: format!(
@@ -368,10 +379,7 @@ impl InputDetector {
                                     is_modifier: false,
                                     session_id: self.session_id.clone(),
                                     device_uuid: Some(resolve_xinput_uuid(controller_id)),
-                                    raw_button_code: Some(format!(
-                                        "XInput 0x{:04X}",
-                                        buttons_pressed
-                                    )),
+                                    raw_button_code: Some(format!("XInput 0x{:04X}", mask)),
                                     raw_code_index: Some(btn),
                                     device_name: Some(format!(
                                         "Xbox Controller (XInput {})",
@@ -544,27 +552,28 @@ impl InputDetector {
                     }
 
                     if !newly_pressed.is_empty() {
-                        let button_num = newly_pressed[0];
                         let device_name = device.product.as_deref().unwrap_or("Unknown Device");
 
-                        detected_inputs.push(DetectedInput {
-                            input_string: format!("js{}_button{}", device_instance, button_num),
-                            display_name: format!(
-                                "Joystick {} - Button {}",
-                                device_instance, button_num
-                            ),
-                            device_type: "Joystick".to_string(),
-                            axis_value: None,
-                            modifiers: get_active_modifiers(),
-                            is_modifier: false,
-                            session_id: self.session_id.clone(),
-                            device_uuid: Some(build_hid_uuid(device)),
-                            raw_button_code: Some(format!("HID Button {}", button_num)),
-                            raw_code_index: Some(button_num),
-                            device_name: Some(device_name.to_string()),
-                            hid_usage_id: None,
-                            hid_axis_name: None,
-                        });
+                        for button_num in newly_pressed {
+                            detected_inputs.push(DetectedInput {
+                                input_string: format!("js{}_button{}", device_instance, button_num),
+                                display_name: format!(
+                                    "Joystick {} - Button {}",
+                                    device_instance, button_num
+                                ),
+                                device_type: "Joystick".to_string(),
+                                axis_value: None,
+                                modifiers: get_active_modifiers(),
+                                is_modifier: false,
+                                session_id: self.session_id.clone(),
+                                device_uuid: Some(build_hid_uuid(device)),
+                                raw_button_code: Some(format!("HID Button {}", button_num)),
+                                raw_code_index: Some(button_num),
+                                device_name: Some(device_name.to_string()),
+                                hid_usage_id: None,
+                                hid_axis_name: None,
+                            });
+                        }
                     }
                 } // else: First poll for this device - just establish baseline, don't detect anything
 
@@ -587,18 +596,20 @@ impl InputDetector {
 
                         let change_abs = (current_value as i32 - prev_value as i32).abs() as f32;
 
+                        let base_usage_id = get_base_hid_usage_id(axis_id);
+
                         // Hat switch check (HID Usage ID 0x39 = 57)
                         // Hat switches need special handling - they should detect any value change
-                        let is_hat_switch = axis_id == 0x39;
+                        let is_hat_switch = base_usage_id == 0x39;
 
                         // For hat switches, trigger on any non-zero change
-                        // For regular axes, use absolute threshold
-                        const AXIS_CHANGE_THRESHOLD: f32 = 50.0; // Absolute value change needed
+                        // For regular axes, use percentage threshold based on axis range
+                        let axis_change_threshold = (range * 0.02).max(2.0);
 
                         let should_detect = if is_hat_switch {
                             change_abs > 0.0 // Any change triggers detection for hat switches
                         } else {
-                            change_abs >= AXIS_CHANGE_THRESHOLD
+                            change_abs >= axis_change_threshold
                         };
 
                         if should_detect {
@@ -645,14 +656,16 @@ impl InputDetector {
                                 };
 
                                 if let Some(direction) = hat_direction {
+                                    let hat_number = if axis_index > 0 { axis_index } else { 1 };
                                     detected_inputs.push(DetectedInput {
                                         input_string: format!(
-                                            "js{}_hat1_{}",
-                                            device_instance, direction
+                                            "js{}_hat{}_{}",
+                                            device_instance, hat_number, direction
                                         ),
                                         display_name: format!(
-                                            "Joystick {} - Hat 1 {}",
+                                            "Joystick {} - Hat {} {}",
                                             device_instance,
+                                            hat_number,
                                             direction.to_uppercase()
                                         ),
                                         device_type: "Joystick".to_string(),
@@ -664,7 +677,7 @@ impl InputDetector {
                                         raw_button_code: None,
                                         raw_code_index: Some(axis_index),
                                         device_name: Some(device_name.to_string()),
-                                        hid_usage_id: Some(axis_id),
+                                        hid_usage_id: Some(base_usage_id),
                                         hid_axis_name: Some(axis_name.to_string()),
                                     });
                                 }
@@ -718,7 +731,7 @@ impl InputDetector {
                                 raw_button_code: None,
                                 raw_code_index: Some(axis_index),
                                 device_name: Some(device_name.to_string()),
-                                hid_usage_id: Some(axis_id),
+                                hid_usage_id: Some(base_usage_id),
                                 hid_axis_name: Some(axis_name.to_string()),
                             });
                         }
@@ -853,17 +866,19 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
                     device.product_id
                 );
 
-                // Try to get axis count from descriptor
+                // Read HID input capabilities from descriptor
                 let (button_count, axis_count, hat_count) =
-                    match hid_reader::get_axis_names_from_descriptor(&device.path) {
-                        Ok(axis_names) => {
-                            let axes = axis_names.len();
-                            eprintln!("  Detected {} axes from HID descriptor", axes);
-                            (32, axes, 1)
+                    match hid_reader::get_input_capabilities_from_descriptor(&device.path) {
+                        Ok(caps) => {
+                            eprintln!(
+                                "  Detected {} buttons, {} axes, {} hats from HID descriptor",
+                                caps.button_count, caps.axis_count, caps.hat_count
+                            );
+                            (caps.button_count, caps.axis_count, caps.hat_count)
                         }
                         Err(e) => {
                             eprintln!("  Could not read descriptor: {}", e);
-                            (32, 6, 1) // Defaults
+                            (0, 0, 0)
                         }
                     };
 
@@ -945,11 +960,17 @@ pub fn list_connected_devices() -> Result<Vec<DeviceInfo>, String> {
         let uuid = build_hid_uuid(&device);
         let is_gamepad_device = is_gamepad(&name);
 
-        let (button_count, axis_count, hat_count) = if is_gamepad_device {
-            (15, 6, 1)
-        } else {
-            (32, 7, 1)
-        };
+        let (button_count, axis_count, hat_count) =
+            match hid_reader::get_input_capabilities_from_descriptor(&device.path) {
+                Ok(caps) => (caps.button_count, caps.axis_count, caps.hat_count),
+                Err(e) => {
+                    eprintln!(
+                        "Failed to read HID capabilities for '{}': {}, using fallback",
+                        name, e
+                    );
+                    (0, 0, 0)
+                }
+            };
 
         devices.push(DeviceInfo {
             uuid,
@@ -1063,10 +1084,9 @@ pub fn detect_axis_movement_for_device(
     // Handle HID devices
     let hid_devices = hid_reader::list_hid_game_controllers().unwrap_or_default();
 
-    let target_device = hid_devices.iter().find(|d| {
-        let uuid = format!("{:04x}:{:04x}", d.vendor_id, d.product_id);
-        uuid == target_uuid
-    });
+    let target_device = hid_devices
+        .iter()
+        .find(|d| build_hid_uuid(d) == target_uuid);
 
     let Some(device) = target_device else {
         return Err(format!("Device not found: {}", target_uuid));

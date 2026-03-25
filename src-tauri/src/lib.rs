@@ -2474,7 +2474,8 @@ fn find_actionmaps_path(base_path: String) -> Result<Option<String>, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(AppState::new()))
@@ -2544,7 +2545,14 @@ pub fn run() {
             }
 
             Ok(())
-        })
+        });
+
+    #[cfg(all(feature = "mcp-bridge", debug_assertions))]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|_app_handle, event| {

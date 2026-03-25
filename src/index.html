@@ -18,26 +18,21 @@
   <title>Star Citizen Bindnig Utility</title>
   <script>
     // Restore font size immediately before page renders to avoid flash
-    (function ()
-    {
+    (function () {
       const FONT_SIZE_DEFAULT = 14;
       const savedFontSize = localStorage.getItem('appFontSize');
-      if (savedFontSize)
-      {
+      if (savedFontSize) {
         document.documentElement.style.fontSize = savedFontSize + 'px';
-      } else
-      {
+      } else {
         document.documentElement.style.fontSize = FONT_SIZE_DEFAULT + 'px';
       }
     })();
 
     // Restore theme immediately before page renders to avoid theme flash
-    (function ()
-    {
+    (function () {
       const THEME_STORAGE_KEY = 'appTheme';
       const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
-      if (savedTheme === 'vscode')
-      {
+      if (savedTheme === 'vscode') {
         document.documentElement.classList.add('theme-red');
       }
     })();
@@ -63,7 +58,7 @@
       <!-- Header Row 1 -->
       <div class="header-row-1">
         <div class="header-logo">
-          <h1>Boxxy Binder<span id="app-version">v1.1.0</span></h1>
+          <h1>Boxxy Binder<span id="app-version">v1.1.3</span></h1>
           <div id="update-info" class="header-update-info"></div>
         </div>
         <div id="theme-switcher" class="theme-switcher-container">
@@ -154,7 +149,8 @@
           <div class="welcome-section">
             <h2>Discord</h2>
             <p>Join our Discord community for user-submitted templates, updates, and to share your feedback:</p>
-            <a href="https://discord.gg/cjEtkeBG" target="_blank" rel="noopener noreferrer" class="external-link">Join Discord Server</a>
+            <a href="https://discord.gg/cjEtkeBG" target="_blank" rel="noopener noreferrer" class="external-link">Join
+              Discord Server</a>
           </div>
 
           <div class="welcome-section support-section">
@@ -182,7 +178,8 @@
               <span class="view-icon">🎮</span>
               <span>Visual View</span>
             </button>
-            <button id="bindings-view-split" class="bindings-view-btn" data-view="split" title="Show List + Visual side-by-side">
+            <button id="bindings-view-split" class="bindings-view-btn" data-view="split"
+              title="Show List + Visual side-by-side">
               <span class="view-icon">↔️</span>
               <span>Split View</span>
             </button>
@@ -224,329 +221,332 @@
         <!-- Views Wrapper (enables split layout) -->
         <div id="bindings-views-wrapper" class="bindings-views-wrapper">
 
-        <!-- List View Container -->
-        <div id="bindings-list-view" class="bindings-view-container active">
+          <!-- List View Container -->
+          <div id="bindings-list-view" class="bindings-view-container active">
 
-          <div class="main-content">
-            <!-- Sidebar - Categories and Filters -->
-            <aside class="sidebar">
-              <div class="filter-section">
-                <h3>Actions</h3>
-                <button id="clear-sc-binds-btn" class="btn btn-secondary" style="width: 100%;">🗑️ Generate Unbind
-                  Profile</button>
-                <button id="swap-joystick-prefixes-btn" class="btn btn-secondary" style="width: 100%;">🔄 Swap Device
-                  Prefixes</button>
-                <!-- Restore Defaults - COMMENTED OUT: Has issues with SC not properly applying bindings
+            <div class="main-content">
+              <!-- Sidebar - Categories and Filters -->
+              <aside class="sidebar">
+                <div class="filter-section">
+                  <h3>Actions</h3>
+                  <button id="clear-sc-binds-btn" class="btn btn-secondary" style="width: 100%;">🗑️ Generate Unbind
+                    Profile</button>
+                  <button id="swap-joystick-prefixes-btn" class="btn btn-secondary" style="width: 100%;">🔄 Swap Device
+                    Prefixes</button>
+                  <!-- Restore Defaults - COMMENTED OUT: Has issues with SC not properly applying bindings
                 <button id="restore-defaults-btn" class="btn btn-secondary" style="width: 100%;">🔄 Restore
                   Defaults</button>
                 -->
-                <button id="configure-joystick-mapping-btn" class="btn btn-secondary" style="width: 100%;">⚙️ Manage
-                  Devices</button>
-              </div>
-
-              <div class=" filter-section">
-                <h3>Filters</h3>
-                <div class="category-list">
-                  <button class="category-item  category-item-indented active" data-filter="all">All</button>
-                  <button class="category-item  category-item-indented" data-filter="keyboard">Keyboard</button>
-                  <button class="category-item  category-item-indented" data-filter="mouse">Mouse</button>
-                  <button class="category-item  category-item-indented" data-filter="joystick">Joystick</button>
-                  <button class="category-item  category-item-indented" data-filter="gamepad">Gamepad</button>
-                  <div class="checkbox-container" id="customized-only-wrapper">
-                    <input type="checkbox" id="customized-only-checkbox" />
-                    <label for="customized-only-checkbox">Customized Only</label>
-                  </div>
-                  <div class="checkbox-container" id="show-unbound-wrapper">
-                    <input type="checkbox" id="show-unbound-checkbox" checked />
-                    <label for="show-unbound-checkbox">Show Unbound Actions</label>
-                  </div>
+                  <button id="configure-joystick-mapping-btn" class="btn btn-secondary" style="width: 100%;">⚙️ Manage
+                    Devices</button>
                 </div>
-              </div>
 
-              <div class="category-section">
-                <h3>Categories</h3>
-                <div id="category-list" class="category-list">
-                  <!-- Categories will be populated here -->
-                </div>
-              </div>
-            </aside>
-
-            <!-- Main Panel - Keybindings Display -->
-            <main class="bindings-panel">
-              <div id="welcome-screen" class="welcome-screen-bindings">
-                <div class="welcome-content">
-                  <h2>Get Started with Your Keybindings</h2>
-                  <p style="margin-bottom: 1.5rem;">Choose one of the options below:</p>
-                  <div style="display: flex; flex-direction: column; gap: 1rem; max-width: 500px;">
-                    <div
-                      style="padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
-                      <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;">📂 Load Existing Keybindings</h3>
-                      <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.95rem;">Import a
-                        keybinding file from your Star Citizen installation to view and customize your controls.</p>
-                      <button id="welcome-load-btn" class="btn btn-primary" style="width: 100%;">Load File</button>
+                <div class=" filter-section">
+                  <h3>Filters</h3>
+                  <div class="category-list">
+                    <button class="category-item  category-item-indented active" data-filter="all">All</button>
+                    <button class="category-item  category-item-indented" data-filter="keyboard">Keyboard</button>
+                    <button class="category-item  category-item-indented" data-filter="mouse">Mouse</button>
+                    <button class="category-item  category-item-indented" data-filter="joystick">Joystick</button>
+                    <button class="category-item  category-item-indented" data-filter="gamepad">Gamepad</button>
+                    <div class="checkbox-container" id="customized-only-wrapper">
+                      <input type="checkbox" id="customized-only-checkbox" />
+                      <label for="customized-only-checkbox">Customized Only</label>
                     </div>
-                    <div
-                      style="padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
-                      <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;">✨ Create New Keybindings</h3>
-                      <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.95rem;">Start from
-                        scratch with a blank keybinding set. Customize your controls from the default Star Citizen
-                        bindings.</p>
-                      <button id="welcome-new-btn" class="btn btn-primary" style="width: 100%;">Create New
-                        Set</button>
+                    <div class="checkbox-container" id="show-unbound-wrapper">
+                      <input type="checkbox" id="show-unbound-checkbox" checked />
+                      <label for="show-unbound-checkbox">Show Unbound Actions</label>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <div id="bindings-content" class="bindings-content" style="display: none;">
-                <div class="bindings-header">
-                  <h2 id="profile-name">Keybindings <span id="split-view-drag-tip" class="split-view-tip">Tip: Optionally Drag actions onto inputs to bind, or buttons onto actions</span></h2>
-                  <div class="search-container">
-                    <input type="text" id="search-input" placeholder="Search actions..." class="search-input" />
-                    <button id="search-clear-btn" class="search-clear-btn" title="Clear search"
-                      style="display: none;">✕</button>
+                <div class="category-section">
+                  <h3>Categories</h3>
+                  <div id="category-list" class="category-list">
+                    <!-- Categories will be populated here -->
+                  </div>
+                </div>
+              </aside>
+
+              <!-- Main Panel - Keybindings Display -->
+              <main class="bindings-panel">
+                <div id="welcome-screen" class="welcome-screen-bindings">
+                  <div class="welcome-content">
+                    <h2>Get Started with Your Keybindings</h2>
+                    <p style="margin-bottom: 1.5rem;">Choose one of the options below:</p>
+                    <div style="display: flex; flex-direction: column; gap: 1rem; max-width: 500px;">
+                      <div
+                        style="padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                        <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;">📂 Load Existing Keybindings</h3>
+                        <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.95rem;">Import a
+                          keybinding file from your Star Citizen installation to view and customize your controls.</p>
+                        <button id="welcome-load-btn" class="btn btn-primary" style="width: 100%;">Load File</button>
+                      </div>
+                      <div
+                        style="padding: 1rem; background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+                        <h3 style="margin: 0 0 0.5rem 0; font-size: 1.1rem;">✨ Create New Keybindings</h3>
+                        <p style="margin: 0 0 1rem 0; color: var(--text-secondary); font-size: 0.95rem;">Start from
+                          scratch with a blank keybinding set. Customize your controls from the default Star Citizen
+                          bindings.</p>
+                        <button id="welcome-new-btn" class="btn btn-primary" style="width: 100%;">Create New
+                          Set</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
-                <div id="action-maps-container" class="action-maps-container">
-                  <!-- Action maps and bindings will be populated here -->
+                <div id="bindings-content" class="bindings-content" style="display: none;">
+                  <div class="bindings-header">
+                    <h2 id="profile-name">Keybindings <span id="split-view-drag-tip" class="split-view-tip">Tip:
+                        Optionally Drag actions onto inputs to bind, or buttons onto actions</span></h2>
+                    <div class="search-container">
+                      <input type="text" id="search-input" placeholder="Search actions..." class="search-input" />
+                      <button id="search-clear-btn" class="search-clear-btn" title="Clear search"
+                        style="display: none;">✕</button>
+                    </div>
+                  </div>
+
+                  <div id="action-maps-container" class="action-maps-container">
+                    <!-- Action maps and bindings will be populated here -->
+                  </div>
                 </div>
-              </div>
-            </main>
+              </main>
+            </div>
           </div>
-        </div>
-        <!-- End List View Container -->
+          <!-- End List View Container -->
 
-        <div id="bindings-split-resizer" class="split-resizer"></div>
+          <div id="bindings-split-resizer" class="split-resizer"></div>
 
-        <!-- Visual View Container -->
-        <div id="bindings-visual-view" class="bindings-view-container">
-          <div class="viewer-content">
-            <!-- Joystick Display -->
-            <div class="joystick-display">
-              <!-- Quick Tips -->
-              <div class="quick-tips" style="top:3rem;right:3rem;">Middle or Right click to pan view<br>Scroll wheel to
-                zoom<br>Press <kbd>Tab</kbd> to switch pages<br>Click on button boxes to show all actions<br>Press a
-                button on the shown device to highlight its frame<br>Grey actions are default SC bind actions</div>
+          <!-- Visual View Container -->
+          <div id="bindings-visual-view" class="bindings-view-container">
+            <div class="viewer-content">
+              <!-- Joystick Display -->
+              <div class="joystick-display">
+                <!-- Quick Tips -->
+                <div class="quick-tips" style="top:3rem;right:3rem;">Middle or Right click to pan view<br>Scroll wheel
+                  to
+                  zoom<br>Press <kbd>Tab</kbd> to switch pages<br>Click on button boxes to show all actions<br>Press a
+                  button on the shown device to highlight its frame<br>Grey actions are default SC bind actions</div>
 
-              <div id="welcome-screen-visual" class="welcome-screen-visual">
-                <div class="welcome-content">
-                  <h2>Select a joystick template to view your bindings</h2>
-                  <p>Make sure you have keybindings loaded first</p>
-                  <button id="welcome-select-btn" class="btn btn-large btn-primary">Select Template</button>
-                </div>
-              </div>
-
-              <div id="viewer-canvas-container" class="canvas-container" style="display: none;">
-                <canvas id="viewer-canvas"></canvas>
-              </div>
-
-              <!-- Floating Control Toolbar -->
-              <div id="viewer-controls" class="viewer-controls" style="display: none;">
-                <!-- Template Tabs -->
-                <div class="control-group template-tabs-container" id="viewer-template-tabs" style="display: none;">
-                  <!-- Template tabs will be dynamically populated -->
+                <div id="welcome-screen-visual" class="welcome-screen-visual">
+                  <div class="welcome-content">
+                    <h2>Select a joystick template to view your bindings</h2>
+                    <p>Make sure you have keybindings loaded first</p>
+                    <button id="welcome-select-btn" class="btn btn-large btn-primary">Select Template</button>
+                  </div>
                 </div>
 
-                <div class="control-divider template-tabs-divider" style="display: none;"></div>
-
-                <!-- Stick Selector -->
-                <div class="control-group stick-selector" id="viewer-stick-selector" style="display: none;">
-                  <button id="viewer-left-stick-btn" class="control-btn" title="View Left Stick">
-                    <span class="control-icon">🕹️</span>
-                    <span>Left</span>
-                  </button>
-                  <button id="viewer-right-stick-btn" class="control-btn active" title="View Right Stick">
-                    <span class="control-icon">🕹️</span>
-                    <span>Right</span>
-                  </button>
+                <div id="viewer-canvas-container" class="canvas-container" style="display: none;">
+                  <canvas id="viewer-canvas"></canvas>
                 </div>
 
-                <div class="control-divider"></div>
+                <!-- Floating Control Toolbar -->
+                <div id="viewer-controls" class="viewer-controls" style="display: none;">
+                  <!-- Template Tabs -->
+                  <div class="control-group template-tabs-container" id="viewer-template-tabs" style="display: none;">
+                    <!-- Template tabs will be dynamically populated -->
+                  </div>
 
-                <!-- Template File Indicator - Now hidden since we have tabs -->
-                <div id="viewer-file-indicator" class="loaded-file-indicator-sub" style="display: none;">
-                  <span class="file-icon">📄</span>
-                  <span id="viewer-file-path" class="loaded-file-path"></span>
-                  <span id="viewer-file-name" class="loaded-file-name">No Template</span>
+                  <div class="control-divider template-tabs-divider" style="display: none;"></div>
+
+                  <!-- Stick Selector -->
+                  <div class="control-group stick-selector" id="viewer-stick-selector" style="display: none;">
+                    <button id="viewer-left-stick-btn" class="control-btn" title="View Left Stick">
+                      <span class="control-icon">🕹️</span>
+                      <span>Left</span>
+                    </button>
+                    <button id="viewer-right-stick-btn" class="control-btn active" title="View Right Stick">
+                      <span class="control-icon">🕹️</span>
+                      <span>Right</span>
+                    </button>
+                  </div>
+
+                  <div class="control-divider"></div>
+
+                  <!-- Template File Indicator - Now hidden since we have tabs -->
+                  <div id="viewer-file-indicator" class="loaded-file-indicator-sub" style="display: none;">
+                    <span class="file-icon">📄</span>
+                    <span id="viewer-file-path" class="loaded-file-path"></span>
+                    <span id="viewer-file-name" class="loaded-file-name">No Template</span>
+                  </div>
+
+                  <!-- Filter Controls -->
+                  <div class="control-group">
+                    <button id="hide-defaults-toggle" class="control-btn" title="Hide Default Bindings">
+                      <span class="control-icon">👁️</span>
+                      <span>Show All</span>
+                    </button>
+                  </div>
+
+                  <div class="control-divider"></div>
+
+                  <!-- Display Config -->
+                  <div class="control-group">
+                    <button id="viewer-config-btn" class="control-btn" title="Display Configuration">
+                      <span class="control-icon">⚙️</span>
+                      <span>Config</span>
+                    </button>
+                  </div>
+
+                  <div class="control-divider"></div>
+
+                  <!-- Template & Export -->
+                  <div class="control-group">
+                    <button id="select-template-btn" class="control-btn" title="Add Template">
+                      <span class="control-icon">➕</span>
+                      <span>Add</span>
+                    </button>
+                    <button id="export-image-btn" class="control-btn" title="Export as Image">
+                      <span class="control-icon">💾</span>
+                      <span>Export</span>
+                    </button>
+                  </div>
                 </div>
 
-                <!-- Filter Controls -->
-                <div class="control-group">
-                  <button id="hide-defaults-toggle" class="control-btn" title="Hide Default Bindings">
-                    <span class="control-icon">👁️</span>
-                    <span>Show All</span>
-                  </button>
-                </div>
-
-                <div class="control-divider"></div>
-
-                <!-- Display Config -->
-                <div class="control-group">
-                  <button id="viewer-config-btn" class="control-btn" title="Display Configuration">
-                    <span class="control-icon">⚙️</span>
-                    <span>Config</span>
-                  </button>
-                </div>
-
-                <div class="control-divider"></div>
-
-                <!-- Template & Export -->
-                <div class="control-group">
-                  <button id="select-template-btn" class="control-btn" title="Add Template">
-                    <span class="control-icon">➕</span>
-                    <span>Add</span>
-                  </button>
-                  <button id="export-image-btn" class="control-btn" title="Export as Image">
-                    <span class="control-icon">💾</span>
-                    <span>Export</span>
-                  </button>
-                </div>
-              </div>
-
-              <!-- Modifier Filter Toolbar -->
-              <div id="modifier-toolbar" class="modifier-toolbar" style="display: none;">
-                <span class="toolbar-label">Filter by:</span>
-                <div class="modifier-options">
-                  <label class="modifier-radio">
-                    <input type="radio" name="modifier-filter" value="all" checked />
-                    <span>All</span>
-                  </label>
-                  <label class="modifier-radio">
-                    <input type="radio" name="modifier-filter" value="lalt" />
-                    <span>L Alt</span>
-                  </label>
-                  <label class="modifier-radio">
-                    <input type="radio" name="modifier-filter" value="lctrl" />
-                    <span>L Ctrl</span>
-                  </label>
-                  <label class="modifier-radio">
-                    <input type="radio" name="modifier-filter" value="lshift" />
-                    <span>L Shift</span>
-                  </label>
-                  <label class="modifier-radio">
-                    <input type="radio" name="modifier-filter" value="rshift" />
-                    <span>R Shift</span>
-                  </label>
-                  <label class="modifier-radio">
-                    <input type="radio" name="modifier-filter" value="rctrl" />
-                    <span>R Ctrl</span>
-                  </label>
-                  <label class="modifier-radio">
-                    <input type="radio" name="modifier-filter" value="ralt" />
-                    <span>R Alt</span>
-                  </label>
-                </div>
-                <div class="smart-filter-group">
-                  <span class="toolbar-label">Context:</span>
-                  <div class="modifier-options smart-filter-options">
+                <!-- Modifier Filter Toolbar -->
+                <div id="modifier-toolbar" class="modifier-toolbar" style="display: none;">
+                  <span class="toolbar-label">Filter by:</span>
+                  <div class="modifier-options">
                     <label class="modifier-radio">
-                      <input type="radio" name="smart-filter" value="all" checked />
+                      <input type="radio" name="modifier-filter" value="all" checked />
                       <span>All</span>
                     </label>
                     <label class="modifier-radio">
-                      <input type="radio" name="smart-filter" value="on-foot" />
-                      <span>On Foot</span>
+                      <input type="radio" name="modifier-filter" value="lalt" />
+                      <span>L Alt</span>
                     </label>
                     <label class="modifier-radio">
-                      <input type="radio" name="smart-filter" value="spaceship" />
-                      <span>Spaceship</span>
+                      <input type="radio" name="modifier-filter" value="lctrl" />
+                      <span>L Ctrl</span>
                     </label>
                     <label class="modifier-radio">
-                      <input type="radio" name="smart-filter" value="turret" />
-                      <span>Turret</span>
+                      <input type="radio" name="modifier-filter" value="lshift" />
+                      <span>L Shift</span>
                     </label>
                     <label class="modifier-radio">
-                      <input type="radio" name="smart-filter" value="vehicle" />
-                      <span>Vehicle</span>
+                      <input type="radio" name="modifier-filter" value="rshift" />
+                      <span>R Shift</span>
                     </label>
-                    <button id="smart-filter-help" class="smart-filter-help tips-sensitive" type="button" aria-label="Smart filter info">?</button>
+                    <label class="modifier-radio">
+                      <input type="radio" name="modifier-filter" value="rctrl" />
+                      <span>R Ctrl</span>
+                    </label>
+                    <label class="modifier-radio">
+                      <input type="radio" name="modifier-filter" value="ralt" />
+                      <span>R Alt</span>
+                    </label>
+                  </div>
+                  <div class="smart-filter-group">
+                    <span class="toolbar-label">Context:</span>
+                    <div class="modifier-options smart-filter-options">
+                      <label class="modifier-radio">
+                        <input type="radio" name="smart-filter" value="all" checked />
+                        <span>All</span>
+                      </label>
+                      <label class="modifier-radio">
+                        <input type="radio" name="smart-filter" value="on-foot" />
+                        <span>On Foot</span>
+                      </label>
+                      <label class="modifier-radio">
+                        <input type="radio" name="smart-filter" value="spaceship" />
+                        <span>Spaceship</span>
+                      </label>
+                      <label class="modifier-radio">
+                        <input type="radio" name="smart-filter" value="turret" />
+                        <span>Turret</span>
+                      </label>
+                      <label class="modifier-radio">
+                        <input type="radio" name="smart-filter" value="vehicle" />
+                        <span>Vehicle</span>
+                      </label>
+                      <button id="smart-filter-help" class="smart-filter-help tips-sensitive" type="button"
+                        aria-label="Smart filter info">?</button>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-        <!-- End Visual View Container -->
+          <!-- End Visual View Container -->
 
-        <!-- Controls View Container -->
-        <div id="bindings-controls-view" class="bindings-view-container">
-          <div class="controls-editor-container">
-            <!-- Controls Toolbar -->
-            <div class="controls-toolbar">
-              <div class="controls-toolbar-left">
-                <span class="controls-file-label" id="controls-file-label">No controls file loaded</span>
-              </div>
-              <div class="controls-toolbar-right">
-                <button class="btn btn-secondary" id="controls-load-btn" title="Load controls from file">
-                  <span>📂</span> Load
-                </button>
-                <button class="btn btn-secondary" id="controls-save-btn" title="Save controls to file">
-                  <span>💾</span> Save
-                </button>
-                <button class="btn btn-secondary" id="controls-save-as-btn" title="Save controls as new file">
-                  <span>📄</span> Save As
-                </button>
-                <div class="controls-toolbar-divider"></div>
-                <button class="btn btn-secondary" id="controls-import-btn" title="Import from Star Citizen settings">
-                  <span>📥</span> Import from SC
-                </button>
-                <button class="btn btn-primary" id="controls-apply-btn" title="Apply controls to Star Citizen">
-                  <span>🚀</span> Apply to SC
-                </button>
-              </div>
-            </div>
-
-            <!-- Device Type Tabs -->
-            <div class="controls-device-tabs" id="controls-device-tabs">
-              <button class="controls-device-tab active" data-device="keyboard">
-                <span class="tab-icon">⌨️</span>
-                <span>Keyboard</span>
-              </button>
-              <button class="controls-device-tab" data-device="gamepad">
-                <span class="tab-icon">🎮</span>
-                <span>Gamepad</span>
-              </button>
-              <button class="controls-device-tab" data-device="joystick">
-                <span class="tab-icon">🕹️</span>
-                <span>Joystick</span>
-              </button>
-            </div>
-
-            <!-- Main Content Area -->
-            <div class="controls-main-content">
-              <!-- Tree Navigation Sidebar -->
-              <div class="controls-tree-sidebar">
-                <div class="controls-tree-header">
-                  <h3>📋 Control Options</h3>
+          <!-- Controls View Container -->
+          <div id="bindings-controls-view" class="bindings-view-container">
+            <div class="controls-editor-container">
+              <!-- Controls Toolbar -->
+              <div class="controls-toolbar">
+                <div class="controls-toolbar-left">
+                  <span class="controls-file-label" id="controls-file-label">No controls file loaded</span>
                 </div>
-                <div class="controls-tree-content" id="controls-tree-content">
-                  <div class="controls-empty-state">
-                    <div class="empty-icon">⏳</div>
-                    <h3>Loading...</h3>
-                    <p>Parsing control options from AllBinds.xml</p>
+                <div class="controls-toolbar-right">
+                  <button class="btn btn-secondary" id="controls-load-btn" title="Load controls from file">
+                    <span>📂</span> Load
+                  </button>
+                  <button class="btn btn-secondary" id="controls-save-btn" title="Save controls to file">
+                    <span>💾</span> Save
+                  </button>
+                  <button class="btn btn-secondary" id="controls-save-as-btn" title="Save controls as new file">
+                    <span>📄</span> Save As
+                  </button>
+                  <div class="controls-toolbar-divider"></div>
+                  <button class="btn btn-secondary" id="controls-import-btn" title="Import from Star Citizen settings">
+                    <span>📥</span> Import from SC
+                  </button>
+                  <button class="btn btn-primary" id="controls-apply-btn" title="Apply controls to Star Citizen">
+                    <span>🚀</span> Apply to SC
+                  </button>
+                </div>
+              </div>
+
+              <!-- Device Type Tabs -->
+              <div class="controls-device-tabs" id="controls-device-tabs">
+                <button class="controls-device-tab active" data-device="keyboard">
+                  <span class="tab-icon">⌨️</span>
+                  <span>Keyboard</span>
+                </button>
+                <button class="controls-device-tab" data-device="gamepad">
+                  <span class="tab-icon">🎮</span>
+                  <span>Gamepad</span>
+                </button>
+                <button class="controls-device-tab" data-device="joystick">
+                  <span class="tab-icon">🕹️</span>
+                  <span>Joystick</span>
+                </button>
+              </div>
+
+              <!-- Main Content Area -->
+              <div class="controls-main-content">
+                <!-- Tree Navigation Sidebar -->
+                <div class="controls-tree-sidebar">
+                  <div class="controls-tree-header">
+                    <h3>📋 Control Options</h3>
+                  </div>
+                  <div class="controls-tree-content" id="controls-tree-content">
+                    <div class="controls-empty-state">
+                      <div class="empty-icon">⏳</div>
+                      <h3>Loading...</h3>
+                      <p>Parsing control options from AllBinds.xml</p>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <!-- Settings Panel -->
-              <div class="controls-settings-panel">
-                <div class="controls-settings-header">
-                  <h2>Settings</h2>
-                  <span class="controls-settings-path"></span>
-                </div>
-                <div class="controls-settings-content" id="controls-settings-content">
-                  <div class="controls-empty-state">
-                    <div class="empty-icon">🎛️</div>
-                    <h3>Select a Control Option</h3>
-                    <p>Choose an option from the tree on the left to view and edit its settings.</p>
+                <!-- Settings Panel -->
+                <div class="controls-settings-panel">
+                  <div class="controls-settings-header">
+                    <h2>Settings</h2>
+                    <span class="controls-settings-path"></span>
+                  </div>
+                  <div class="controls-settings-content" id="controls-settings-content">
+                    <div class="controls-empty-state">
+                      <div class="empty-icon">🎛️</div>
+                      <h3>Select a Control Option</h3>
+                      <p>Choose an option from the tree on the left to view and edit its settings.</p>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-        <!-- End Controls View Container -->
+          <!-- End Controls View Container -->
 
         </div>
         <!-- End Views Wrapper -->
@@ -845,49 +845,75 @@
 
         <div class="help-page-container">
           <!-- HELP NAVIGATION -->
-          <div class="help-nav" style="background: var(--bg-light); border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; border-left: 4px solid var(--accent-color);">
+          <div class="help-nav"
+            style="background: var(--bg-light); border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; border-left: 4px solid var(--accent-color);">
             <h3 style="margin: 0 0 1rem 0; font-size: 1rem; color: var(--text-primary);">📑 Quick Navigation</h3>
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">
-              <a href="#help-getting-started" style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;" onmouseover="this.style.background='var(--bg-dark)'" onmouseout="this.style.background='var(--bg-medium)'">
+              <a href="#help-getting-started"
+                style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
+                onmouseover="this.style.background='var(--bg-dark)'"
+                onmouseout="this.style.background='var(--bg-medium)'">
                 🚀 Getting Started
               </a>
-              <a href="#help-faq" style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;" onmouseover="this.style.background='var(--bg-dark)'" onmouseout="this.style.background='var(--bg-medium)'">
+              <a href="#help-faq"
+                style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
+                onmouseover="this.style.background='var(--bg-dark)'"
+                onmouseout="this.style.background='var(--bg-medium)'">
                 ❓ FAQ
               </a>
-              <a href="#help-howto" style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;" onmouseover="this.style.background='var(--bg-dark)'" onmouseout="this.style.background='var(--bg-medium)'">
+              <a href="#help-howto"
+                style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
+                onmouseover="this.style.background='var(--bg-dark)'"
+                onmouseout="this.style.background='var(--bg-medium)'">
                 📚 How-To Guides
               </a>
-              <a href="#help-tips" style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;" onmouseover="this.style.background='var(--bg-dark)'" onmouseout="this.style.background='var(--bg-medium)'">
+              <a href="#help-tips"
+                style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
+                onmouseover="this.style.background='var(--bg-dark)'"
+                onmouseout="this.style.background='var(--bg-medium)'">
                 💡 Tips & Best Practices
               </a>
-              <a href="#help-troubleshooting" style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;" onmouseover="this.style.background='var(--bg-dark)'" onmouseout="this.style.background='var(--bg-medium)'">
+              <a href="#help-troubleshooting"
+                style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
+                onmouseover="this.style.background='var(--bg-dark)'"
+                onmouseout="this.style.background='var(--bg-medium)'">
                 🔧 Troubleshooting
               </a>
-              <a href="#help-support" style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;" onmouseover="this.style.background='var(--bg-dark)'" onmouseout="this.style.background='var(--bg-medium)'">
+              <a href="#help-support"
+                style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
+                onmouseover="this.style.background='var(--bg-dark)'"
+                onmouseout="this.style.background='var(--bg-medium)'">
                 🤝 Support & Feedback
               </a>
             </div>
           </div>
 
           <!-- SECTION 1: GETTING STARTED -->
-          <h2 id="help-getting-started" style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">🚀 Getting Started</h2>
+          <h2 id="help-getting-started"
+            style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
+            🚀 Getting Started</h2>
 
           <div class="help-section">
             <h3>Pages Explained</h3>
             <p>The app has 4 main pages:</p>
             <ul>
               <li><strong>Keybindings:</strong> This is where you'll be setting your actual bindings.</li>
-              <li><strong>Visual Viewer:</strong> This loads a <b>template</b>, and displays your current bindings visually.</li>
-              <li><strong>Template Editor:</strong> Create and edit device templates, assign buttons, and customize layouts.</li>
-              <li><strong>Device Manager:</strong> Manage and configure your joystick and gamepad devices, including setting device prefixes to match your in-game configuration.</li>
-              <li><strong>Character Manager:</strong> Manage your saved character profiles from the character creator - easily copy and backup your characters between various installations.</li>
+              <li><strong>Visual Viewer:</strong> This loads a <b>template</b>, and displays your current bindings
+                visually.</li>
+              <li><strong>Template Editor:</strong> Create and edit device templates, assign buttons, and customize
+                layouts.</li>
+              <li><strong>Device Manager:</strong> Manage and configure your joystick and gamepad devices, including
+                setting device prefixes to match your in-game configuration.</li>
+              <li><strong>Character Manager:</strong> Manage your saved character profiles from the character creator -
+                easily copy and backup your characters between various installations.</li>
             </ul>
           </div>
 
           <div class="help-section">
             <h3>Common Workflow</h3>
             <ol>
-              <li>Create a template in the template editor for your devices (or skip this if you have one to import)</li>
+              <li>Create a template in the template editor for your devices (or skip this if you have one to import)
+              </li>
               <li>Go to the keybindings page, import your keybindings file</li>
               <li>Go to the visual view, and load the template you created or imported</li>
               <li>Use the keybindings page to set your binds</li>
@@ -923,17 +949,25 @@
           </div>
 
           <!-- SECTION 2: FAQ -->
-          <h2 id="help-faq" style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">❓ Frequently Asked Questions</h2>
+          <h2 id="help-faq"
+            style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
+            ❓ Frequently Asked Questions</h2>
 
           <div class="help-section">
             <h3>What is a template?</h3>
-            <p>Think of a template like a blueprint for your devices. It defines where buttons and controls are located, so the app knows how to visually represent them in the visual view. A template can have more than one devices within it, so you can create groups of devices.</p>
-            <p>The template editor is the page you'll use to create your layouts where you can assign the device prefixes to match your physical devices, add images of the devices, and arrange buttons to reflect your actual hardware.</p>
+            <p>Think of a template like a blueprint for your devices. It defines where buttons and controls are located,
+              so the app knows how to visually represent them in the visual view. A template can have more than one
+              devices within it, so you can create groups of devices.</p>
+            <p>The template editor is the page you'll use to create your layouts where you can assign the device
+              prefixes to match your physical devices, add images of the devices, and arrange buttons to reflect your
+              actual hardware.</p>
           </div>
 
           <div class="help-section">
             <h3>Is my device supported?</h3>
-            <p>I've done my best to try and make the app compatible with a wide range of devices, by reading the HID information directly from the deivces. Buttons and axes should generally work as expected. There may be some exceptions to this, but perfectly supporting EVERY possible device is a huge challenge.</p>
+            <p>I've done my best to try and make the app compatible with a wide range of devices, by reading the HID
+              information directly from the deivces. Buttons and axes should generally work as expected. There may be
+              some exceptions to this, but perfectly supporting EVERY possible device is a huge challenge.</p>
           </div>
 
           <div class="help-section">
@@ -946,18 +980,22 @@
               <li><strong>js2</strong> = Second joystick device as detected by star citizen</li>
               <li><strong>gp1</strong> = First gamepad device (Xbox controllers, etc.) as detected by star citizen</li>
             </ul>
-            <p class="help-note"><strong>Your device prefixes must match your in-game configuration:</strong> If the prefixes are not correct when binding actions, you'll need to head to the Device Manager, and override them manually.</p>
+            <p class="help-note"><strong>Your device prefixes must match your in-game configuration:</strong> If the
+              prefixes are not correct when binding actions, you'll need to head to the Device Manager, and override
+              them manually.</p>
           </div>
 
-            <div class="help-section">
+          <div class="help-section">
             <h3>Joysticks Mirrored In-Game?</h3>
             <p>If your left and right joysticks are responding the opposite way they should (e.g., right stick movement
               is detected as left stick), follow these steps to fix it:</p>
-            
+
             <h4>Step 1: Verify Device Prefixes</h4>
             <ol>
               <li>Go to the <strong>Device Manager</strong> tab</li>
-              <li>Check that your joystick devices have the correct prefixes assigned (typically <code>js1</code>, <code>js2</code>, etc.)</li>
+              <li>Check that your joystick devices have the correct prefixes assigned (typically <code>js1</code>,
+                <code>js2</code>, etc.)
+              </li>
               <li>If needed, use the prefix dropdown to manually override them to match your in-game configuration</li>
             </ol>
 
@@ -971,22 +1009,28 @@
             </ol>
 
             <h4>Step 3: Swap in Star Citizen (if needed)</h4>
-            <p>If swapping the prefixes doesn't resolve the issue, you can also swap them in-game without restarting:</p>
+            <p>If swapping the prefixes doesn't resolve the issue, you can also swap them in-game without restarting:
+            </p>
             <ol>
               <li>Open the Star Citizen console by pressing <code>~</code> (tilde)</li>
               <li>Enter the following command to swap joystick 1 and joystick 2:</li>
             </ol>
             <div style="display: flex; gap: 0.5rem; align-items: center; margin: 1rem 0;">
               <code
-              style="flex: 1; padding: 0.75rem; background: var(--bg-dark); border-radius: 4px; font-family: 'Consolas', 'Courier New', monospace;">pp_resortdevices joystick 1 2</code>
+                style="flex: 1; padding: 0.75rem; background: var(--bg-dark); border-radius: 4px; font-family: 'Consolas', 'Courier New', monospace;">pp_resortdevices joystick 1 2</code>
               <button id="copy-resort-devices-btn" class="btn btn-primary" title="Copy to clipboard"
-              onclick="copyResortDevicesCommand()">📋 Copy</button>
+                onclick="copyResortDevicesCommand()">📋 Copy</button>
             </div>
-            <p class="help-note"><strong>Note:</strong> The <strong>Swap Device Prefixes</strong> method in step 2 is recommended as the primary solution, as it ensures your keybindings file matches your device configuration. The in-game console command is a fallback option if you prefer to swap them in Star Citizen instead.</p>
-            </div>
+            <p class="help-note"><strong>Note:</strong> The <strong>Swap Device Prefixes</strong> method in step 2 is
+              recommended as the primary solution, as it ensures your keybindings file matches your device
+              configuration. The in-game console command is a fallback option if you prefer to swap them in Star Citizen
+              instead.</p>
+          </div>
 
           <!-- SECTION 3: HOW-TO GUIDES -->
-          <h2 id="help-howto" style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">📚 How-To Guides</h2>
+          <h2 id="help-howto"
+            style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
+            📚 How-To Guides</h2>
 
           <div class="help-section">
             <h3>How do I export my bindings from Star Citizen?</h3>
@@ -994,40 +1038,47 @@
             <strong>Option A</strong>
             <ol>
               <li>Open up the console with ~</li>
-              <li>Type the command: <code>pp_rebindkeys export all file_name</code> (replacing file_name with your desired file name)</li>
+              <li>Type the command: <code>pp_rebindkeys export all file_name</code> (replacing file_name with your
+                desired file name)</li>
             </ol>
             <strong>Option B:</string>
-            <ol>
-              <li>Launch Star Citizen and go to the main menu.</li>
-              <li>Open the Options menu and navigate to the Keybindings tab.</li>
-              <li>Click "advanced controls customiation"</li>
-              <li>Click the "control profiles" dropdown</li>
-              <li>Click the "save control settings" option, choose a name, and click save.</li>
-              <li>Go to your Star Citizen user folder, and find the file you just exported.</li>
-            </ol>
+              <ol>
+                <li>Launch Star Citizen and go to the main menu.</li>
+                <li>Open the Options menu and navigate to the Keybindings tab.</li>
+                <li>Click "advanced controls customiation"</li>
+                <li>Click the "control profiles" dropdown</li>
+                <li>Click the "save control settings" option, choose a name, and click save.</li>
+                <li>Go to your Star Citizen user folder, and find the file you just exported.</li>
+              </ol>
           </div>
 
           <div class="help-section">
             <h3>How do I import my bindings into Star Citizen?</h3>
-            <p>There are two ways to import your modified keybindings into Star Citizen. The <strong>Quick Way</strong> is recommended for the smoothest workflow.</p>
+            <p>There are two ways to import your modified keybindings into Star Citizen. The <strong>Quick Way</strong>
+              is recommended for the smoothest workflow.</p>
 
             <h4>⚡ Quick Way (Recommended)</h4>
-            <p>This method uses the app's auto-save feature to deploy bindings to all installations and quickly reload them in-game:</p>
+            <p>This method uses the app's auto-save feature to deploy bindings to all installations and quickly reload
+              them in-game:</p>
             <ol>
               <li><strong>Configure your Star Citizen installation directory</strong> (if not already done):
                 <ul>
                   <li>Go to the Settings tab</li>
-                  <li>Under "Star Citizen Installation Directory", click "Choose Folder" and select your Star Citizen base directory (the folder containing LIVE, PTU, etc.)</li>
+                  <li>Under "Star Citizen Installation Directory", click "Choose Folder" and select your Star Citizen
+                    base directory (the folder containing LIVE, PTU, etc.)</li>
                 </ul>
               </li>
-              <li>Click the <strong>"⚙️ Auto Save Settings"</strong> button in the Keybindings tab to open the auto-save modal</li>
-              <li>Enable the checkbox to automatically deploy keybindings to all detected Star Citizen installations</li>
+              <li>Click the <strong>"⚙️ Auto Save Settings"</strong> button in the Keybindings tab to open the auto-save
+                modal</li>
+              <li>Enable the checkbox to automatically deploy keybindings to all detected Star Citizen installations
+              </li>
               <li><strong>Save your keybindings file</strong> using the "Save" button in the Keybindings tab
                 <ul>
                   <li>This automatically triggers deployment to all configured installations</li>
                 </ul>
               </li>
-              <li>Click the "📋 Copy Command" button to copy the console command to your clipboard (located on the toolbar next to the "⚙️ Auto Save Settings" button)</li>
+              <li>Click the "📋 Copy Command" button to copy the console command to your clipboard (located on the
+                toolbar next to the "⚙️ Auto Save Settings" button)</li>
               <li>In Star Citizen, open the console by pressing <code>~</code> (tilde)</li>
               <li>Paste the command (Ctrl+V) and press Enter</li>
               <li>Your keybindings will be reloaded immediately in-game!</li>
@@ -1037,9 +1088,12 @@
             <h4>📋 Manual Way</h4>
             <p>If you prefer to manage files manually or don't want to use auto-save:</p>
             <ol>
-              <li><strong>Copy your keybindings file</strong> to a location outside the Star Citizen installation folders (for safekeeping)</li>
-              <li><strong>Manually copy the file back</strong> to your Star Citizen installation folder when ready (typically <code>StarCitizen\LIVE\</code> or the relevant build folder)</li>
-              <li>In Star Citizen, open the <strong>Options menu</strong> and navigate to the <strong>Keybindings tab</strong></li>
+              <li><strong>Copy your keybindings file</strong> to a location outside the Star Citizen installation
+                folders (for safekeeping)</li>
+              <li><strong>Manually copy the file back</strong> to your Star Citizen installation folder when ready
+                (typically <code>StarCitizen\LIVE\</code> or the relevant build folder)</li>
+              <li>In Star Citizen, open the <strong>Options menu</strong> and navigate to the <strong>Keybindings
+                  tab</strong></li>
               <li>Click the <strong>"Advanced Controls Customization"</strong> button</li>
               <li>Click the <strong>"Control Profiles"</strong> dropdown</li>
               <li>Find and select your keybinding file from the list</li>
@@ -1048,8 +1102,12 @@
 
             <h4>⚠️ Important Notes</h4>
             <ul>
-              <li><strong>First import not working?</strong> Sometimes Star Citizen requires importing the bindings twice. If your controls don't seem to apply on the first try, repeat the import process again—this often resolves the issue.</li>
-              <li><strong>Auto-save vs. manual:</strong> Using auto-save is faster if you have multiple Star Citizen installations, as it deploys to all of them automatically when saving - super handy for fast iteration.</li>
+              <li><strong>First import not working?</strong> Sometimes Star Citizen requires importing the bindings
+                twice. If your controls don't seem to apply on the first try, repeat the import process again—this often
+                resolves the issue.</li>
+              <li><strong>Auto-save vs. manual:</strong> Using auto-save is faster if you have multiple Star Citizen
+                installations, as it deploys to all of them automatically when saving - super handy for fast iteration.
+              </li>
             </ul>
           </div>
 
@@ -1083,47 +1141,66 @@
           </div>
 
           <!-- SECTION 4: TIPS & BEST PRACTICES -->
-          <h2 id="help-tips" style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">💡 Tips & Best Practices</h2>
+          <h2 id="help-tips"
+            style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
+            💡 Tips & Best Practices</h2>
 
           <div class="help-section">
             <h3>Keybindings Page Tips</h3>
             <p>Before editing keybindings:</p>
             <ol>
-              <li>The device prefix (js1, js2, etc.) is auto-detected, but can be overridden in the Device Manager if needed.</li>
+              <li>The device prefix (js1, js2, etc.) is auto-detected, but can be overridden in the Device Manager if
+                needed.</li>
               <li>When you press a button to bind an action, the app will assign it using the prefix you've configured
                 for that device.</li>
-              <li>Each action when hovered, shows various buttons to manage it - such as the manager, clear, reset, and bind buttons.</li>
+              <li>Each action when hovered, shows various buttons to manage it - such as the manager, clear, reset, and
+                bind buttons.</li>
               <li>Each action shows tags indicating what buttons are bound to it.</li>
-              <li>You can click the button tag to search for it in the visual view. If found, it'll highlight the button frame for that button ID.</li>
-              <li>If you click the button manager, you can set the button type per button. For example you can set a button to require double-tapping it, holding it, etc.</li>
-              <li>Action rows that have a accented background are actions that YOU have customized - rows that have the default background are unmodified.</li>
-              <li>If you're importing a key binding file for the first time, and all the prefixes are flipped - you can use the "swap device prefixes" button to correct them.</li>
+              <li>You can click the button tag to search for it in the visual view. If found, it'll highlight the button
+                frame for that button ID.</li>
+              <li>If you click the button manager, you can set the button type per button. For example you can set a
+                button to require double-tapping it, holding it, etc.</li>
+              <li>Action rows that have a accented background are actions that YOU have customized - rows that have the
+                default background are unmodified.</li>
+              <li>If you're importing a key binding file for the first time, and all the prefixes are flipped - you can
+                use the "swap device prefixes" button to correct them.</li>
             </ol>
-            <p><strong>Generate Unbind Profile:</strong> This will generate a binding file for the very specific purpose of unbinding all key binds. THIS CAN HAVE UNINTENDED CONSEQUENCES, such as device IDs breaking. If this happens, a game restart will generally fix it. Use this feature with caution, and only when necessary.</p>
-            <p class="help-note"><strong>Why are device prefixes important?</strong> If device prefixes are incorrect, your bindings
+            <p><strong>Generate Unbind Profile:</strong> This will generate a binding file for the very specific purpose
+              of unbinding all key binds. THIS CAN HAVE UNINTENDED CONSEQUENCES, such as device IDs breaking. If this
+              happens, a game restart will generally fix it. Use this feature with caution, and only when necessary.</p>
+            <p class="help-note"><strong>Why are device prefixes important?</strong> If device prefixes are incorrect,
+              your bindings
               will be assigned to the wrong device, causing controls to not work correctly in Star Citizen.</p>
           </div>
 
-            <div class="help-section">
+          <div class="help-section">
             <h3>Visual View Tips</h3>
             <p>The Visual View is where you can see your keybindings displayed directly on your joystick template:</p>
             <ul>
-              <li><strong>Requirements:</strong> You need both a keybindings file loaded (from the Keybindings tab) and at least one template selected to see anything.</li>
-              <li><strong>Color Coding:</strong> Custom bindings appear in the accent color (usually cyan), while default Star Citizen bindings appear in grey. You can change this in the Display Configuration menu (⚙️ Config button).</li>
+              <li><strong>Requirements:</strong> You need both a keybindings file loaded (from the Keybindings tab) and
+                at least one template selected to see anything.</li>
+              <li><strong>Color Coding:</strong> Custom bindings appear in the accent color (usually cyan), while
+                default Star Citizen bindings appear in grey. You can change this in the Display Configuration menu (⚙️
+                Config button).</li>
               <li><strong>Click Button Frames:</strong> Click any button frame on the joystick to open a modal showing:
-              <ul>
-                <li>The button ID (e.g., js1_button1)</li>
-                <li>All actions currently bound to that button</li>
-                <li>Options to remove individual bindings or add new ones</li>
-              </ul>
+                <ul>
+                  <li>The button ID (e.g., js1_button1)</li>
+                  <li>All actions currently bound to that button</li>
+                  <li>Options to remove individual bindings or add new ones</li>
+                </ul>
               </li>
-              <li><strong>Quick Search:</strong> Click the button ID in the button modal to search for that button in the Keybindings tab.</li>
-              <li><strong>Add Bindings Fast:</strong> Click the "Add Action" button in the button modal to open a quick search dialog for binding new actions to that button.</li>
-              <li><strong>Multiple Templates:</strong> Load multiple templates to see all your devices. Each device will have its own page that you can navigate with Tab/Shift+Tab.</li>
-              <li><strong>Customize Display:</strong> Use the Config menu (⚙️) to adjust button frame sizes, font sizes, and the number of lines shown per button.</li>
-              <li><strong>Export as Image:</strong> Click the "Export" button to save a PNG image of the currently displayed device, perfect for sharing your layout with others.</li>
+              <li><strong>Quick Search:</strong> Click the button ID in the button modal to search for that button in
+                the Keybindings tab.</li>
+              <li><strong>Add Bindings Fast:</strong> Click the "Add Action" button in the button modal to open a quick
+                search dialog for binding new actions to that button.</li>
+              <li><strong>Multiple Templates:</strong> Load multiple templates to see all your devices. Each device will
+                have its own page that you can navigate with Tab/Shift+Tab.</li>
+              <li><strong>Customize Display:</strong> Use the Config menu (⚙️) to adjust button frame sizes, font sizes,
+                and the number of lines shown per button.</li>
+              <li><strong>Export as Image:</strong> Click the "Export" button to save a PNG image of the currently
+                displayed device, perfect for sharing your layout with others.</li>
             </ul>
-            </div>
+          </div>
 
           <div class="help-section">
             <h3>Template Editor Tips</h3>
@@ -1144,19 +1221,24 @@
               device per physical stick to keep your layout organized!</p>
           </div>
 
-          
+
           <!-- SECTION 5: TROUBLESHOOTING -->
-          <h2 id="help-troubleshooting" style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">🔧 Troubleshooting</h2>
+          <h2 id="help-troubleshooting"
+            style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
+            🔧 Troubleshooting</h2>
 
           <div class="help-section">
             <h3>My buttons are mapping to the wrong device</h3>
-            <p>This is where things can get a little tricky and confusing. As mentioned above, the main concern here are device prefixes. Here's the steps I'd recommend trying:</p>
+            <p>This is where things can get a little tricky and confusing. As mentioned above, the main concern here are
+              device prefixes. Here's the steps I'd recommend trying:</p>
             <ul>
               <li>Record what prefix your devices are detected as in star citizen.</li>
               <li>Head over to the Device Manager page</li>
               <li>Use the drop down to override their prefix to match your in-game configuration</li>
               <li>Return to the Keybindings page and try binding again</li>
-              <li>Remember, the prefix you set here is what gets recorded in your keybindings when you press a button on the device. If the prefix is wrong, your bindings will be assigned to the wrong device, and your controls won't work correctly in Star Citizen.</li> 
+              <li>Remember, the prefix you set here is what gets recorded in your keybindings when you press a button on
+                the device. If the prefix is wrong, your bindings will be assigned to the wrong device, and your
+                controls won't work correctly in Star Citizen.</li>
             </ul>
           </div>
 
@@ -1186,7 +1268,9 @@
           </div>
 
           <!-- SECTION 6: SUPPORT & FEEDBACK -->
-          <h2 id="help-support" style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">🤝 Support & Feedback</h2>
+          <h2 id="help-support"
+            style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
+            🤝 Support & Feedback</h2>
 
           <div class="help-section">
             <h3>Report Issues</h3>
@@ -1578,7 +1662,8 @@
             <button class="btn btn-secondary btn-sm hat-clear-btn" data-direction="4">✕ Clear Pos 4</button>
           </div>
 
-          <div class="hat-button-group" data-hat-type="hat4way,hat2way-vertical,hat2way-horizontal,rotary3way,rotary4way">
+          <div class="hat-button-group"
+            data-hat-type="hat4way,hat2way-vertical,hat2way-horizontal,rotary3way,rotary4way">
             <button class="btn btn-secondary btn-sm hat-detect-btn" data-direction="push">⬇️ Detect Push</button>
             <button class="btn btn-secondary btn-sm hat-clear-btn" data-direction="push">✕ Clear Push</button>
           </div>
@@ -1920,14 +2005,12 @@
         <h2>🎉 What's New</h2>
       </div>
       <div class="modal-body whats-new-body">
-        <!-- v1.0.0 Collapsible Section -->
-        <!-- v1.1.0 Collapsible Section -->
         <div class="whats-new-version-section">
-          <button class="whats-new-version-toggle" data-version="1.1.0">
+          <button class="whats-new-version-toggle" data-version="1.1.3">
             <span class="version-toggle-arrow">▼</span>
             <span class="version-toggle-label">v1.1.0</span>
           </button>
-          <div class="whats-new-version-content" id="whats-new-0110" style="display: block;">
+          <div class="whats-new-version-content" id="whats-new-110" style="display: block;">
             <div class="whats-new-section">
               <h3>📋 Updates</h3>
               <ul>
@@ -1935,56 +2018,93 @@
               </ul>
               <h3>🐛 Bug Fixes</h3>
               <ul>
-                <li><strong>Keybindings Page Override:</strong> Fixed keybindings page not respecting override on devices.</li>
-                <li><strong>Button Breadcrumb Navigation:</strong> Fixed button breadcrumb navigating off split view.</li>
-                <li><strong>View State Persistence:</strong> Fixed visual view / split view remembering canvas pan/zoom positions.</li>
-                <li><strong>Vjoy Device ID:</strong> Fixed vjoy devices being seen as the same device for overrides.</li>
-                </ul>
-                <div class="warning-box" style="margin-top: 1rem;">
-                <p><strong>⚠️ Action Required:</strong> This fix requires you to re-apply your device prefix overrides in the Device Manager. Please review your joystick prefix settings to ensure they still match your in-game configuration.</p>
-                </div>
-                <ul>
+                <li><strong>Keybindings Page Override:</strong> Fixed keybindings page not respecting override on
+                  devices.</li>
+                <li><strong>Button Breadcrumb Navigation:</strong> Fixed button breadcrumb navigating off split view.
+                </li>
+                <li><strong>View State Persistence:</strong> Fixed visual view / split view remembering canvas pan/zoom
+                  positions.</li>
+                <li><strong>Vjoy Device ID:</strong> Fixed vjoy devices being seen as the same device for overrides.
+                </li>
+                <li><strong>Sliders:</strong> Fixed sliders showing as "slider" instead of "slider1", "slider2", etc.
+                </li>
               </ul>
+              <div class="warning-box" style="margin-top: 1rem;">
+                <p><strong>⚠️ Action Required:</strong> This fix requires you to re-apply your device prefix overrides
+                  in the Device Manager. Please review your joystick prefix settings to ensure they still match your
+                  in-game configuration.</p>
+              </div>
               <h3>✨ New Features</h3>
               <ul>
-                <li><strong>Delete Confirmation Setting:</strong> Added setting to disable the confirmation message when removing bindings for faster workflow.</li>
-                <li><strong>Drag & Drop Bindings:</strong> Added click + drag to drag actions onto input buttons in split view.</li>
-                <li><strong>Input Detection Indicator:</strong> Added input detection on joystick view to show which button was pressed.</li>
-                <li><strong>Tip Visibility Toggle:</strong> Added a tip text checkbox to hide some of the various tips on the pages for a cleaner look.</li>
-                <li><strong>Quick filters for joystick viewer:</strong> Added buttons to quickly filter out basic input categories.</li>
-                <li><strong>Click binding tag to find in devices:</strong> Clicking on a binding tag in the keybindings list will highlight that binding on the visual view page if found.</li>
+                <li><strong>Delete Confirmation Setting:</strong> Added setting to disable the confirmation message when
+                  removing bindings for faster workflow.</li>
+                <li><strong>Drag & Drop Bindings:</strong> Added click + drag to drag actions onto input buttons in
+                  split view.</li>
+                <li><strong>Input Detection Indicator:</strong> Added input detection on joystick view to show which
+                  button was pressed.</li>
+                <li><strong>Tip Visibility Toggle:</strong> Added a tip text checkbox to hide some of the various tips
+                  on the pages for a cleaner look.</li>
+                <li><strong>Quick filters for joystick viewer:</strong> Added buttons to quickly filter out basic input
+                  categories.</li>
+                <li><strong>Click binding tag to find in devices:</strong> Clicking on a binding tag in the keybindings
+                  list will highlight that binding on the visual view page if found.</li>
+              </ul>
+              <h3>v1.1.1</h3>
+              <ul>
+                <li><strong>Bug Fixes:</strong> Fixed inconsistenty with slider bind types, and speculative fix for
+                  click detection on different monitor resolutions.</li>
+              </ul>
+              <h3>v1.1.2</h3>
+              <ul>
+                <li><strong>Bug Fixes:</strong> Potential fixes for missing axis detection.</li>
+              </ul>
+              <h3>v1.1.3</h3>
+              <ul>
+                <li><strong>Feature:</strong> Supported modifier key combinations with joystick inputs.</li>
+                <li><strong>Feature:</strong> Updating bindings to alpha 4.7</li>
+                <li><strong>Bug Fix:</strong> Fixed sliders not appending input index</li>
               </ul>
             </div>
           </div>
         </div>
 
-        <!-- v1.0.0 Collapsible Section -->
         <div class="whats-new-version-section">
           <button class="whats-new-version-toggle" data-version="1.0.0">
             <span class="version-toggle-arrow">▼</span>
             <span class="version-toggle-label">v1.0.0</span>
           </button>
-          <div class="whats-new-version-content" id="whats-new-0120" style="display: block;">
+          <div class="whats-new-version-content" id="whats-new-100" style="display: block;">
             <div class="whats-new-section">
               <h3>🚀 Boxxy Binder now v1.0!</h3>
               <ul>
-                <li><strong>Major Release:</strong> I think Boxxy Binder is finally ready to go to version 1.0! A huge thank you to all the users who have supported and contributed to the project so far.</li>
-                  <li><strong>What's Next:</strong> There's almost certainly still bugs to squash, and I will continue to squash them whenever they crop up. This isn't the end of new features, and I'll add new ones over time. I'll be sure to update the master keybindings list whenever there's an update from Star Citizen.</li>
-                                    <li><strong>Discord:</strong> We have a <a href="https://discord.gg/cjEtkeBG" target="_blank" rel="noopener noreferrer" class="external-link">discord server</a> now! Templates are often shared there, so feel free to join and participate.</li>
+                <li><strong>Major Release:</strong> I think Boxxy Binder is finally ready to go to version 1.0! A huge
+                  thank you to all the users who have supported and contributed to the project so far.</li>
+                <li><strong>What's Next:</strong> There's almost certainly still bugs to squash, and I will continue to
+                  squash them whenever they crop up. This isn't the end of new features, and I'll add new ones over
+                  time. I'll be sure to update the master keybindings list whenever there's an update from Star
+                  Citizen.</li>
+                <li><strong>Discord:</strong> We have a <a href="https://discord.gg/cjEtkeBG" target="_blank"
+                    rel="noopener noreferrer" class="external-link">discord server</a> now! Templates are often
+                  shared there, so feel free to join and participate.</li>
               </ul>
-<hr>
+              <hr>
               <h3>✨ New Features</h3>
               <ul>
-                <li><strong>Split view:</strong> Can now see the keybindings editor and visual view pages side by side.</li>
-                <li><strong>Clickable Bind Tags:</strong> You can now click the binding tags in the keybindnigs list that will highlight that binding on the visual view page if found.</li>
-                <li><strong>New button types:</strong> Added a few new button types for enhanced customization, such as 3 way toggles, or 4 way rotary knobs.</li>
-                <li><strong>Refreshed help section:</strong> Updated the help section to be more up to date, and easier to navigate.</li>
+                <li><strong>Split view:</strong> Can now see the keybindings editor and visual view pages side by side.
+                </li>
+                <li><strong>Clickable Bind Tags:</strong> You can now click the binding tags in the keybindnigs list
+                  that will highlight that binding on the visual view page if found.</li>
+                <li><strong>New button types:</strong> Added a few new button types for enhanced customization, such as
+                  3 way toggles, or 4 way rotary knobs.</li>
+                <li><strong>Refreshed help section:</strong> Updated the help section to be more up to date, and easier
+                  to navigate.</li>
               </ul>
             </div>
           </div>
+        </div>
 
-
-          <button class="whats-new-version-toggle" data-version="0.11.1">
+        <div class="whats-new-version-section">
+          <button class="whats-new-version-toggle" data-version="0.11.0">
             <span class="version-toggle-arrow">▼</span>
             <span class="version-toggle-label">v0.11.0</span>
           </button>
@@ -2004,6 +2124,7 @@
               <ul>
                 <li><strong>Bug Fixes:</strong> Fixed joystick prefixes swaps not saving in keybindings page.</li>
                 <li><strong>Features:</strong> Updated keybindings list to 4.5.</li>
+              </ul>
             </div>
           </div>
         </div>
@@ -2062,7 +2183,6 @@
             <input type="checkbox" id="unbind-gamepad" checked />
             <label for="unbind-gamepad">Gamepad</label>
           </div>
-          <!-- Joystick checkboxes will be populated dynamically by JS -->
           <div id="unbind-joysticks-list"></div>
         </div>
 
@@ -2077,43 +2197,43 @@
 
   <!-- Action Search Modal (for Visual View binding) -->
   <div id="action-search-modal" class="modal" style="display: none;">
-    <div class="modal-content" style="max-width: 700px;">
-      <div class="modal-header">
-        <h2>🔍 Search Actions to Bind</h2>
+    <div class="modal-header">
+      <div class="whats-new-footer">
+        <p>Thank you for using the Boxxy Binder!</p>
+        <p class="text-muted">Be sure to report any issues on the github <a
+            href="https://github.com/BoxximusPrime/SC-Binding-Utility/issues" target="_blank" rel="noopener noreferrer"
+            class="external-link">repository</a>.</p>
       </div>
-      <div class="modal-body">
-        <div class="action-search-target" id="action-search-target">
-          <span class="target-label">Binding to:</span>
-          <code id="action-search-button-id">js1_button1</code>
-        </div>
-        <div class="action-search-modifiers">
-          <span class="modifier-label">Modifier:</span>
-          <div class="modifier-buttons">
-            <button class="modifier-btn" data-modifier="" title="No modifier">None</button>
-            <button class="modifier-btn" data-modifier="lalt" title="Left Alt">L Alt</button>
-            <button class="modifier-btn" data-modifier="lctrl" title="Left Ctrl">L Ctrl</button>
-            <button class="modifier-btn" data-modifier="lshift" title="Left Shift">L Shift</button>
-            <button class="modifier-btn" data-modifier="ralt" title="Right Alt">R Alt</button>
-            <button class="modifier-btn" data-modifier="rctrl" title="Right Ctrl">R Ctrl</button>
-            <button class="modifier-btn" data-modifier="rshift" title="Right Shift">R Shift</button>
-          </div>
-        </div>
-        <div class="action-search-input-container">
-          <input type="text" id="action-search-input" class="action-search-input"
-            placeholder="Search actions... (use | for OR, + for AND)" autofocus />
-          <button id="action-search-clear-btn" class="action-search-clear-btn" style="display: none;">✕</button>
-        </div>
-        <div class="action-search-tips">
-          <span>💡 Tips: Use <code>|</code> for OR (fire|missile), <code>+</code> for AND (required+both)</span>
-        </div>
-        <div id="action-search-results" class="action-search-results">
-          <div class="action-search-empty">Type to search for actions...</div>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button id="action-search-cancel-btn" class="btn btn-secondary">Cancel</button>
+      <code id="action-search-button-id">js1_button1</code>
+    </div>
+    <div class="action-search-modifiers">
+      <span class="modifier-label">Modifier:</span>
+      <div class="modifier-buttons">
+        <button class="modifier-btn" data-modifier="" title="No modifier">None</button>
+        <button class="modifier-btn" data-modifier="lalt" title="Left Alt">L Alt</button>
+        <button class="modifier-btn" data-modifier="lctrl" title="Left Ctrl">L Ctrl</button>
+        <button class="modifier-btn" data-modifier="lshift" title="Left Shift">L Shift</button>
+        <button class="modifier-btn" data-modifier="ralt" title="Right Alt">R Alt</button>
+        <button class="modifier-btn" data-modifier="rctrl" title="Right Ctrl">R Ctrl</button>
+        <button class="modifier-btn" data-modifier="rshift" title="Right Shift">R Shift</button>
       </div>
     </div>
+    <div class="action-search-input-container">
+      <input type="text" id="action-search-input" class="action-search-input"
+        placeholder="Search actions... (use | for OR, + for AND)" autofocus />
+      <button id="action-search-clear-btn" class="action-search-clear-btn" style="display: none;">✕</button>
+    </div>
+    <div class="action-search-tips">
+      <span>💡 Tips: Use <code>|</code> for OR (fire|missile), <code>+</code> for AND (required+both)</span>
+    </div>
+    <div id="action-search-results" class="action-search-results">
+      <div class="action-search-empty">Type to search for actions...</div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button id="action-search-cancel-btn" class="btn btn-secondary">Cancel</button>
+  </div>
+  </div>
   </div>
 
   <!-- Clear SC Binds Success Modal -->

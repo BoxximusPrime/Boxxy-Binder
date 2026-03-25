@@ -1636,9 +1636,11 @@ function resizeViewerCanvas()
     // Draw highlight border around selected box if any
     if (selectedBox)
     {
+        const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim() || '#4a9eff';
+
         if (isPulsing)
         {
-            const highlightColor = '#ffffff'; // Pure white for pulsing
+            const highlightColor = accentPrimary;
 
             // Pulse effect based on time
             const pulse = (Math.sin(Date.now() / 200) + 1) / 2; // 0 to 1
@@ -1671,8 +1673,7 @@ function resizeViewerCanvas()
         {
             // Static selection - match template-editor.js style
             ctx.save();
-            const accentHover = getComputedStyle(document.documentElement).getPropertyValue('--accent-hover').trim();
-            ctx.strokeStyle = accentHover;
+            ctx.strokeStyle = accentPrimary;
             ctx.lineWidth = 3;
 
             // Draw a single clean outline around the box
@@ -2819,19 +2820,14 @@ function findAllBindingsForHatDirection(hat, direction)
 function getCanvasCoords(event)
 {
     const rect = canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
 
     // Convert screen coordinates to canvas coordinates
     const canvasX = (event.clientX - rect.left);
     const canvasY = (event.clientY - rect.top);
 
-    // Reverse the DPR scaling
-    const scaledX = canvasX / dpr;
-    const scaledY = canvasY / dpr;
-
     // Reverse the pan and zoom transformations
-    const imgX = (scaledX - pan.x) / zoom;
-    const imgY = (scaledY - pan.y) / zoom;
+    const imgX = (canvasX - pan.x) / zoom;
+    const imgY = (canvasY - pan.y) / zoom;
 
     return { x: imgX, y: imgY };
 }

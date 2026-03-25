@@ -1369,7 +1369,7 @@
 			gamepad=" " joystick=" " UILabel="@ui_CIMiningConsumable3"
 			UIDescription="@ui_CIMiningConsumableDesc" Category="MiningMode" />
 		<action name="v_mining_use_permanent_modifier" activationMode="press" mouse=""
-			keyboard="lalt+4" gamepad=" " joystick=" " UILabel="@ui_CIMiningConsumable1"
+			keyboard="lalt+4" gamepad=" " joystick=" " UILabel="@ui_CIMiningLaserType"
 			UIDescription="@ui_CIMiningConsumableDesc" Category="MiningMode" />
 		<action name="v_jettison_volatile_cargo" activationMode="press" mouse="" keyboard="lalt+j"
 			gamepad=" " joystick=" " UILabel="@ui_CIJettisonVolatileCargo"
@@ -2043,7 +2043,7 @@
 			UILabel="@ui_stopwatch_trigger" UIDescription="@ui_v_hud_stopwatch_trigger_desc"
 			Category="VehicleActions" />
 	</actionmap>
-	<actionmap name="player" version="27" UILabel="@ui_CGFPSMovement" UICategory="@ui_CCFPS"><![CDATA[/>                                                                                                                                                                                                                                                                                                                                                                                            ]]>
+	<actionmap name="player" version="27" UILabel="@ui_CGFPSMovement" UICategory="@ui_CCFPS"><![CDATA[/>                                                                                                                                                                                                                                                                                                                                                                                           ]]>
 		<action name="moveleft" activationMode="hold" retriggerable="1" keyboard="a" joystick=" "
 			UILabel="@ui_CIFPSMoveLeft" UIDescription="@ui_CIFPSMoveLeftDesc" />
 		<action name="moveright" activationMode="hold" retriggerable="1" keyboard="d" joystick=" "
@@ -2181,9 +2181,9 @@
 			UIDescription="@ui_CIFPSSelectUnarmedCombatDesc" Category="WeaponSelection" />
 		<action name="nextitem" activationMode="press" keyboard=" " gamepad=" " joystick=" " />
 		<action name="prevItem" activationMode="press" keyboard=" " gamepad=" " joystick=" " />
-		<action name="nextweapon" activationMode="press" keyboard="" gamepad=" " joystick=" "
+		<action name="nextweapon" activationMode="press" keyboard=" " gamepad=" " joystick=" "
 			UILabel="@ui_CIFPSNextWeapon" UIDescription="@ui_CIFPSNextWeaponDesc" />
-		<action name="prevweapon" activationMode="press" keyboard="" gamepad=" " joystick=" "
+		<action name="prevweapon" activationMode="press" keyboard=" " gamepad=" " joystick=" "
 			UILabel="@ui_CIFPSPreviousWeapon" UIDescription="@ui_CIFPSPreviousWeaponDesc" />
 		<action name="reload" activationMode="tap" keyboard="r" gamepad="x" joystick=" "
 			UILabel="@ui_CIFPSReload" UIDescription="@ui_CIFPSReloadDesc" Category="ItemActions" />
@@ -2278,7 +2278,7 @@
 		<action name="thirdperson" activationMode="tap" keyboard="f4" gamepad="shoulderl+y"
 			joystick=" " UILabel="@ui_CIFPSToggleThirdPerson"
 			UIDescription="@ui_CIFPSToggleThirdPersonDesc" />
-		<action name="toggle_cursor_input" activationMode="press" keyboard="f11" gamepad="" />
+		<action name="toggle_cursor_input" activationMode="press" keyboard="f11" gamepad=" " />
 		<action name="free_thirdperson_camera" activationMode="hold" keyboard="z" gamepad=" "
 			joystick=" " UILabel="@ui_CIFPSToggle3rdPersonFreeView"
 			UIDescription="@ui_CIFPSToggle3rdPersonFreeViewDesc" />
@@ -3303,8 +3303,7 @@
 		<action name="character_customizer_zoom_out" onPress="1" onHold="1" mouse="mwheel_down" />
 		<action name="character_customizer_select" onRelease="1" mouse="mouse1" keyboard="f"
 			gamepad="a" />
-		<action name="character_customizer_enable_dna_edit" activationMode="hold" onRelease="1"
-			mouse="mouse1" />
+		<action name="character_customizer_enable_dna_edit" onPress="1" onRelease="1" mouse="mouse1" />
 		<action name="character_customizer_enable_rotation" activationMode="hold" onRelease="1"
 			keyboard="lshift" />
 		<action name="character_customizer_enable_mouse_rotation" activationMode="hold"

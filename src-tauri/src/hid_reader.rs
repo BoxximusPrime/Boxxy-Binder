@@ -69,6 +69,21 @@ pub struct HidFullReport {
     pub is_16bit: bool,
 }
 
+#[derive(Serialize, Clone, Debug)]
+pub struct HidInputCapabilities {
+    pub button_count: usize,
+    pub axis_count: usize,
+    pub hat_count: usize,
+}
+
+fn make_axis_field_id(usage_id: u32, occurrence: u32) -> u32 {
+    if occurrence == 0 {
+        usage_id
+    } else {
+        (usage_id << 16) | occurrence
+    }
+}
+
 /// List all HID devices that appear to be game controllers
 pub fn list_hid_game_controllers() -> Result<Vec<HidDeviceListItem>, String> {
     let api = HidApi::new().map_err(|e| format!("Failed to initialize HID API: {}", e))?;
@@ -177,6 +192,7 @@ pub fn parse_hid_full_report(report: &[u8], descriptor: &[u8]) -> Result<HidFull
     let mut pressed_buttons = Vec::new();
     let mut max_bits = 8;
     let mut button_index: u32 = 1; // 1-based button numbering
+    let mut usage_occurrence: HashMap<u32, u32> = HashMap::new();
 
     // Extract values from each field
     for field in input_report.fields() {
@@ -216,8 +232,10 @@ pub fn parse_hid_full_report(report: &[u8], descriptor: &[u8]) -> Result<HidFull
                 let usage_val: u32 =
                     ((usage_page as u32) << 16) | (u16::from(var.usage.usage_id) as u32);
 
-                // Use the usage ID as the axis index for consistency
-                let axis_index = u16::from(var.usage.usage_id) as u32;
+                let usage_id = u16::from(var.usage.usage_id) as u32;
+                let occurrence = usage_occurrence.get(&usage_id).copied().unwrap_or(0);
+                let axis_index = make_axis_field_id(usage_id, occurrence);
+                usage_occurrence.insert(usage_id, occurrence + 1);
 
                 // Extract the value
                 match var.extract(report) {
@@ -347,6 +365,7 @@ pub fn get_directinput_to_hid_axis_mapping(device_path: &str) -> Result<HashMap<
 
     let mut mapping = HashMap::new();
     let mut directinput_index: u32 = 1; // DirectInput uses 1-based indexing
+    let mut usage_occurrence: HashMap<u32, u32> = HashMap::new();
 
     // Iterate through input reports and collect axes in order
     for report in rdesc.input_reports() {
@@ -357,14 +376,18 @@ pub fn get_directinput_to_hid_axis_mapping(device_path: &str) -> Result<HashMap<
                     continue;
                 }
 
-                // This is an axis - map DirectInput index to HID usage ID
+                // This is an axis - map DirectInput index to HID axis field ID.
+                // Field ID preserves duplicate usage IDs (e.g., multiple hat switches).
                 let usage_id = u16::from(var.usage.usage_id) as u32;
-                mapping.insert(directinput_index, usage_id);
+                let occurrence = usage_occurrence.get(&usage_id).copied().unwrap_or(0);
+                let axis_field_id = make_axis_field_id(usage_id, occurrence);
+                usage_occurrence.insert(usage_id, occurrence + 1);
+                mapping.insert(directinput_index, axis_field_id);
 
                 eprintln!(
                     "[Axis Mapping] DirectInput axis {} → HID usage ID {} ({})",
                     directinput_index,
-                    usage_id,
+                    axis_field_id,
                     Usage::try_from(((u16::from(var.usage.usage_page) as u32) << 16) | usage_id)
                         .ok()
                         .map(|u| u.name().to_string())
@@ -383,6 +406,7 @@ pub fn get_directinput_to_hid_axis_mapping(device_path: &str) -> Result<HashMap<
 /// This replaces our manual parsing with proper library-based parsing
 fn parse_hid_descriptor_with_library(descriptor: &[u8]) -> Result<HashMap<u32, String>, String> {
     let mut axis_names = HashMap::new();
+    let mut usage_occurrence: HashMap<u32, u32> = HashMap::new();
 
     // Parse the report descriptor
     let rdesc = ReportDescriptor::try_from(descriptor)
@@ -415,9 +439,12 @@ fn parse_hid_descriptor_with_library(descriptor: &[u8]) -> Result<HashMap<u32, S
                     let usage_val: u32 = ((u16::from(var.usage.usage_page) as u32) << 16)
                         | (u16::from(var.usage.usage_id) as u32);
 
-                    // Use the usage ID as the axis index for consistency
-                    // This matches how we assign indices in parse_hid_axes_from_descriptor_bytes
-                    let axis_index = u16::from(var.usage.usage_id) as u32;
+                    // Use a stable field ID for axis index so duplicate usage IDs are preserved
+                    // (e.g., multiple hat switches on one device).
+                    let usage_id = u16::from(var.usage.usage_id) as u32;
+                    let occurrence = usage_occurrence.get(&usage_id).copied().unwrap_or(0);
+                    let axis_index = make_axis_field_id(usage_id, occurrence);
+                    usage_occurrence.insert(usage_id, occurrence + 1);
 
                     eprintln!(
                         "[HID] Variable field: {} bits, usage: 0x{:08X}",
@@ -462,4 +489,42 @@ fn parse_hid_descriptor_with_library(descriptor: &[u8]) -> Result<HashMap<u32, S
     eprintln!("[HID] Total axes found: {}", axis_names.len());
 
     Ok(axis_names)
+}
+
+pub fn get_input_capabilities_from_descriptor(
+    device_path: &str,
+) -> Result<HidInputCapabilities, String> {
+    let descriptor = get_hid_descriptor_bytes(device_path)?;
+
+    let rdesc = ReportDescriptor::try_from(descriptor.as_slice())
+        .map_err(|e| format!("Failed to parse report descriptor: {:?}", e))?;
+
+    let mut button_count = 0usize;
+    let mut axis_count = 0usize;
+    let mut hat_count = 0usize;
+
+    for report in rdesc.input_reports() {
+        for field in report.fields() {
+            if let Field::Variable(var) = field {
+                let usage_page = u16::from(var.usage.usage_page);
+                let usage_id = u16::from(var.usage.usage_id);
+
+                if usage_page == 0x09 {
+                    button_count += 1;
+                    continue;
+                }
+
+                axis_count += 1;
+                if usage_page == 0x01 && usage_id == 0x39 {
+                    hat_count += 1;
+                }
+            }
+        }
+    }
+
+    Ok(HidInputCapabilities {
+        button_count,
+        axis_count,
+        hat_count,
+    })
 }

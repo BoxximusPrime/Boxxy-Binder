@@ -1,13 +1,14 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open, save } = window.__TAURI__.dialog;
-import { toStarCitizenFormat } from './input-utils.js';
+import { toStarCitizenFormat, normalizeHidAxisNameToSCAxisName, ensureSliderNumber } from './input-utils.js';
 import { CustomDropdown } from './custom-dropdown.js';
 import { Tooltip } from './tooltip.js';
 
 // Keyboard detection state
 let keyboardDetectionActive = false;
 let keyboardDetectionHandler = null;
+let keyboardDetectionKeyupHandler = null;
 let isDetectionActive = false; // Global flag to track if input detection is active
 let ignoreModalMouseInputs = false; // Set while hovering cancel/save to avoid accidental detections
 let currentBindingId = null; // Unique ID for the current binding attempt - helps ignore stale events
@@ -54,6 +55,20 @@ let statusEl = null;
 let selectionContainer = null;
 let selectionButtons = new Map();
 let selectionMessageEl = null;
+let heldModifiers = new Set();
+let modifierHoldIndicator = null;
+
+const MODIFIER_INPUT_KEYS = ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'];
+const MODIFIER_ORDER = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT'];
+const MODIFIER_DISPLAY_NAMES = {
+    LALT: 'Left Alt',
+    RALT: 'Right Alt',
+    LCTRL: 'Left Ctrl',
+    RCTRL: 'Right Ctrl',
+    LSHIFT: 'Left Shift',
+    RSHIFT: 'Right Shift',
+    LWIN: 'Left Win'
+};
 
 function setBindingSaveEnabled(enabled)
 {
@@ -341,6 +356,177 @@ function renderDetectedInputMessage(container, message)
     container.appendChild(span);
 }
 
+function isModifierKeyCode(scKey)
+{
+    return MODIFIER_INPUT_KEYS.includes(scKey);
+}
+
+function getModifierDisplayName(modifier)
+{
+    return MODIFIER_DISPLAY_NAMES[modifier.toUpperCase()] || modifier;
+}
+
+function getModifierTokenForScKey(scKey)
+{
+    if (!isModifierKeyCode(scKey)) return null;
+    return scKey.toUpperCase();
+}
+
+function removeModifierHoldIndicator()
+{
+    if (!modifierHoldIndicator) return;
+    modifierHoldIndicator.remove();
+    modifierHoldIndicator = null;
+}
+
+function updateModifierHoldUI()
+{
+    removeModifierHoldIndicator();
+
+    if (!statusEl || !bindingMode || allDetectedInputs.size > 0 || heldModifiers.size === 0)
+    {
+        return;
+    }
+
+    const modifierNames = Array.from(heldModifiers)
+        .sort((a, b) => MODIFIER_ORDER.indexOf(a) - MODIFIER_ORDER.indexOf(b))
+        .map(getModifierDisplayName);
+
+    modifierHoldIndicator = document.createElement('div');
+    modifierHoldIndicator.className = 'input-confirm-note modifier-hold-indicator';
+    modifierHoldIndicator.textContent = `Modifier held: ${modifierNames.join(' + ')}. Press another input to create a combo.`;
+    statusEl.appendChild(modifierHoldIndicator);
+}
+
+function getActiveModifierTokens(event, currentScKey = null)
+{
+    const modifiers = [];
+
+    const pushModifier = (isActive, leftToken, rightToken, fallbackToken) =>
+    {
+        if (!isActive) return;
+
+        if (heldModifiers.has(leftToken))
+        {
+            modifiers.push(leftToken);
+        }
+        else if (heldModifiers.has(rightToken))
+        {
+            modifiers.push(rightToken);
+        }
+        else if (currentScKey === leftToken.toLowerCase())
+        {
+            modifiers.push(leftToken);
+        }
+        else if (currentScKey === rightToken.toLowerCase())
+        {
+            modifiers.push(rightToken);
+        }
+        else if (fallbackToken)
+        {
+            modifiers.push(fallbackToken);
+        }
+    };
+
+    pushModifier(event.shiftKey, 'LSHIFT', 'RSHIFT', window._lastShiftKeyPressed || 'LSHIFT');
+    pushModifier(event.ctrlKey, 'LCTRL', 'RCTRL', window._lastCtrlKeyPressed || 'LCTRL');
+    pushModifier(event.altKey, 'LALT', 'RALT', window._lastAltKeyPressed || 'LALT');
+
+    return [...new Set(modifiers)].sort((a, b) => MODIFIER_ORDER.indexOf(a) - MODIFIER_ORDER.indexOf(b));
+}
+
+function isStandaloneModifierDetectedInput(input)
+{
+    if (!input?.scFormattedInput) return false;
+    return /^kb\d*_(lshift|rshift|lctrl|rctrl|lalt|ralt|lwin)$/i.test(input.scFormattedInput);
+}
+
+async function finalizeSingleDetectedInput(processed)
+{
+    statusEl.innerHTML = '';
+    renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
+
+    clearPrimaryCountdown();
+    document.getElementById('binding-modal-countdown').textContent = '';
+    startSecondaryDetectionWindow();
+
+    const helperNote = document.createElement('div');
+    helperNote.className = 'input-confirm-note';
+    helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
+    statusEl.appendChild(helperNote);
+
+    selectedInputKey = processed.scFormattedInput;
+    const conflicts = await setPendingBindingSelection(processed);
+    updateConflictDisplay(conflicts);
+    updateSelectionButtonStates();
+    updateModifierHoldUI();
+}
+
+function showMultipleInputSelection(processed)
+{
+    clearPrimaryCountdown();
+
+    statusEl.innerHTML = '';
+    document.getElementById('binding-modal-countdown').textContent = '';
+
+    selectionMessageEl = document.createElement('div');
+    selectionMessageEl.className = 'input-selection-message';
+    const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
+    selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
+    statusEl.appendChild(selectionMessageEl);
+
+    const helperNote = document.createElement('div');
+    helperNote.className = 'input-confirm-note';
+    helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
+    statusEl.appendChild(helperNote);
+
+    selectionContainer = document.createElement('div');
+    selectionContainer.className = 'input-selection-container';
+    statusEl.appendChild(selectionContainer);
+
+    selectionButtons.clear();
+
+    Array.from(allDetectedInputs.values()).forEach((input) =>
+    {
+        addDetectedInputButton(input);
+    });
+
+    updateSelectionButtonStates();
+    updateConflictDisplay(window.pendingBinding?.conflicts || []);
+    updateModifierHoldUI();
+}
+
+async function handleProcessedDetectedInput(processed)
+{
+    if (!processed || allDetectedInputs.has(processed.scFormattedInput)) return;
+
+    allDetectedInputs.set(processed.scFormattedInput, processed);
+
+    if (allDetectedInputs.size === 1)
+    {
+        await finalizeSingleDetectedInput(processed);
+        return;
+    }
+
+    if (allDetectedInputs.size === 2)
+    {
+        const firstInput = Array.from(allDetectedInputs.values())[0];
+        if (firstInput !== processed && isStandaloneModifierDetectedInput(firstInput))
+        {
+            allDetectedInputs.clear();
+            allDetectedInputs.set(processed.scFormattedInput, processed);
+            await finalizeSingleDetectedInput(processed);
+            return;
+        }
+
+        showMultipleInputSelection(processed);
+        return;
+    }
+
+    addDetectedInputButton(processed);
+    updateModifierHoldUI();
+}
+
 function clearPrimaryCountdown()
 {
     if (!countdownInterval) return;
@@ -375,7 +561,14 @@ function cleanupInputDetectionListeners()
         document.removeEventListener('keydown', keyboardDetectionHandler, true);
         keyboardDetectionHandler = null;
     }
+    if (keyboardDetectionKeyupHandler)
+    {
+        document.removeEventListener('keyup', keyboardDetectionKeyupHandler, true);
+        keyboardDetectionKeyupHandler = null;
+    }
     keyboardDetectionActive = false;
+    heldModifiers.clear();
+    removeModifierHoldIndicator();
 
     // Clear tracked modifier states
     window._lastAltKeyPressed = null;
@@ -421,6 +614,8 @@ function stopDetection(reason = 'unspecified')
 
     console.log(`[TIMER] stopDetection called (${reason})`);
     isDetectionActive = false;
+    heldModifiers.clear();
+    removeModifierHoldIndicator();
     clearPrimaryCountdown();
     clearSecondaryDetectionTimer();
     cleanupInputDetectionListeners();
@@ -1968,12 +2163,9 @@ const processInput = (result) =>
         }
         else
         {
-            // Use the actual HID axis name from the device descriptor
-            // Convert HID axis name to lowercase SC format (Rz -> rotz, X -> x, etc.)
-            const hidName = result.hid_axis_name.toLowerCase();
-            const scAxisName = hidName === 'rx' ? 'rotx' :
-                hidName === 'ry' ? 'roty' :
-                    hidName === 'rz' ? 'rotz' : hidName;
+            // Use the actual HID axis name from the device descriptor.
+            // This also handles aliases like Slider -> slider1 and Dial/Wheel -> slider2.
+            const scAxisName = normalizeHidAxisNameToSCAxisName(result.hid_axis_name);
 
             // Replace axis number format with axis name format
             scFormattedInput = mappedInput.replace(/axis\d+(?:_(positive|negative))?/, scAxisName);
@@ -1985,6 +2177,8 @@ const processInput = (result) =>
         // Fallback: use hardcoded mapping for XInput gamepads or if no HID axis name available
         scFormattedInput = toStarCitizenFormat(mappedInput);
     }
+
+    scFormattedInput = ensureSliderNumber(scFormattedInput);
 
     // Add modifier after device prefix (e.g., kb1_lalt+f, js2_lalt+button13)
     if (result.modifiers && result.modifiers.length > 0)
@@ -2125,6 +2319,8 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
     // Reset detection state
     allDetectedInputs.clear();
     selectedInputKey = null;
+    heldModifiers.clear();
+    removeModifierHoldIndicator();
     window.pendingBinding = null;
 
     // Update UI
@@ -2229,71 +2425,7 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
 
             if (!processed) return;
 
-            // Only add to map if not already there
-            if (!allDetectedInputs.has(processed.scFormattedInput))
-            {
-                allDetectedInputs.set(processed.scFormattedInput, processed);
-
-                if (allDetectedInputs.size === 1)
-                {
-                    statusEl.innerHTML = '';
-                    renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
-
-                    clearPrimaryCountdown();
-                    document.getElementById('binding-modal-countdown').textContent = '';
-                    startSecondaryDetectionWindow();
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
-                    statusEl.appendChild(helperNote);
-
-                    selectedInputKey = processed.scFormattedInput;
-                    const conflicts = await setPendingBindingSelection(processed);
-                    updateConflictDisplay(conflicts);
-                    updateSelectionButtonStates();
-                }
-                else if (allDetectedInputs.size === 2)
-                {
-                    // Second input detected - remove confirm UI and switch to selection UI
-                    clearPrimaryCountdown();
-
-                    // Clear any existing UI and show selection
-                    statusEl.innerHTML = '';
-                    document.getElementById('binding-modal-countdown').textContent = '';
-
-                    selectionMessageEl = document.createElement('div');
-                    selectionMessageEl.className = 'input-selection-message';
-                    const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
-                    selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
-                    statusEl.appendChild(selectionMessageEl);
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
-                    statusEl.appendChild(helperNote);
-
-                    selectionContainer = document.createElement('div');
-                    selectionContainer.className = 'input-selection-container';
-                    statusEl.appendChild(selectionContainer);
-
-                    selectionButtons.clear();
-
-                    // Add both inputs
-                    Array.from(allDetectedInputs.values()).forEach((input) =>
-                    {
-                        addDetectedInputButton(input);
-                    });
-
-                    updateSelectionButtonStates();
-                    updateConflictDisplay(window.pendingBinding?.conflicts || []);
-                }
-                else
-                {
-                    // More inputs - just add the new button
-                    addDetectedInputButton(processed);
-                }
-            }
+            await handleProcessedDetectedInput(processed);
         });
 
         // Store unlisten function for cleanup
@@ -2419,7 +2551,7 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
                 display_name: displayName,
                 device_type: 'Mouse',
                 axis_value: null,
-                modifiers: [],
+                modifiers: getActiveModifierTokens(event),
                 is_modifier: false
             };
 
@@ -2428,71 +2560,7 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
 
             if (!processed) return;
 
-            // Only add to map if not already there
-            if (!allDetectedInputs.has(processed.scFormattedInput))
-            {
-                allDetectedInputs.set(processed.scFormattedInput, processed);
-
-                if (allDetectedInputs.size === 1)
-                {
-                    statusEl.innerHTML = '';
-                    renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
-
-                    clearPrimaryCountdown();
-                    document.getElementById('binding-modal-countdown').textContent = '';
-                    startSecondaryDetectionWindow();
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
-                    statusEl.appendChild(helperNote);
-
-                    selectedInputKey = processed.scFormattedInput;
-                    const conflicts = await setPendingBindingSelection(processed);
-                    updateConflictDisplay(conflicts);
-                    updateSelectionButtonStates();
-                }
-                else if (allDetectedInputs.size === 2)
-                {
-                    // Second input detected - remove confirm UI and switch to selection UI
-                    clearPrimaryCountdown();
-
-                    // Clear any existing UI and show selection
-                    statusEl.innerHTML = '';
-                    document.getElementById('binding-modal-countdown').textContent = '';
-
-                    selectionMessageEl = document.createElement('div');
-                    selectionMessageEl.className = 'input-selection-message';
-                    const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
-                    selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
-                    statusEl.appendChild(selectionMessageEl);
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
-                    statusEl.appendChild(helperNote);
-
-                    selectionContainer = document.createElement('div');
-                    selectionContainer.className = 'input-selection-container';
-                    statusEl.appendChild(selectionContainer);
-
-                    selectionButtons.clear();
-
-                    // Add both inputs
-                    Array.from(allDetectedInputs.values()).forEach((input) =>
-                    {
-                        addDetectedInputButton(input);
-                    });
-
-                    updateSelectionButtonStates();
-                    updateConflictDisplay(window.pendingBinding?.conflicts || []);
-                }
-                else
-                {
-                    // More inputs - just add the new button
-                    addDetectedInputButton(processed);
-                }
-            }
+            await handleProcessedDetectedInput(processed);
         };
 
         // Prevent right-click context menu during recording
@@ -2553,62 +2621,6 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
             const code = event.code;
             const key = event.key;
 
-            // Detect modifiers being held
-            // We need to track which specific modifier keys are currently pressed
-            // event.location only tells us about the current key, not held modifiers
-            // So we use event.getModifierState() and track pressed keys via code
-            const modifiers = [];
-
-            // For modifier detection, we need to check what's actually held down
-            // The issue is that event.shiftKey/ctrlKey/altKey don't tell us left vs right
-            // We need to track this separately or use the code of the current key if it's a modifier
-            if (event.shiftKey)
-            {
-                // Check if we can determine left/right from the current key
-                if (code === 'ShiftLeft')
-                {
-                    modifiers.push('LSHIFT');
-                } else if (code === 'ShiftRight')
-                {
-                    modifiers.push('RSHIFT');
-                } else
-                {
-                    // Shift is held but we're pressing a different key
-                    // Default to left shift (most common)
-                    modifiers.push('LSHIFT');
-                }
-            }
-            if (event.ctrlKey)
-            {
-                if (code === 'ControlLeft')
-                {
-                    modifiers.push('LCTRL');
-                } else if (code === 'ControlRight')
-                {
-                    modifiers.push('RCTRL');
-                } else
-                {
-                    modifiers.push('LCTRL');
-                }
-            }
-            if (event.altKey)
-            {
-                if (code === 'AltLeft')
-                {
-                    modifiers.push('LALT');
-                } else if (code === 'AltRight')
-                {
-                    modifiers.push('RALT');
-                } else
-                {
-                    // Alt is held but we're pressing a different key
-                    // We need to track which alt was pressed - check keyboard state
-                    // Unfortunately, there's no reliable way to know which Alt is held
-                    // when pressing another key. We'll track it via a global variable.
-                    modifiers.push(window._lastAltKeyPressed || 'LALT');
-                }
-            }
-
             // Track which modifier keys are pressed for future reference
             if (code === 'AltLeft') window._lastAltKeyPressed = 'LALT';
             if (code === 'AltRight') window._lastAltKeyPressed = 'RALT';
@@ -2620,22 +2632,22 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
             // Convert to Star Citizen format
             const scKey = convertKeyCodeToSC(code, key);
 
-            // Check if this is a modifier key
-            const isModifierKey = ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'].includes(scKey);
+            if (isModifierKeyCode(scKey))
+            {
+                const modifierToken = getModifierTokenForScKey(scKey);
+                if (modifierToken)
+                {
+                    heldModifiers.add(modifierToken);
+                    updateModifierHoldUI();
+                }
+                return;
+            }
 
             // Build the input string (kb1_key format)
-            let inputString = `kb1_${scKey}`;
+            const inputString = `kb1_${scKey}`;
 
             // Build display name
-            let displayName = `Keyboard - ${code}`;
-
-            // For modifiers pressed alone, don't wait for other keys - accept them immediately
-            if (isModifierKey && modifiers.length === 1 && modifiers[0].toLowerCase() === scKey)
-            {
-                // This is a modifier key pressed alone (not as a combo with other modifiers)
-                // Clear the modifier list since we're binding the modifier itself
-                modifiers.length = 0;
-            }
+            const displayName = `Keyboard - ${code}`;
 
             // Create a synthetic event that matches the structure from Rust backend
             const syntheticResult = {
@@ -2643,7 +2655,7 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
                 display_name: displayName,
                 device_type: 'Keyboard',
                 axis_value: null,
-                modifiers: modifiers,
+                modifiers: getActiveModifierTokens(event, scKey),
                 is_modifier: false
             };
 
@@ -2652,100 +2664,29 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
 
             if (!processed) return;
 
-            // Only add to map if not already there
-            if (!allDetectedInputs.has(processed.scFormattedInput))
-            {
-                allDetectedInputs.set(processed.scFormattedInput, processed);
+            await handleProcessedDetectedInput(processed);
+        };
 
-                if (allDetectedInputs.size === 1)
-                {
-                    statusEl.innerHTML = '';
-                    renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
+        keyboardDetectionKeyupHandler = (event) =>
+        {
+            if (!keyboardDetectionActive) return;
 
-                    clearPrimaryCountdown();
-                    document.getElementById('binding-modal-countdown').textContent = '';
-                    startSecondaryDetectionWindow();
+            const scKey = convertKeyCodeToSC(event.code, event.key);
+            if (!isModifierKeyCode(scKey)) return;
 
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
-                    statusEl.appendChild(helperNote);
+            event.preventDefault();
+            event.stopPropagation();
 
-                    selectedInputKey = processed.scFormattedInput;
-                    const conflicts = await setPendingBindingSelection(processed);
-                    updateConflictDisplay(conflicts);
-                    updateSelectionButtonStates();
-                }
-                else if (allDetectedInputs.size === 2)
-                {
-                    // Check if the first detected input is a modifier key
-                    const firstInput = Array.from(allDetectedInputs.values())[0];
-                    const isFirstModifier = ['lshift', 'rshift', 'lctrl', 'rctrl', 'lalt', 'ralt', 'lwin'].some(mod =>
-                        firstInput.scFormattedInput.includes(mod)
-                    );
+            const modifierToken = getModifierTokenForScKey(scKey);
+            if (!modifierToken) return;
 
-                    // If first input is a modifier, automatically combine it with the second key
-                    if (isFirstModifier)
-                    {
-                        // Use the newly detected input (second key) as the primary binding
-                        // The processInput already added modifiers if they were held, so processed already has the combo
-                        stopDetection('modifier-auto-combo');
-                        clearPrimaryCountdown();
-
-                        statusEl.innerHTML = '';
-                        renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
-
-                        selectedInputKey = processed.scFormattedInput;
-                        const conflicts = await setPendingBindingSelection(processed);
-                        updateConflictDisplay(conflicts);
-
-                        // Don't show selection UI - go straight to save
-                        return;
-                    }
-
-                    // Second input detected - remove confirm UI and switch to selection UI
-                    clearPrimaryCountdown();
-
-                    // Clear any existing UI and show selection
-                    statusEl.innerHTML = '';
-                    document.getElementById('binding-modal-countdown').textContent = '';
-
-                    selectionMessageEl = document.createElement('div');
-                    selectionMessageEl.className = 'input-selection-message';
-                    const initiallySelected = allDetectedInputs.get(selectedInputKey) || processed;
-                    selectionMessageEl.textContent = `Multiple inputs detected. Selected: ${initiallySelected.displayName}`;
-                    statusEl.appendChild(selectionMessageEl);
-
-                    const helperNote = document.createElement('div');
-                    helperNote.className = 'input-confirm-note';
-                    helperNote.textContent = 'Click the input you want to keep, then press Save Binding.';
-                    statusEl.appendChild(helperNote);
-
-                    selectionContainer = document.createElement('div');
-                    selectionContainer.className = 'input-selection-container';
-                    statusEl.appendChild(selectionContainer);
-
-                    selectionButtons.clear();
-
-                    // Add both inputs
-                    Array.from(allDetectedInputs.values()).forEach((input) =>
-                    {
-                        addDetectedInputButton(input);
-                    });
-
-                    updateSelectionButtonStates();
-                    updateConflictDisplay(window.pendingBinding?.conflicts || []);
-                }
-                else
-                {
-                    // More inputs - just add the new button
-                    addDetectedInputButton(processed);
-                }
-            }
+            heldModifiers.delete(modifierToken);
+            updateModifierHoldUI();
         };
 
         // Add keyboard listener (capture phase)
         document.addEventListener('keydown', keyboardDetectionHandler, true);
+        document.addEventListener('keyup', keyboardDetectionKeyupHandler, true);
 
         // Start event-based detection (doesn't return a value, just emits events)
         console.log('[TIMER] [RUST] Calling wait_for_inputs_with_events with bindingId:', thisBindingId);
@@ -2756,40 +2697,7 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
         }).catch((error) =>
         {
             console.error('[TIMER] [RUST] Error during input detection:', error);
-
-            // Cleanup listeners
-            if (window.currentInputDetectionUnlisten)
-            {
-                window.currentInputDetectionUnlisten();
-                window.currentInputDetectionUnlisten = null;
-            }
-            if (window.currentCompletionUnlisten)
-            {
-                window.currentCompletionUnlisten();
-                window.currentCompletionUnlisten = null;
-            }
-
-            // Cleanup keyboard detection
-            if (keyboardDetectionHandler)
-            {
-                document.removeEventListener('keydown', keyboardDetectionHandler, true);
-                keyboardDetectionHandler = null;
-            }
-            keyboardDetectionActive = false;
-
-            // Cleanup mouse detection
-            if (window.mouseDetectionHandler)
-            {
-                document.removeEventListener('mousedown', window.mouseDetectionHandler, true);
-                document.removeEventListener('mouseup', window.mouseUpHandler, true);
-                document.removeEventListener('contextmenu', window.contextMenuHandler, true);
-                window.removeEventListener('beforeunload', window.beforeUnloadHandler, true);
-                window.mouseDetectionHandler = null;
-                window.contextMenuHandler = null;
-                window.mouseUpHandler = null;
-                window.beforeUnloadHandler = null;
-            }
-            window.mouseDetectionActive = false;
+            cleanupInputDetectionListeners();
         });
     } catch (error)
     {
@@ -3169,11 +3077,13 @@ async function confirmConflictBinding()
 async function applyBinding(actionMapName, actionName, mappedInput, multiTap = null, activationMode = null)
 {
     console.log('Calling update_binding...');
+    const normalizedInput = ensureSliderNumber(mappedInput);
+
     // Update the binding in backend
     await invoke('update_binding', {
         actionMapName: actionMapName,
         actionName: actionName,
-        newInput: mappedInput,
+        newInput: normalizedInput,
         multiTap: multiTap,
         activationMode: activationMode
     });

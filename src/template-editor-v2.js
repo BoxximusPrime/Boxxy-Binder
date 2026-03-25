@@ -9,7 +9,7 @@ const DEFAULT_TEMPLATE_V2 = {
 // NOTE: Axis profiles are now determined dynamically from HID descriptors
 // No hardcoded fallback profiles - we rely 100% on actual hardware detection
 
-const LOGICAL_AXIS_OPTIONS = ['x', 'y', 'z', 'rotx', 'roty', 'rotz', 'slider', 'slider2', 'hat'];
+const LOGICAL_AXIS_OPTIONS = ['x', 'y', 'z', 'rotx', 'roty', 'rotz', 'slider1', 'slider2', 'hat'];
 const RAW_AXIS_RANGE = Array.from({ length: 8 }, (_, index) => index);
 
 const state = {
