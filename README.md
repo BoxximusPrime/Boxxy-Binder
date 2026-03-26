@@ -63,7 +63,7 @@ A desktop application for managing joystick (including button boxes, etc), keybo
 
 ## Discord
 
-Feel free to join us on Discord! https://discord.gg/cjEtkeBG
+Feel free to join us on Discord! https://discord.gg/CT689wWwKz
 
 - We have a user-submitted template section with different kinds of devices and combos. Feel free to join and grab them - or submit your own! As well as bug reports, etc.
 
