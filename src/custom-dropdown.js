@@ -75,6 +75,18 @@ export class CustomDropdown
 
         document.addEventListener('click', this._outsideClickListener);
         document.addEventListener('keydown', this._keyboardListener);
+
+        if (this.element.tagName === 'SELECT')
+        {
+            this._selectChangeListener = () =>
+            {
+                if (!this.isSelecting)
+                {
+                    this.syncFromSelect();
+                }
+            };
+            this.element.addEventListener('change', this._selectChangeListener);
+        }
     }
 
     populateFromSelect()
@@ -327,6 +339,18 @@ export class CustomDropdown
         return this.items[this.selectedIndex]?.value || null;
     }
 
+    syncFromSelect()
+    {
+        if (this.element.tagName !== 'SELECT') return;
+
+        const index = this.element.selectedIndex;
+        if (index < 0 || index >= this.items.length) return;
+
+        this.selectedIndex = index;
+        this.updateButtonText();
+        this.renderOptions();
+    }
+
     setValue(value)
     {
         const index = this.items.findIndex(item => item.value === value);
@@ -346,6 +370,10 @@ export class CustomDropdown
         if (this._keyboardListener)
         {
             document.removeEventListener('keydown', this._keyboardListener);
+        }
+        if (this._selectChangeListener)
+        {
+            this.element.removeEventListener('change', this._selectChangeListener);
         }
 
         // Clean up event listeners
@@ -379,5 +407,6 @@ export class CustomDropdown
         this.items = null;
         this._outsideClickListener = null;
         this._keyboardListener = null;
+        this._selectChangeListener = null;
     }
 }

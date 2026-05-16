@@ -3,6 +3,11 @@
 const fs = require('fs');
 const path = require('path');
 
+function applyVersionReplacement(template, version)
+{
+    return template.replaceAll('NEW_VERSION', version);
+}
+
 // Configuration
 const FILES_TO_UPDATE = [
     {
@@ -32,8 +37,8 @@ const FILES_TO_UPDATE = [
     },
     {
         path: 'src/index.html',
-        regex: /<button class="whats-new-version-toggle" data-version="(\d+\.\d+\.\d+)">\s*<span class="version-toggle-arrow">▼<\/span>\s*<span class="version-toggle-label">v(\d+\.\d+\.\d+)<\/span>/,
-        replacement: '<button class="whats-new-version-toggle" data-version="NEW_VERSION">\n            <span class="version-toggle-arrow">▼</span>\n            <span class="version-toggle-label">vNEW_VERSION</span>'
+        regex: /<div class="whats-new-version-section">\s*<button class="whats-new-version-toggle" data-version="[^"]+">\s*<span class="version-toggle-arrow">▼<\/span>\s*<span class="version-toggle-label">v[^<]+<\/span>/,
+        replacement: '<div class="whats-new-version-section">\n          <button class="whats-new-version-toggle" data-version="NEW_VERSION">\n            <span class="version-toggle-arrow">▼</span>\n            <span class="version-toggle-label">vNEW_VERSION</span>'
     }
 ];
 
@@ -125,7 +130,7 @@ FILES_TO_UPDATE.forEach(fileConfig =>
         {
             if (fileConfig.regex.test(content))
             {
-                content = content.replace(fileConfig.regex, fileConfig.replacement.replace('NEW_VERSION', newVersion));
+                content = content.replace(fileConfig.regex, applyVersionReplacement(fileConfig.replacement, newVersion));
                 updated = true;
             }
         } else
@@ -134,7 +139,7 @@ FILES_TO_UPDATE.forEach(fileConfig =>
             const match = content.match(fileConfig.regex);
             if (match)
             {
-                content = content.replace(fileConfig.regex, fileConfig.replacement.replace('NEW_VERSION', newVersion));
+                content = content.replace(fileConfig.regex, applyVersionReplacement(fileConfig.replacement, newVersion));
                 updated = true;
             }
         }

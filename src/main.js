@@ -260,7 +260,7 @@ window.showAlert = showAlert;
 
 function initializeWhatsNewModal()
 {
-  const CURRENT_VERSION = '1.1.3';
+  const CURRENT_VERSION = '1.1.4';
   const WHATS_NEW_KEY = 'whatsNew';
 
   // Check if the stored version matches the current version
@@ -275,7 +275,7 @@ function initializeWhatsNewModal()
 
 function showWhatsNewModal()
 {
-  const CURRENT_VERSION = '1.1.3';
+  const CURRENT_VERSION = '1.1.4';
   const WHATS_NEW_KEY = 'whatsNew';
 
   const modal = document.getElementById('whats-new-modal');
@@ -378,6 +378,7 @@ window.addEventListener("DOMContentLoaded", async () =>
 
   initializeEventListeners();
   initializeTabSystem();
+  initializeHelpNavigation();
   initializeSplitResizer();
   initializeWhatsNewModal();
   initializeFontSizeScaling();
@@ -1068,6 +1069,36 @@ function switchTab(tabName)
       window.initializeDeviceManager();
     }
   }
+}
+
+function initializeHelpNavigation()
+{
+  const helpContainer = document.querySelector('#tab-content-help .help-page-container');
+  if (!helpContainer) return;
+
+  const helpLinks = helpContainer.querySelectorAll('.help-nav a[href^="#help-"]');
+  helpLinks.forEach(link =>
+  {
+    link.addEventListener('click', (event) =>
+    {
+      const targetId = link.getAttribute('href')?.slice(1);
+      if (!targetId) return;
+
+      const target = document.getElementById(targetId);
+      if (!target) return;
+
+      event.preventDefault();
+
+      const containerRect = helpContainer.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const scrollTop = helpContainer.scrollTop + (targetRect.top - containerRect.top) - 16;
+
+      helpContainer.scrollTo({
+        top: Math.max(scrollTop, 0),
+        behavior: 'smooth'
+      });
+    });
+  });
 }
 
 function initializeEventListeners()

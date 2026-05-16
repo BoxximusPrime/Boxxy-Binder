@@ -2356,6 +2356,10 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
     if (activationModeSelect)
     {
         activationModeSelect.value = '';
+        if (window.activationModeDropdown?.syncFromSelect)
+        {
+            window.activationModeDropdown.syncFromSelect();
+        }
     }
 
     actionNameEl.textContent = 'Binding Action: ' + (actionDisplayName || actionName);

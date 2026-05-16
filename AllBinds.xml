@@ -502,6 +502,9 @@
 		<action name="v_toggle_salvage_mode" activationMode="press" keyboard="m" gamepad=" "
 			joystick=" " UILabel="@ui_CISalvageMode" UIDescription="@ui_CISalvageModeDesc"
 			Category="ShipSystems" />
+		<action name="v_toggle_refuel_mode" activationMode="press" keyboard="m" gamepad=" "
+			joystick=" " UILabel="@ui_CIRefuelMode" UIDescription="@ui_CIRefuelModeDesc"
+			Category="ShipSystems" />
 		<action name="v_toggle_scan_mode" activationMode="press" keyboard="v" gamepad="dpad_right"
 			joystick=" " UILabel="@ui_CIScanningMode" UIDescription="@ui_CIScanningModeDesc"
 			Category="ShipSystems" />
@@ -522,6 +525,8 @@
 		<action name="v_set_salvage_mode" activationMode="press" keyboard=" " gamepad=" "
 			joystick=" " UILabel="@ui_v_set_salvage_mode"
 			UIDescription="@ui_v_set_salvage_mode_desc" />
+		<action name="v_set_refuel_mode" activationMode="press" keyboard=" " gamepad=" "
+			joystick=" " UILabel="@ui_v_set_refuel_mode" UIDescription="@ui_v_set_refuel_mode_desc" />
 		<action name="v_set_scan_mode" activationMode="press" keyboard=" " gamepad=" " joystick=" "
 			UILabel="@ui_v_set_scan_mode" UIDescription="@ui_v_set_scan_mode_desc" />
 		<action name="v_set_quantum_mode" activationMode="press" keyboard=" " gamepad=" "
@@ -989,6 +994,12 @@
 			<states>
 				<state name="retracted" UILabel="@ui_CIToggleLandingSystem_Deploy" />
 				<state name="deployed" UILabel="@ui_CIToggleLandingSystem_Retract" />
+			</states>
+		</action>
+		<action name="v_toggle_docking_request" activationMode="tap" keyboard="ralt+n" gamepad=""
+			joystick="" UILabel="@ui_CIToggleLandingSystem_Dock"
+			UIDescription="ui_CIToggleLandingSystem_DockDesc">
+			<states>
 				<state name="can_dock" UILabel="@ui_CIToggleLandingSystem_Dock" />
 				<state name="docking" UILabel="@ui_CIToggleLandingSystem_CancelDocking" />
 				<state name="docked" UILabel="@ui_CIToggleLandingSystem_Undock" />
