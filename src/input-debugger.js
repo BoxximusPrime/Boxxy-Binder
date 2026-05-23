@@ -427,8 +427,9 @@ function handleKeyboardInput(event)
 // Helper function to determine if a device is a gamepad
 function isGamepad(deviceName)
 {
+    const normalizedName = String(deviceName || '');
     const gamepadPatterns = ['xbox', 'controller', 'gamepad'];
-    return gamepadPatterns.some(pattern => deviceName.toLowerCase().includes(pattern));
+    return gamepadPatterns.some(pattern => normalizedName.toLowerCase().includes(pattern));
 }
 
 // Show device modal with list of connected devices
@@ -451,19 +452,20 @@ async function showDevices()
 
             devices.forEach((device, index) =>
             {
+                const deviceName = device.name || 'Unknown Device';
                 const isGp = device.device_type === 'Gamepad';
-                const typeLabel = device.device_type;
+                const typeLabel = device.device_type || (isGamepad(deviceName) ? 'Gamepad' : 'Joystick');
                 const typeClass = isGp ? 'gamepad' : 'joystick';
                 // Use index + 1 for the SC instance ID (SC uses 1-based indexing)
                 const deviceId = isGp ? `gp${index + 1}` : `js${index + 1}`;
 
-                console.log(`Device ${index}: ${device.name} -> ${deviceId} (${typeLabel})`);
+                console.log(`Device ${index}: ${deviceName} -> ${deviceId} (${typeLabel})`);
 
                 const deviceCard = document.createElement('div');
                 deviceCard.className = `device-card device-${typeClass}`;
                 deviceCard.innerHTML = `
                     <div class="device-header">
-                        <div class="device-name">${device.name}</div>
+                        <div class="device-name">${deviceName}</div>
                         <span class="device-badge ${typeClass}">${typeLabel}</span>
                     </div>
                     <div class="device-details">

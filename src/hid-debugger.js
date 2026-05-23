@@ -5,6 +5,8 @@ let pollingInterval = null;
 let selectedDevice = null;
 let eventCount = 0;
 let lastAxisValues = new Map(); // Track last values for change detection
+let lastPressedButtons = new Set(); // Track held buttons so button events fire on press, not every poll
+let activeLowButtons = false;
 let axisBitDepths = new Map(); // Track maximum observed bit depth per axis
 let gilrsAxes = new Set();
 let hidAxes = new Set();
@@ -12,6 +14,7 @@ let is16BitDevice = false; // Track if device uses 16-bit axes
 let maxAxisValue = 255; // Max value detected (255 for 8-bit, 65535 for 16-bit)
 let deviceAxisNames = {}; // Cached axis names from HID descriptor
 let cachedDescriptor = null; // Cached HID descriptor bytes for parsing
+let rawButtonFallback = null;
 
 // DOM elements
 let startBtn, stopBtn, clearBtn, selectDeviceBtn, statusIndicator;
@@ -20,10 +23,196 @@ let gilrsAxisList, hidAxisList, missingAxesAlert, missingAxesList;
 let deviceModal, closeModalBtn, closeModalFooterBtn, deviceSelectionList;
 let showUnchangedCheckbox;
 
+async function logHidInfo(message)
+{
+    console.log(message);
+    try
+    {
+        await invoke('log_info', { message: `[HID Debugger] ${message}` });
+    } catch (error)
+    {
+        console.error('[HID Debugger] Failed to write info log:', error);
+    }
+}
+
+async function logHidError(message, error = null)
+{
+    const stack = error?.stack || null;
+    const detail = error?.message || String(error || '');
+    const fullMessage = detail ? `${message}: ${detail}` : message;
+
+    console.error(`[HID Debugger] ${fullMessage}`, error || '');
+    try
+    {
+        await invoke('log_error', {
+            message: `[HID Debugger] ${fullMessage}`,
+            stack
+        });
+    } catch (logError)
+    {
+        console.error('[HID Debugger] Failed to write error log:', logError);
+    }
+}
+
+window.addEventListener('error', (event) =>
+{
+    logHidError(event.error?.message || event.message || 'Uncaught HID debugger error', event.error);
+});
+
+window.addEventListener('unhandledrejection', (event) =>
+{
+    logHidError('Unhandled HID debugger promise rejection', event.reason);
+});
+
+function formatHexId(value)
+{
+    const number = Number(value) || 0;
+    return number.toString(16).padStart(4, '0').toUpperCase();
+}
+
+function getHidDeviceDisplayName(device)
+{
+    const product = typeof device.product === 'string' ? device.product.trim() : '';
+    const manufacturer = typeof device.manufacturer === 'string' ? device.manufacturer.trim() : '';
+
+    if (product) return product;
+    if (manufacturer) return `${manufacturer} Device`;
+
+    return `HID Device ${formatHexId(device.vendor_id)}:${formatHexId(device.product_id)}`;
+}
+
+function isFullButtonSet(buttons)
+{
+    if (!Array.isArray(buttons) || buttons.length === 0)
+    {
+        return false;
+    }
+
+    const maxButton = Math.max(...buttons);
+    if (!Number.isFinite(maxButton) || buttons.length !== maxButton)
+    {
+        return false;
+    }
+
+    const buttonSet = new Set(buttons);
+    for (let buttonId = 1; buttonId <= maxButton; buttonId++)
+    {
+        if (!buttonSet.has(buttonId))
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function inferRawButtonFallbackOffset(reportLength, parsedButtons)
+{
+    if (!Array.isArray(parsedButtons) || parsedButtons.length === 0)
+    {
+        return null;
+    }
+
+    const maxButton = Math.max(...parsedButtons);
+    if (!Number.isFinite(maxButton) || maxButton <= 0)
+    {
+        return null;
+    }
+
+    const descriptorButtonBytes = Math.ceil(maxButton / 8);
+    const offsets = [1 + descriptorButtonBytes, descriptorButtonBytes];
+    return offsets.find(offset => offset > 0 && reportLength > offset) || null;
+}
+
+function buildRawButtonFallback(report, axisReport)
+{
+    if (axisReport?.axis_values && Object.keys(axisReport.axis_values).length > 0)
+    {
+        return null;
+    }
+
+    if (!isFullButtonSet(axisReport?.pressed_buttons || []))
+    {
+        return null;
+    }
+
+    const offset = inferRawButtonFallbackOffset(report.length, axisReport.pressed_buttons);
+    if (!offset)
+    {
+        return null;
+    }
+
+    const skippedReportIndices = [];
+    for (let reportIndex = offset; reportIndex < report.length; reportIndex++)
+    {
+        if (countSetBits(report[reportIndex]) > 1)
+        {
+            skippedReportIndices.push(reportIndex);
+        }
+    }
+
+    return {
+        baseline: [...report],
+        offset,
+        skippedReportIndices
+    };
+}
+
+function countSetBits(value)
+{
+    let count = 0;
+    let remaining = value;
+    while (remaining)
+    {
+        count += remaining & 1;
+        remaining >>= 1;
+    }
+    return count;
+}
+
+function parseRawButtonFallback(report, fallback)
+{
+    if (report.length < fallback.baseline.length || report.length <= fallback.offset)
+    {
+        throw new Error(`Raw HID fallback report too short: report ${report.length} bytes, baseline ${fallback.baseline.length} bytes, offset ${fallback.offset}`);
+    }
+
+    const buttons = [];
+    let buttonNumber = 1;
+
+    for (let reportIndex = fallback.offset; reportIndex < fallback.baseline.length; reportIndex++)
+    {
+        if (fallback.skippedReportIndices.includes(reportIndex))
+        {
+            continue;
+        }
+
+        const changedBits = report[reportIndex] ^ fallback.baseline[reportIndex];
+
+        for (let bitIndex = 0; bitIndex < 8; bitIndex++)
+        {
+            if (changedBits & (1 << bitIndex))
+            {
+                buttons.push(buttonNumber);
+            }
+
+            buttonNumber++;
+        }
+    }
+
+    return buttons;
+}
+
 // Initialize when page loads
 document.addEventListener('DOMContentLoaded', () =>
 {
-    initializeHIDDebugger();
+    try
+    {
+        initializeHIDDebugger();
+    } catch (error)
+    {
+        logHidError('Failed to initialize HID Debugger', error);
+    }
 });
 
 function initializeHIDDebugger()
@@ -68,6 +257,30 @@ function initializeHIDDebugger()
 
     showUnchangedCheckbox = document.getElementById('show-unchanged-values');
 
+    const requiredElements = {
+        startBtn,
+        stopBtn,
+        clearBtn,
+        selectDeviceBtn,
+        statusIndicator,
+        deviceInfoDisplay,
+        liveAxisGrid,
+        rawEventStream,
+        eventCounter,
+        deviceModal,
+        deviceSelectionList,
+        showUnchangedCheckbox
+    };
+
+    const missingElements = Object.entries(requiredElements)
+        .filter(([, element]) => !element)
+        .map(([name]) => name);
+
+    if (missingElements.length > 0)
+    {
+        throw new Error(`Missing required HID debugger elements: ${missingElements.join(', ')}`);
+    }
+
     // Event listeners
     startBtn.addEventListener('click', startPolling);
     stopBtn.addEventListener('click', stopPolling);
@@ -85,7 +298,7 @@ function initializeHIDDebugger()
         }
     });
 
-    console.log('HID Debugger initialized');
+    logHidInfo('HID Debugger initialized');
 }
 
 async function showDeviceSelection()
@@ -95,8 +308,12 @@ async function showDeviceSelection()
         deviceSelectionList.innerHTML = '<div class="loading-spinner">Loading devices...</div>';
         deviceModal.classList.add('show');
 
+        logHidInfo('Loading HID device list');
+
         // Get list of HID devices using the new HID API
         const hidDevices = await invoke('list_hid_devices');
+
+        logHidInfo(`Loaded ${hidDevices?.length || 0} HID game controller device(s)`);
 
         deviceSelectionList.innerHTML = '';
 
@@ -111,7 +328,7 @@ async function showDeviceSelection()
             const card = document.createElement('div');
             card.className = 'device-select-card';
 
-            const deviceName = device.product || `${device.manufacturer} Device` || 'Unknown Device';
+            const deviceName = getHidDeviceDisplayName(device);
             const deviceType = 'HID Controller'; // We know these are game controllers from the filter
 
             card.innerHTML = `
@@ -120,8 +337,8 @@ async function showDeviceSelection()
                     <span class="device-select-badge">${deviceType}</span>
                 </div>
                 <div class="device-select-details">
-                    VID: 0x${device.vendor_id.toString(16).padStart(4, '0').toUpperCase()} | 
-                    PID: 0x${device.product_id.toString(16).padStart(4, '0').toUpperCase()}
+                    VID: 0x${formatHexId(device.vendor_id)} | 
+                    PID: 0x${formatHexId(device.product_id)}
                     ${device.serial_number ? ` | SN: ${device.serial_number}` : ''}
                 </div>
                 <div class="device-select-uuid">Path: ${device.path}</div>
@@ -135,6 +352,7 @@ async function showDeviceSelection()
                 vendor_id: device.vendor_id,
                 product_id: device.product_id,
                 serial_number: device.serial_number,
+                product: device.product,
                 manufacturer: device.manufacturer
             }));
             deviceSelectionList.appendChild(card);
@@ -142,7 +360,7 @@ async function showDeviceSelection()
 
     } catch (error)
     {
-        console.error('Error loading HID devices:', error);
+        logHidError('Error loading HID devices', error);
         deviceSelectionList.innerHTML = '<div style="padding: 2rem; color: #f44;">Error loading HID devices: ' + error + '</div>';
     }
 }
@@ -150,7 +368,10 @@ async function showDeviceSelection()
 async function selectDevice(device)
 {
     selectedDevice = device;
-    console.log('Selected HID device:', device);
+    lastPressedButtons.clear();
+    activeLowButtons = false;
+    rawButtonFallback = null;
+    logHidInfo(`Selected HID device ${device.name} (VID: 0x${formatHexId(device.vendor_id)}, PID: 0x${formatHexId(device.product_id)}, path: ${device.path})`);
 
     // Update device info display
     deviceInfoDisplay.innerHTML = `
@@ -166,11 +387,11 @@ async function selectDevice(device)
                 </div>
                 <div class="device-info-item">
                     <div class="device-info-label">Vendor ID</div>
-                    <div class="device-info-value"><code>0x${device.vendor_id.toString(16).padStart(4, '0').toUpperCase()}</code></div>
+                    <div class="device-info-value"><code>0x${formatHexId(device.vendor_id)}</code></div>
                 </div>
                 <div class="device-info-item">
                     <div class="device-info-label">Product ID</div>
-                    <div class="device-info-value"><code>0x${device.product_id.toString(16).padStart(4, '0').toUpperCase()}</code></div>
+                    <div class="device-info-value"><code>0x${formatHexId(device.product_id)}</code></div>
                 </div>
                 ${device.serial_number ? `
                 <div class="device-info-item">
@@ -211,15 +432,15 @@ async function loadDeviceDescriptor(devicePath)
     {
         // Load the HID descriptor bytes - cache for parsing reports
         cachedDescriptor = await invoke('get_hid_descriptor_bytes', { devicePath });
-        console.log(`[HID] Cached descriptor (${cachedDescriptor.length} bytes)`);
+        logHidInfo(`Cached HID descriptor (${cachedDescriptor.length} bytes) for path ${devicePath}`);
 
         // Also load axis names using the hidreport + hut libraries for proper HID parsing
         // This provides accurate names like "X", "Y", "Rz", "Slider", etc.
         deviceAxisNames = await invoke('get_hid_axis_names', { devicePath });
-        console.log('[HID] Loaded axis names from descriptor:', deviceAxisNames);
+        logHidInfo(`Loaded ${Object.keys(deviceAxisNames || {}).length} HID axis name(s) from descriptor`);
     } catch (error)
     {
-        console.warn('[HID] Could not load descriptor:', error);
+        logHidError('Could not load HID descriptor', error);
         cachedDescriptor = null;
         deviceAxisNames = {};
     }
@@ -252,6 +473,7 @@ async function startPolling()
     }
 
     // Start polling loop
+    logHidInfo(`Starting HID polling for ${selectedDevice.name} (${selectedDevice.path})`);
     pollDevice();
 }
 
@@ -268,6 +490,8 @@ function stopPolling()
         clearTimeout(pollingInterval);
         pollingInterval = null;
     }
+
+    logHidInfo('Stopped HID polling');
 }
 
 function clearData()
@@ -276,6 +500,9 @@ function clearData()
     eventCount = 0;
     eventCounter.textContent = '0 events';
     lastAxisValues.clear();
+    lastPressedButtons.clear();
+    activeLowButtons = false;
+    rawButtonFallback = null;
     axisBitDepths.clear(); // Clear tracked bit depths
     gilrsAxes.clear();
     hidAxes.clear();
@@ -306,18 +533,37 @@ async function pollDevice()
 
         if (report && report.length > 0)
         {
-            // Parse the report to extract axis data using cached descriptor
-            const axisReport = cachedDescriptor
-                ? await invoke('parse_hid_report_with_descriptor', {
-                    report: report,
-                    descriptor: cachedDescriptor
-                })
-                : await invoke('parse_hid_report', {
-                    report: report,
-                    devicePath: selectedDevice.path
-                });
+            const axisReport = rawButtonFallback
+                ? {
+                    pressed_buttons: parseRawButtonFallback(report, rawButtonFallback),
+                    axis_values: {},
+                    axis_bit_depths: {},
+                    axis_ranges: {},
+                    is_16bit: false
+                }
+                : cachedDescriptor
+                    ? await invoke('parse_hid_report_with_descriptor', {
+                        report: report,
+                        descriptor: cachedDescriptor
+                    })
+                    : await invoke('parse_hid_report', {
+                        report: report,
+                        devicePath: selectedDevice.path
+                    });
 
-            if (axisReport && axisReport.axis_values)
+            if (!rawButtonFallback)
+            {
+                const fallback = buildRawButtonFallback(report, axisReport);
+                if (fallback)
+                {
+                    rawButtonFallback = fallback;
+                    axisReport.pressed_buttons = [];
+                    addDiagnosticEventToStream('BUTTON_MODE', `Activated raw HID button fallback for ${selectedDevice.name}`);
+                    logHidInfo(`Activated raw HID button fallback for ${selectedDevice.name} (offset ${fallback.offset}, skipped bytes ${fallback.skippedReportIndices.join(', ') || 'none'})`);
+                }
+            }
+
+            if (axisReport)
             {
                 // Update bit depth tracking
                 const previousBitMode = is16BitDevice;
@@ -333,8 +579,36 @@ async function pollDevice()
                     updateAllAxisCardRanges();
                 }
 
+                if (Array.isArray(axisReport.pressed_buttons) && axisReport.pressed_buttons.length > 0)
+                {
+                    const currentPressedButtons = new Set(axisReport.pressed_buttons);
+
+                    if (!activeLowButtons && lastPressedButtons.size === 0 && isFullButtonSet(axisReport.pressed_buttons))
+                    {
+                        activeLowButtons = true;
+                        addDiagnosticEventToStream('BUTTON_MODE', `Detected active-low HID button encoding for ${selectedDevice.name}`);
+                        logHidInfo(`Detected active-low HID button encoding for ${selectedDevice.name}`);
+                    }
+
+                    const newlyPressedButtons = activeLowButtons
+                        ? [...lastPressedButtons].filter(buttonId => !currentPressedButtons.has(buttonId))
+                        : [...currentPressedButtons].filter(buttonId => !lastPressedButtons.has(buttonId));
+
+                    for (const buttonId of newlyPressedButtons)
+                    {
+                        addButtonEventToStream(buttonId);
+                        eventCount++;
+                    }
+                    lastPressedButtons = currentPressedButtons;
+                    eventCounter.textContent = `${eventCount} events`;
+                }
+                else
+                {
+                    lastPressedButtons.clear();
+                }
+
                 // Process each axis
-                for (const [axisId, value] of Object.entries(axisReport.axis_values))
+                for (const [axisId, value] of Object.entries(axisReport.axis_values || {}))
                 {
                     const axis_id = parseInt(axisId);
                     const bitDepth = axisReport.axis_bit_depths ? axisReport.axis_bit_depths[axisId] : null;
@@ -361,7 +635,8 @@ async function pollDevice()
         // Silently ignore timeout errors (no data available)
         if (!error.toString().includes('timeout') && !error.toString().includes('timed out'))
         {
-            console.error('Error polling HID device:', error);
+            logHidError('Error polling HID device', error);
+            addDiagnosticEventToStream('POLL_ERROR', error?.message || String(error));
         }
     }
 
@@ -553,6 +828,56 @@ function addEventToStream(type, axisId, value)
     rawEventStream.insertBefore(eventEntry, rawEventStream.firstChild);
 
     // Limit to 200 events
+    while (rawEventStream.children.length > 200)
+    {
+        rawEventStream.removeChild(rawEventStream.lastChild);
+    }
+}
+
+function addButtonEventToStream(buttonId)
+{
+    const eventEntry = document.createElement('div');
+    eventEntry.className = 'event-entry button-press';
+
+    const now = new Date();
+    const timestamp = now.toLocaleTimeString('en-US', {
+        hour12: false,
+        fractionalSecondDigits: 3
+    });
+
+    eventEntry.innerHTML = `
+        <span class="event-timestamp">${timestamp}</span>
+        <span class="event-type">BUTTON_PRESS</span>
+        <span class="event-data">Button <span class="event-value">${buttonId}</span></span>
+    `;
+
+    rawEventStream.insertBefore(eventEntry, rawEventStream.firstChild);
+
+    while (rawEventStream.children.length > 200)
+    {
+        rawEventStream.removeChild(rawEventStream.lastChild);
+    }
+}
+
+function addDiagnosticEventToStream(type, message)
+{
+    const eventEntry = document.createElement('div');
+    eventEntry.className = 'event-entry diagnostic';
+
+    const now = new Date();
+    const timestamp = now.toLocaleTimeString('en-US', {
+        hour12: false,
+        fractionalSecondDigits: 3
+    });
+
+    eventEntry.innerHTML = `
+        <span class="event-timestamp">${timestamp}</span>
+        <span class="event-type">${type}</span>
+        <span class="event-data">${message}</span>
+    `;
+
+    rawEventStream.insertBefore(eventEntry, rawEventStream.firstChild);
+
     while (rawEventStream.children.length > 200)
     {
         rawEventStream.removeChild(rawEventStream.lastChild);

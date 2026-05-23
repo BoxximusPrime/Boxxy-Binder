@@ -1107,9 +1107,12 @@ async function startAxisDetection()
                     // Try to find a match - check if names contain each other
                     const match = hidDevices.find(d =>
                     {
-                        const p = (d.product || '').toLowerCase();
-                        const n = deviceName.toLowerCase();
-                        return p && (p.includes(n) || n.includes(p));
+                        const p = [d.manufacturer, d.product]
+                            .filter(value => typeof value === 'string' && value.trim())
+                            .join(' ')
+                            .toLowerCase();
+                        const n = String(deviceName || '').toLowerCase();
+                        return p && n && (p.includes(n) || n.includes(p));
                     });
 
                     if (match)

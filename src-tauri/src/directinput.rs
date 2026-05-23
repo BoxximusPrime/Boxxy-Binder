@@ -1,7 +1,9 @@
 use crate::hid_reader;
+use log::{info, warn};
 use rusty_xinput::{XInputHandle, XInputState};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::thread;
 use std::time::{Duration, Instant};
 use tauri::Emitter;
@@ -199,6 +201,37 @@ fn build_hid_uuid(device: &hid_reader::HidDeviceListItem) -> String {
     }
 }
 
+fn hid_device_fallback_name(device: &hid_reader::HidDeviceListItem) -> String {
+    format!(
+        "HID Device VID_{:04X} PID_{:04X}",
+        device.vendor_id, device.product_id
+    )
+}
+
+fn hid_device_display_name(device: &hid_reader::HidDeviceListItem) -> String {
+    let product = device.product.as_deref().unwrap_or("").trim();
+    let manufacturer = device.manufacturer.as_deref().unwrap_or("").trim();
+
+    if !product.is_empty() && !manufacturer.is_empty() {
+        format!("{} {}", manufacturer, product)
+    } else if !product.is_empty() {
+        product.to_string()
+    } else if !manufacturer.is_empty() {
+        format!("{} Device", manufacturer)
+    } else {
+        hid_device_fallback_name(device)
+    }
+}
+
+fn hid_device_product_name(device: &hid_reader::HidDeviceListItem) -> Option<String> {
+    device
+        .product
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 fn get_base_hid_usage_id(axis_field_id: u32) -> u32 {
     if axis_field_id > 0xFFFF {
         axis_field_id >> 16
@@ -213,6 +246,39 @@ struct AxisState {
     last_triggered_direction: Option<bool>, // true = positive, false = negative
 }
 
+struct HidDeviceDebugState {
+    idle_polls_without_reports: u32,
+    reports_seen: u32,
+    parse_failures: u32,
+    first_report_logged: bool,
+    empty_report_logged: bool,
+    active_low_buttons: bool,
+    active_low_logged: bool,
+    raw_button_fallback: Option<RawButtonFallbackState>,
+}
+
+struct RawButtonFallbackState {
+    baseline: Vec<u8>,
+    offset: usize,
+    skipped_report_indices: Vec<usize>,
+    descriptor_button_limit: Option<u32>,
+}
+
+impl HidDeviceDebugState {
+    fn new() -> Self {
+        Self {
+            idle_polls_without_reports: 0,
+            reports_seen: 0,
+            parse_failures: 0,
+            first_report_logged: false,
+            empty_report_logged: false,
+            active_low_buttons: false,
+            active_low_logged: false,
+            raw_button_fallback: None,
+        }
+    }
+}
+
 /// Handles the state and polling logic for input detection
 struct InputDetector {
     session_id: String,
@@ -225,11 +291,172 @@ struct InputDetector {
     device_hid_to_axis_maps: HashMap<String, HashMap<u32, u32>>,
     prev_hid_reports: HashMap<String, hid_reader::HidFullReport>,
     opened_devices: HashMap<String, hid_reader::OpenedHidDevice>,
+    hid_debug_states: HashMap<String, HidDeviceDebugState>,
+}
+
+fn format_hex_preview(bytes: &[u8], max_len: usize) -> String {
+    let mut output = String::new();
+
+    for (index, byte) in bytes.iter().take(max_len).enumerate() {
+        if index > 0 {
+            output.push(' ');
+        }
+        let _ = write!(&mut output, "{:02X}", byte);
+    }
+
+    if bytes.len() > max_len {
+        let _ = write!(&mut output, " ... (+{} bytes)", bytes.len() - max_len);
+    }
+
+    output
+}
+
+fn is_full_button_set(buttons: &[u32]) -> bool {
+    if buttons.is_empty() {
+        return false;
+    }
+
+    let max_button = buttons.iter().copied().max().unwrap_or(0);
+    if max_button == 0 || buttons.len() != max_button as usize {
+        return false;
+    }
+
+    buttons
+        .iter()
+        .copied()
+        .all(|button| button >= 1 && button <= max_button)
+}
+
+fn infer_raw_button_fallback_offset(report_len: usize, parsed_buttons: &[u32]) -> Option<usize> {
+    let max_button = parsed_buttons.iter().copied().max()?;
+    let descriptor_button_bytes = max_button.div_ceil(8) as usize;
+
+    [1 + descriptor_button_bytes, descriptor_button_bytes]
+        .into_iter()
+        .find(|&offset| offset > 0 && report_len > offset)
+}
+
+fn parse_descriptor_item_value(bytes: &[u8]) -> u32 {
+    bytes.iter().enumerate().fold(0u32, |value, (index, byte)| {
+        value | ((*byte as u32) << (index * 8))
+    })
+}
+
+fn descriptor_button_usage_max(descriptor: &[u8]) -> Option<u32> {
+    let mut index = 0usize;
+    let mut usage_page = 0u32;
+    let mut usage_max = None;
+
+    while index < descriptor.len() {
+        let prefix = descriptor[index];
+        index += 1;
+
+        if prefix == 0xfe {
+            if index + 1 >= descriptor.len() {
+                break;
+            }
+            let data_size = descriptor[index] as usize;
+            index += 2 + data_size;
+            continue;
+        }
+
+        let data_size = match prefix & 0x03 {
+            0 => 0,
+            1 => 1,
+            2 => 2,
+            _ => 4,
+        };
+
+        if index + data_size > descriptor.len() {
+            break;
+        }
+
+        let item_type = (prefix >> 2) & 0x03;
+        let item_tag = (prefix >> 4) & 0x0f;
+        let value = parse_descriptor_item_value(&descriptor[index..index + data_size]);
+        index += data_size;
+
+        match (item_type, item_tag) {
+            (1, 0) => usage_page = value,
+            (2, 2) if usage_page == 0x09 => usage_max = Some(value),
+            _ => {}
+        }
+    }
+
+    usage_max
+}
+
+fn build_raw_button_fallback(
+    report: &[u8],
+    descriptor: &[u8],
+    parsed_report: &hid_reader::HidFullReport,
+) -> Option<RawButtonFallbackState> {
+    if !parsed_report.axis_values.is_empty() || !is_full_button_set(&parsed_report.pressed_buttons)
+    {
+        return None;
+    }
+
+    let offset = infer_raw_button_fallback_offset(report.len(), &parsed_report.pressed_buttons)?;
+
+    let skipped_report_indices = report[offset..]
+        .iter()
+        .enumerate()
+        .filter_map(|(relative_index, value)| {
+            if value.count_ones() > 1 {
+                Some(offset + relative_index)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Some(RawButtonFallbackState {
+        baseline: report.to_vec(),
+        offset,
+        skipped_report_indices,
+        descriptor_button_limit: descriptor_button_usage_max(descriptor),
+    })
+}
+
+fn parse_raw_button_fallback(
+    report: &[u8],
+    fallback: &RawButtonFallbackState,
+) -> Result<Vec<u32>, String> {
+    if report.len() < fallback.baseline.len() || report.len() <= fallback.offset {
+        return Err(format!(
+            "raw button fallback report too short: report {} bytes, baseline {} bytes, offset {}",
+            report.len(),
+            fallback.baseline.len(),
+            fallback.offset
+        ));
+    }
+
+    let mut buttons = Vec::new();
+    let mut button_number = 1u32;
+
+    for report_index in fallback.offset..fallback.baseline.len() {
+        if fallback.skipped_report_indices.contains(&report_index) {
+            continue;
+        }
+
+        let changed_bits = report[report_index] ^ fallback.baseline[report_index];
+
+        for bit_index in 0..8 {
+            if changed_bits & (1 << bit_index) != 0 {
+                buttons.push(button_number);
+            }
+
+            button_number += 1;
+        }
+    }
+
+    Ok(buttons)
 }
 
 impl InputDetector {
     fn new(session_id: String) -> Self {
         eprintln!("InputDetector: Initializing...");
+        info!("InputDetector: Initializing HID/XInput detection session '{session_id}'");
 
         // Initialize XInput
         let xinput = XInputHandle::load_default().ok();
@@ -276,38 +503,116 @@ impl InputDetector {
 
         // Initialize HID devices
         let hid_devices = hid_reader::list_hid_game_controllers().unwrap_or_default();
+        info!(
+            "InputDetector: Found {} HID game controller candidate(s)",
+            hid_devices.len()
+        );
         let mut device_descriptors = HashMap::new();
         let mut device_instances = HashMap::new();
         let mut device_hid_to_axis_maps = HashMap::new();
         let mut opened_devices = HashMap::new();
+        let mut hid_debug_states = HashMap::new();
 
         for (idx, device) in hid_devices.iter().enumerate() {
             // Try to open the device persistently
+            let display_name = hid_device_display_name(device);
+
             match hid_reader::OpenedHidDevice::open(&device.path) {
                 Ok(opened_dev) => {
                     opened_devices.insert(device.path.clone(), opened_dev);
                 }
                 Err(e) => {
                     eprintln!(
-                        "InputDetector: Failed to open device {}: {}",
-                        device.path, e
+                        "InputDetector: Failed to open HID device '{}' (VID: 0x{:04x}, PID: 0x{:04x}, interface: {}, path: {}): {}",
+                        display_name,
+                        device.vendor_id,
+                        device.product_id,
+                        device.interface_number,
+                        device.path,
+                        e
+                    );
+                    warn!(
+                        "InputDetector: Failed to open HID device '{}' (VID: 0x{:04x}, PID: 0x{:04x}, interface: {}, path: {}): {}",
+                        display_name,
+                        device.vendor_id,
+                        device.product_id,
+                        device.interface_number,
+                        device.path,
+                        e
                     );
                     continue;
                 }
             }
 
-            if let Ok(descriptor) = hid_reader::get_hid_descriptor_bytes(&device.path) {
-                device_descriptors.insert(device.path.clone(), descriptor);
-                device_instances.insert(device.path.clone(), idx + 1);
+            match hid_reader::get_hid_descriptor_bytes(&device.path) {
+                Ok(descriptor) => {
+                    let descriptor_preview = format_hex_preview(&descriptor, 24);
+                    info!(
+                        "InputDetector: Loaded descriptor for HID device '{}' (VID: 0x{:04x}, PID: 0x{:04x}, interface: {}, descriptor: {} bytes)",
+                        display_name,
+                        device.vendor_id,
+                        device.product_id,
+                        device.interface_number,
+                        descriptor.len()
+                    );
 
-                // Get the DirectInput-to-HID mapping and invert it (HID usage ID -> DirectInput index)
-                if let Ok(di_to_hid) = hid_reader::get_directinput_to_hid_axis_mapping(&device.path)
-                {
-                    let mut hid_to_axis: HashMap<u32, u32> = HashMap::new();
-                    for (axis_idx, hid_usage_id) in di_to_hid {
-                        hid_to_axis.insert(hid_usage_id, axis_idx);
+                    match hid_reader::get_input_capabilities_from_descriptor(&device.path) {
+                        Ok(caps) => {
+                            info!(
+                                "InputDetector: HID capabilities for '{}' -> buttons: {}, axes: {}, hats: {}, descriptor preview: {}",
+                                display_name,
+                                caps.button_count,
+                                caps.axis_count,
+                                caps.hat_count,
+                                descriptor_preview
+                            );
+                        }
+                        Err(e) => {
+                            warn!(
+                                "InputDetector: Failed to summarize HID capabilities for '{}' (VID: 0x{:04x}, PID: 0x{:04x}): {}. Descriptor preview: {}",
+                                display_name,
+                                device.vendor_id,
+                                device.product_id,
+                                e,
+                                descriptor_preview
+                            );
+                        }
                     }
-                    device_hid_to_axis_maps.insert(device.path.clone(), hid_to_axis);
+
+                    device_descriptors.insert(device.path.clone(), descriptor);
+                    device_instances.insert(device.path.clone(), idx + 1);
+                    hid_debug_states.insert(device.path.clone(), HidDeviceDebugState::new());
+
+                    // Get the DirectInput-to-HID mapping and invert it (HID usage ID -> DirectInput index)
+                    if let Ok(di_to_hid) =
+                        hid_reader::get_directinput_to_hid_axis_mapping(&device.path)
+                    {
+                        let mut hid_to_axis: HashMap<u32, u32> = HashMap::new();
+                        for (axis_idx, hid_usage_id) in di_to_hid {
+                            hid_to_axis.insert(hid_usage_id, axis_idx);
+                        }
+                        device_hid_to_axis_maps.insert(device.path.clone(), hid_to_axis);
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "InputDetector: Failed to read descriptor for HID device '{}' (VID: 0x{:04x}, PID: 0x{:04x}, interface: {}, path: {}): {}",
+                        display_name,
+                        device.vendor_id,
+                        device.product_id,
+                        device.interface_number,
+                        device.path,
+                        e
+                    );
+                    warn!(
+                        "InputDetector: Failed to read descriptor for HID device '{}' (VID: 0x{:04x}, PID: 0x{:04x}, interface: {}, path: {}): {}",
+                        display_name,
+                        device.vendor_id,
+                        device.product_id,
+                        device.interface_number,
+                        device.path,
+                        e
+                    );
                 }
             }
         }
@@ -315,6 +620,11 @@ impl InputDetector {
         eprintln!(
             "InputDetector: Monitoring {} HID devices and 4 XInput slots",
             hid_devices.len()
+        );
+        info!(
+            "InputDetector: Monitoring {} opened HID device(s), {} descriptor(s), and 4 XInput slots",
+            opened_devices.len(),
+            device_descriptors.len()
         );
 
         Self {
@@ -328,6 +638,7 @@ impl InputDetector {
             device_hid_to_axis_maps,
             prev_hid_reports: HashMap::new(),
             opened_devices,
+            hid_debug_states,
         }
     }
 
@@ -500,7 +811,12 @@ impl InputDetector {
             let Some(opened_device) = self.opened_devices.get(&device.path) else {
                 continue;
             };
+            let Some(debug_state) = self.hid_debug_states.get_mut(&device.path) else {
+                continue;
+            };
             let device_instance = self.device_instances[&device.path];
+            let device_display_name = hid_device_display_name(device);
+            let mut saw_report_this_poll = false;
 
             // Drain the HID queue (up to 10 reports per poll to avoid blocking)
             let mut reports_processed = 0;
@@ -512,16 +828,115 @@ impl InputDetector {
                 // Use 0 timeout for non-blocking read
                 let report_bytes = match opened_device.read(0) {
                     Ok(bytes) if !bytes.is_empty() => bytes,
-                    _ => break, // No more reports or error
+                    Ok(_) => break, // No more reports
+                    Err(e) => {
+                        warn!(
+                            "InputDetector: Failed to read HID report for '{}': {}",
+                            device_display_name, e
+                        );
+                        break;
+                    }
                 };
 
                 reports_processed += 1;
+                saw_report_this_poll = true;
+                debug_state.idle_polls_without_reports = 0;
+                debug_state.reports_seen += 1;
 
-                let current_report =
-                    match hid_reader::parse_hid_full_report(&report_bytes, descriptor) {
-                        Ok(report) => report,
-                        Err(_) => continue,
+                if !debug_state.first_report_logged {
+                    info!(
+                        "InputDetector: First HID report received from '{}' -> {} bytes [{}]",
+                        device_display_name,
+                        report_bytes.len(),
+                        format_hex_preview(&report_bytes, 24)
+                    );
+                    debug_state.first_report_logged = true;
+                }
+
+                let current_report = if let Some(fallback) = &debug_state.raw_button_fallback {
+                    let pressed_buttons = match parse_raw_button_fallback(&report_bytes, fallback) {
+                        Ok(buttons) => buttons,
+                        Err(e) => {
+                            warn!(
+                                "InputDetector: Failed to parse raw HID button fallback report for '{}': {}. Report preview: [{}]",
+                                device_display_name,
+                                e,
+                                format_hex_preview(&report_bytes, 36)
+                            );
+                            continue;
+                        }
                     };
+
+                    hid_reader::HidFullReport {
+                        axis_values: HashMap::new(),
+                        axis_bit_depths: HashMap::new(),
+                        axis_names: HashMap::new(),
+                        axis_ranges: HashMap::new(),
+                        pressed_buttons,
+                        timestamp_ms: 0,
+                        is_16bit: false,
+                    }
+                } else {
+                    match hid_reader::parse_hid_full_report(&report_bytes, descriptor) {
+                        Ok(report) => {
+                            if let Some(fallback) =
+                                build_raw_button_fallback(&report_bytes, descriptor, &report)
+                            {
+                                info!(
+                                    "InputDetector: Activated raw HID button fallback for '{}' (offset {}, skipped bytes {:?}, descriptor usage max {:?}) from baseline [{}]",
+                                    device_display_name,
+                                    fallback.offset,
+                                    fallback.skipped_report_indices,
+                                    fallback.descriptor_button_limit,
+                                    format_hex_preview(&report_bytes, 36)
+                                );
+                                debug_state.raw_button_fallback = Some(fallback);
+
+                                hid_reader::HidFullReport {
+                                    axis_values: HashMap::new(),
+                                    axis_bit_depths: HashMap::new(),
+                                    axis_names: HashMap::new(),
+                                    axis_ranges: HashMap::new(),
+                                    pressed_buttons: Vec::new(),
+                                    timestamp_ms: 0,
+                                    is_16bit: false,
+                                }
+                            } else {
+                                report
+                            }
+                        }
+                        Err(e) => {
+                            debug_state.parse_failures += 1;
+                            eprintln!(
+                                "InputDetector: Failed to parse HID report for '{}' ({} bytes): {}",
+                                device_display_name,
+                                report_bytes.len(),
+                                e
+                            );
+                            warn!(
+                                "InputDetector: Failed to parse HID report for '{}' ({} bytes, failure #{}) : {}. Report preview: [{}]",
+                                device_display_name,
+                                report_bytes.len(),
+                                debug_state.parse_failures,
+                                e,
+                                format_hex_preview(&report_bytes, 24)
+                            );
+                            continue;
+                        }
+                    }
+                };
+
+                if current_report.axis_values.is_empty()
+                    && current_report.pressed_buttons.is_empty()
+                    && !debug_state.empty_report_logged
+                {
+                    info!(
+                        "InputDetector: Parsed HID report for '{}' but it contains no axes or pressed buttons. Report preview: [{}]",
+                        device_display_name,
+                        format_hex_preview(&report_bytes, 24)
+                    );
+                    debug_state.empty_report_logged = true;
+                }
 
                 // Check buttons - only detect NEW button presses (not held buttons)
                 // Skip detection on the very first poll for this device (baseline establishment)
@@ -533,12 +948,20 @@ impl InputDetector {
 
                 if let Some(prev_buttons) = prev_buttons {
                     // We have a previous state, so detect new button presses
-                    let newly_pressed: Vec<u32> = current_report
-                        .pressed_buttons
-                        .iter()
-                        .filter(|&&btn| !prev_buttons.contains(&btn))
-                        .copied()
-                        .collect();
+                    let newly_pressed: Vec<u32> = if debug_state.active_low_buttons {
+                        prev_buttons
+                            .iter()
+                            .filter(|&&btn| !current_report.pressed_buttons.contains(&btn))
+                            .copied()
+                            .collect()
+                    } else {
+                        current_report
+                            .pressed_buttons
+                            .iter()
+                            .filter(|&&btn| !prev_buttons.contains(&btn))
+                            .copied()
+                            .collect()
+                    };
 
                     // Debug logging for button detection
                     if !current_report.pressed_buttons.is_empty() || !prev_buttons.is_empty() {
@@ -552,7 +975,8 @@ impl InputDetector {
                     }
 
                     if !newly_pressed.is_empty() {
-                        let device_name = device.product.as_deref().unwrap_or("Unknown Device");
+                        let device_name = hid_device_product_name(device)
+                            .unwrap_or_else(|| hid_device_fallback_name(device));
 
                         for button_num in newly_pressed {
                             detected_inputs.push(DetectedInput {
@@ -574,6 +998,17 @@ impl InputDetector {
                                 hid_axis_name: None,
                             });
                         }
+                    }
+                } else if is_full_button_set(&current_report.pressed_buttons) {
+                    debug_state.active_low_buttons = true;
+
+                    if !debug_state.active_low_logged {
+                        info!(
+                            "InputDetector: Detected active-low HID button encoding for '{}' using baseline with {} asserted buttons",
+                            device_display_name,
+                            current_report.pressed_buttons.len()
+                        );
+                        debug_state.active_low_logged = true;
                     }
                 } // else: First poll for this device - just establish baseline, don't detect anything
 
@@ -624,8 +1059,8 @@ impl InputDetector {
                                     .get(&axis_id)
                                     .map(|s| s.as_str())
                                     .unwrap_or("Unknown");
-                                let device_name =
-                                    device.product.as_deref().unwrap_or("Unknown Device");
+                                let device_name = hid_device_product_name(device)
+                                    .unwrap_or_else(|| hid_device_fallback_name(device));
 
                                 let axis_index = self
                                     .device_hid_to_axis_maps
@@ -696,7 +1131,8 @@ impl InputDetector {
                                 .get(&axis_id)
                                 .map(|s| s.as_str())
                                 .unwrap_or("Unknown");
-                            let device_name = device.product.as_deref().unwrap_or("Unknown Device");
+                            let device_name = hid_device_product_name(device)
+                                .unwrap_or_else(|| hid_device_fallback_name(device));
 
                             let axis_index = self
                                 .device_hid_to_axis_maps
@@ -740,6 +1176,19 @@ impl InputDetector {
                 self.prev_hid_reports
                     .insert(device.path.clone(), current_report);
             }
+
+            if !saw_report_this_poll {
+                debug_state.idle_polls_without_reports += 1;
+
+                if debug_state.idle_polls_without_reports == 200 {
+                    info!(
+                        "InputDetector: No HID reports received yet from '{}' after {} poll cycles. Descriptor size: {} bytes",
+                        device_display_name,
+                        debug_state.idle_polls_without_reports,
+                        descriptor.len()
+                    );
+                }
+            }
         }
 
         detected_inputs
@@ -778,6 +1227,9 @@ pub fn wait_for_inputs_with_events(
     session_id: String,
     initial_timeout_secs: u64,
     collect_duration_secs: u64,
+    input_event_name: String,
+    completion_event_name: String,
+    emit_buttons_only: bool,
 ) -> Result<(), String> {
     eprintln!("wait_for_inputs_with_events: Starting hybrid input detection");
 
@@ -793,7 +1245,7 @@ pub fn wait_for_inputs_with_events(
         if let Some(first_time) = first_input_time {
             if first_time.elapsed() >= collect_duration {
                 let _ = window.emit(
-                    "input-detection-complete",
+                    completion_event_name.as_str(),
                     DetectionComplete {
                         session_id: session_id.clone(),
                     },
@@ -802,7 +1254,7 @@ pub fn wait_for_inputs_with_events(
             }
         } else if start.elapsed() >= initial_timeout {
             let _ = window.emit(
-                "input-detection-complete",
+                completion_event_name.as_str(),
                 DetectionComplete {
                     session_id: session_id.clone(),
                 },
@@ -812,7 +1264,11 @@ pub fn wait_for_inputs_with_events(
 
         let inputs = detector.poll();
         for input in inputs {
-            let _ = window.emit("input-detected", &input);
+            if emit_buttons_only && !input.input_string.contains("_button") {
+                continue;
+            }
+
+            let _ = window.emit(input_event_name.as_str(), &input);
             if first_input_time.is_none() {
                 first_input_time = Some(Instant::now());
             }
@@ -829,20 +1285,16 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
     let mut joysticks = Vec::new();
 
     eprintln!("=== Hybrid Device Detection (HID + XInput) ===");
+    info!("=== Hybrid Device Detection (HID + XInput) ===");
 
     // First, list HID game controllers (joysticks/HOTAS)
     match hid_reader::list_hid_game_controllers() {
         Ok(hid_devices) => {
             eprintln!("Found {} HID game controllers", hid_devices.len());
+            info!("Found {} HID game controllers", hid_devices.len());
 
             for (idx, device) in hid_devices.iter().enumerate() {
-                let device_name = device.product.as_deref().unwrap_or("Unknown HID Device");
-                let manufacturer = device.manufacturer.as_deref().unwrap_or("");
-                let full_name = if !manufacturer.is_empty() {
-                    format!("{} {}", manufacturer, device_name)
-                } else {
-                    device_name.to_string()
-                };
+                let full_name = hid_device_display_name(device);
 
                 // Skip Xbox controllers as they'll be added via XInput for better support
                 if cfg!(windows)
@@ -865,6 +1317,14 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
                     device.vendor_id,
                     device.product_id
                 );
+                info!(
+                    "HID Device {}: {} (VID: 0x{:04x}, PID: 0x{:04x}, interface: {})",
+                    idx + 1,
+                    full_name,
+                    device.vendor_id,
+                    device.product_id,
+                    device.interface_number
+                );
 
                 // Read HID input capabilities from descriptor
                 let (button_count, axis_count, hat_count) =
@@ -878,6 +1338,13 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
                         }
                         Err(e) => {
                             eprintln!("  Could not read descriptor: {}", e);
+                            warn!(
+                                "Could not read descriptor for HID device '{}' (VID: 0x{:04x}, PID: 0x{:04x}): {}",
+                                full_name,
+                                device.vendor_id,
+                                device.product_id,
+                                e
+                            );
                             (0, 0, 0)
                         }
                     };
@@ -895,7 +1362,7 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
                 joysticks.push(JoystickInfo {
                     id: joysticks.len() + 1,
                     name: full_name,
-                    product_name: Some(device_name.to_string()),
+                    product_name: hid_device_product_name(device),
                     is_connected: true,
                     button_count,
                     axis_count,
@@ -907,6 +1374,7 @@ pub fn detect_joysticks() -> Result<Vec<JoystickInfo>, String> {
         }
         Err(e) => {
             eprintln!("Failed to list HID devices: {}", e);
+            warn!("Failed to list HID devices: {}", e);
         }
     }
 
@@ -944,11 +1412,8 @@ pub fn list_connected_devices() -> Result<Vec<DeviceInfo>, String> {
     let hid_devices = hid_reader::list_hid_game_controllers().unwrap_or_default();
 
     for device in hid_devices {
-        let name = device
-            .product
-            .as_deref()
-            .unwrap_or("Unknown Device")
-            .to_string();
+        let name =
+            hid_device_product_name(&device).unwrap_or_else(|| hid_device_fallback_name(&device));
 
         // Skip Xbox controllers as they'll be added via XInput
         if cfg!(windows)

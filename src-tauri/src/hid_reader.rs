@@ -49,16 +49,6 @@ pub struct HidDeviceListItem {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct HidAxisReport {
-    pub axis_values: HashMap<u32, u16>, // axis_id -> raw value (0-65535 for 16-bit, 0-255 for 8-bit)
-    pub axis_bit_depths: HashMap<u32, u8>, // axis_id -> detected bit depth (8, 10, 11, 12, 16, etc.)
-    pub axis_names: HashMap<u32, String>,  // axis_id -> HID usage name (e.g., "X", "Y", "Rz")
-    pub axis_ranges: HashMap<u32, (i32, i32)>, // axis_id -> (logical_min, logical_max) from HID descriptor
-    pub timestamp_ms: u64,
-    pub is_16bit: bool, // Indicates if values are 16-bit (true) or 8-bit (false)
-}
-
-#[derive(Serialize, Clone, Debug)]
 pub struct HidFullReport {
     pub axis_values: HashMap<u32, u16>,
     pub axis_bit_depths: HashMap<u32, u8>,
@@ -153,24 +143,6 @@ pub fn read_hid_report(device_path: &str, timeout_ms: i32) -> Result<Vec<u8>, St
     }
 
     Ok(buf[..len].to_vec())
-}
-
-/// Parse a HID report using a pre-fetched descriptor (recommended)
-/// This avoids reopening the device on every parse
-pub fn parse_hid_axes_from_descriptor_bytes(
-    report: &[u8],
-    descriptor: &[u8],
-) -> Result<HidAxisReport, String> {
-    let full_report = parse_hid_full_report(report, descriptor)?;
-
-    Ok(HidAxisReport {
-        axis_values: full_report.axis_values,
-        axis_bit_depths: full_report.axis_bit_depths,
-        axis_names: full_report.axis_names,
-        axis_ranges: full_report.axis_ranges,
-        timestamp_ms: full_report.timestamp_ms,
-        is_16bit: full_report.is_16bit,
-    })
 }
 
 /// Parse a HID report to extract BOTH axes and buttons from descriptor

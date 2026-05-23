@@ -29,7 +29,16 @@ import
     drawHat2WayVerticalBoxes,
     drawHat2WayHorizontalBoxes,
     HatFrameWidth,
-    HatFrameHeight
+    HatFrameHeight,
+    MinButtonFrameWidth,
+    MaxButtonFrameWidth,
+    MinButtonFrameHeight,
+    MaxButtonFrameHeight,
+    getButtonFrameWidth,
+    getButtonFrameHeight,
+    getButtonBoxColor,
+    normalizeButtonStyle,
+    isValidHexColor
 } from './button-renderer.js';
 import { initializeTemplatePagesUI, refreshTemplatePagesUI } from './template-editor-v2.js';
 
@@ -40,6 +49,416 @@ import
     getToggle3WayPositions,
     getRotaryPositions
 } from './input-type-renderer.js';
+import { RenderButtonGraphic } from './button-graphic.js';
+
+function refreshButtonGraphic()
+{
+    const container = document.getElementById('button-graphic-container');
+    if (!container)
+    {
+        return;
+    }
+
+    const typeSelect = document.getElementById('button-type-select');
+    const buttonType = (typeSelect && typeSelect.value) || (tempButton && tempButton.buttonType) || 'simple';
+    const stage = document.querySelector('.button-graphic-stage');
+    if (stage)
+    {
+        stage.dataset.buttonType = buttonType;
+    }
+
+    RenderButtonGraphic(container, buttonType, tempButton);
+}
+
+function getButtonGraphicSocketForSlot(slot)
+{
+    if (!slot)
+    {
+        return null;
+    }
+
+    if (slot === 'main')
+    {
+        return document.getElementById('button-input-socket');
+    }
+
+    return document.querySelector(`.hat-input-socket[data-direction="${slot}"]`);
+}
+
+function getSlotFromGraphicTarget(target)
+{
+    if (!(target instanceof Element))
+    {
+        return null;
+    }
+
+    let current = target;
+    while (current && !current.classList?.contains('button-graphic-svg'))
+    {
+        const slotClass = Array.from(current.classList || []).find(className => className.startsWith('slot-'));
+        if (slotClass)
+        {
+            return slotClass.slice(5);
+        }
+
+        current = current.parentElement;
+    }
+
+    return null;
+}
+
+function triggerButtonGraphicSlotBinding(slot)
+{
+    if (!slot)
+    {
+        return;
+    }
+
+    if (slot === 'main')
+    {
+        startInputDetection();
+        return;
+    }
+
+    startHatInputDetection(slot);
+}
+
+function initializeButtonGraphicInteractions()
+{
+    const container = document.getElementById('button-graphic-container');
+    if (!container || container.dataset.interactionsBound === 'true')
+    {
+        return;
+    }
+
+    container.dataset.interactionsBound = 'true';
+
+    container.addEventListener('mouseover', (event) =>
+    {
+        const slot = getSlotFromGraphicTarget(event.target);
+        if (!slot)
+        {
+            return;
+        }
+
+        const socket = getButtonGraphicSocketForSlot(slot);
+        setButtonGraphicHoverSlot(slot, socket);
+    });
+
+    container.addEventListener('mouseout', (event) =>
+    {
+        const currentSlot = getSlotFromGraphicTarget(event.target);
+        if (!currentSlot)
+        {
+            return;
+        }
+
+        const nextSlot = getSlotFromGraphicTarget(event.relatedTarget);
+        if (nextSlot === currentSlot)
+        {
+            return;
+        }
+
+        clearButtonGraphicHoverSlot();
+    });
+
+    container.addEventListener('click', (event) =>
+    {
+        const slot = getSlotFromGraphicTarget(event.target);
+        if (!slot)
+        {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        triggerButtonGraphicSlotBinding(slot);
+    });
+}
+
+function formatBindingOverlayLabel(text)
+{
+    if (!text)
+    {
+        return 'Input';
+    }
+
+    return String(text)
+        .replace(/[-_]/g, ' ')
+        .replace(/\b\w/g, char => char.toUpperCase());
+}
+
+let bindingOverlayCountdownInterval = null;
+
+function clearBindingOverlayCountdown()
+{
+    if (bindingOverlayCountdownInterval !== null)
+    {
+        clearInterval(bindingOverlayCountdownInterval);
+        bindingOverlayCountdownInterval = null;
+    }
+}
+
+function setBindingOverlayTimer(text = '', { hidden = false, isError = false } = {})
+{
+    const timerEl = document.getElementById('button-binding-overlay-timer');
+    if (!timerEl)
+    {
+        return;
+    }
+
+    timerEl.hidden = hidden;
+    timerEl.textContent = hidden ? '' : text;
+    timerEl.style.color = isError ? '#ef4444' : '';
+}
+
+function startBindingOverlayCountdown(seconds)
+{
+    clearBindingOverlayCountdown();
+
+    let remaining = Math.max(0, Math.ceil(Number(seconds) || 0));
+    if (remaining <= 0)
+    {
+        setBindingOverlayTimer('', { hidden: true });
+        return;
+    }
+
+    const renderCountdown = () =>
+    {
+        setBindingOverlayTimer(`${remaining}s remaining`);
+    };
+
+    renderCountdown();
+    bindingOverlayCountdownInterval = setInterval(() =>
+    {
+        remaining -= 1;
+        if (remaining <= 0)
+        {
+            clearBindingOverlayCountdown();
+            setBindingOverlayTimer('Timed Out', { isError: true });
+            return;
+        }
+
+        renderCountdown();
+    }, 1000);
+}
+
+function stopBindingOverlayCountdown({ hideTimer = true } = {})
+{
+    clearBindingOverlayCountdown();
+    if (hideTimer)
+    {
+        setBindingOverlayTimer('', { hidden: true });
+    }
+}
+
+function resetBindingOverlayState()
+{
+    stopBindingOverlayCountdown();
+
+    const titleEl = document.getElementById('button-binding-overlay-title');
+    const subtitleEl = document.getElementById('button-binding-overlay-subtitle');
+    if (titleEl)
+    {
+        titleEl.textContent = 'Press Button';
+    }
+
+    if (subtitleEl)
+    {
+        subtitleEl.textContent = 'Listening for input...';
+    }
+
+    const inputStatusEl = document.getElementById('input-detection-status');
+    if (inputStatusEl)
+    {
+        inputStatusEl.style.display = 'none';
+        inputStatusEl.textContent = '';
+        inputStatusEl.style.color = '';
+    }
+
+    const hatStatusEl = document.getElementById('hat-detection-status');
+    if (hatStatusEl)
+    {
+        hatStatusEl.style.display = 'none';
+        hatStatusEl.textContent = '';
+        hatStatusEl.style.color = '';
+    }
+}
+
+function delay(ms)
+{
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function showBindingOverlay(title, subtitle = 'Listening for input...', timeoutSecs = 0)
+{
+    const overlay = document.getElementById('button-binding-overlay');
+    if (!overlay)
+    {
+        return;
+    }
+
+    resetBindingOverlayState();
+
+    const titleEl = document.getElementById('button-binding-overlay-title');
+    const subtitleEl = document.getElementById('button-binding-overlay-subtitle');
+
+    if (titleEl)
+    {
+        titleEl.textContent = title || 'Press Button';
+    }
+
+    if (subtitleEl)
+    {
+        subtitleEl.textContent = subtitle || 'Listening for input...';
+    }
+
+    const capturedEl = document.getElementById('button-binding-overlay-captured');
+    if (capturedEl)
+    {
+        capturedEl.hidden = true;
+        capturedEl.textContent = '';
+    }
+
+    const optionsEl = document.getElementById('button-binding-overlay-options');
+    if (optionsEl)
+    {
+        optionsEl.hidden = true;
+        optionsEl.replaceChildren();
+    }
+
+    if (timeoutSecs > 0)
+    {
+        startBindingOverlayCountdown(timeoutSecs);
+    }
+
+    overlay.classList.add('active');
+    overlay.setAttribute('aria-hidden', 'false');
+}
+
+function hideBindingOverlay()
+{
+    const overlay = document.getElementById('button-binding-overlay');
+    if (!overlay)
+    {
+        return;
+    }
+
+    resetBindingOverlayState();
+
+    const capturedEl = document.getElementById('button-binding-overlay-captured');
+    if (capturedEl)
+    {
+        capturedEl.hidden = true;
+        capturedEl.textContent = '';
+    }
+
+    const optionsEl = document.getElementById('button-binding-overlay-options');
+    if (optionsEl)
+    {
+        optionsEl.hidden = true;
+        optionsEl.replaceChildren();
+    }
+
+    if (pendingBindingOverlayChoiceResolve)
+    {
+        const resolveChoice = pendingBindingOverlayChoiceResolve;
+        pendingBindingOverlayChoiceResolve = null;
+        resolveChoice(null);
+    }
+
+    overlay.classList.remove('active');
+    overlay.setAttribute('aria-hidden', 'true');
+}
+
+function formatBindingOverlayCapturedInput(result)
+{
+    if (!result || !result.input_string)
+    {
+        return 'Unknown Input';
+    }
+
+    if (typeof parseInputShortName === 'function')
+    {
+        return parseInputShortName(result.input_string);
+    }
+
+    return result.display_name || result.input_string;
+}
+
+function updateBindingOverlayCapturedInputs(inputs)
+{
+    const capturedEl = document.getElementById('button-binding-overlay-captured');
+    const subtitleEl = document.getElementById('button-binding-overlay-subtitle');
+    if (!capturedEl)
+    {
+        return;
+    }
+
+    if (!Array.isArray(inputs) || inputs.length === 0)
+    {
+        capturedEl.hidden = true;
+        capturedEl.textContent = '';
+        return;
+    }
+
+    stopBindingOverlayCountdown();
+
+    const labels = inputs.map(formatBindingOverlayCapturedInput);
+    capturedEl.hidden = false;
+    capturedEl.textContent = labels.length === 1
+        ? `Captured: ${labels[0]}`
+        : `Captured: ${labels.join(' • ')}`;
+
+    if (subtitleEl && labels.length > 1)
+    {
+        subtitleEl.textContent = 'Multiple inputs captured...';
+    }
+}
+
+function chooseBindingOverlayInput(inputs)
+{
+    const titleEl = document.getElementById('button-binding-overlay-title');
+    const subtitleEl = document.getElementById('button-binding-overlay-subtitle');
+    const optionsEl = document.getElementById('button-binding-overlay-options');
+
+    if (!optionsEl)
+    {
+        return Promise.resolve(inputs[inputs.length - 1] || null);
+    }
+
+    if (titleEl)
+    {
+        titleEl.textContent = 'Choose Input';
+    }
+
+    if (subtitleEl)
+    {
+        subtitleEl.textContent = 'Multiple inputs captured. Pick one to bind.';
+    }
+
+    optionsEl.hidden = false;
+    optionsEl.replaceChildren();
+
+    return new Promise((resolve) =>
+    {
+        pendingBindingOverlayChoiceResolve = resolve;
+
+        inputs.forEach((input) =>
+        {
+            const optionBtn = document.createElement('button');
+            optionBtn.type = 'button';
+            optionBtn.className = 'button-binding-overlay-option';
+            optionBtn.textContent = formatBindingOverlayCapturedInput(input);
+            optionBtn.addEventListener('click', () =>
+            {
+                pendingBindingOverlayChoiceResolve = null;
+                resolve(input);
+            }, { once: true });
+            optionsEl.appendChild(optionBtn);
+        });
+    });
+}
 
 /**
  * Migrate template from v1.0 to v1.1
@@ -288,6 +707,7 @@ let rightStickCamera = { zoom: 1.0, pan: { x: 0, y: 0 } };
 let selectedButtonId = null;
 let mode = 'view'; // 'view', 'placing-button', 'placing-label'
 let tempButton = null;
+let placementPreviewPos = null;
 let originalButton = null; // Store original button data for cancel functionality
 let draggingHandle = null;
 let isPanning = false;
@@ -295,6 +715,467 @@ let lastPanPosition = { x: 0, y: 0 };
 
 // Snapping grid for better alignment when dragging boxes
 const SNAP_GRID = 10; // pixels
+const DefaultButtonColor = '#2f7f78';
+
+function getStyleControls()
+{
+    return {
+        panel: document.getElementById('button-appearance-panel'),
+        widthSection: document.getElementById('button-width-section'),
+        widthField: document.getElementById('button-width-field'),
+        widthRange: document.getElementById('button-width-range'),
+        widthInput: document.getElementById('button-width-input'),
+        heightSection: document.getElementById('button-height-section'),
+        heightField: document.getElementById('button-height-field'),
+        heightRange: document.getElementById('button-height-range'),
+        heightInput: document.getElementById('button-height-input'),
+        colorInput: document.getElementById('button-color-input'),
+        colorHexInput: document.getElementById('button-color-hex-input'),
+        presetButtons: document.querySelectorAll('.button-color-preset')
+    };
+}
+
+function clearCurrentTemplateFilePath()
+{
+    currentTemplateFilePath = null;
+    localStorage.removeItem('editorTemplateFilePath');
+    localStorage.removeItem('editorTemplateFileName');
+    showUnsavedTemplateIndicator();
+    updateTemplateUnsavedIndicator();
+}
+
+function isMissingPathSaveError(error)
+{
+    const message = String(error || '').toLowerCase();
+    return message.includes('cannot find the path specified') ||
+        message.includes('os error 3') ||
+        message.includes('no such file or directory') ||
+        message.includes('path not found');
+}
+
+function setActiveColorPreset(color)
+{
+    const normalizedColor = isValidHexColor(color) ? color.toLowerCase() : '';
+    getStyleControls().presetButtons.forEach(button =>
+    {
+        button.classList.toggle('active', (button.dataset.color || '').toLowerCase() === normalizedColor);
+    });
+}
+
+function setModalColorValue(color)
+{
+    const { colorInput, colorHexInput } = getStyleControls();
+    const normalizedColor = isValidHexColor(color) ? color.toLowerCase() : '';
+
+    if (colorInput)
+    {
+        colorInput.value = normalizedColor || DefaultButtonColor;
+    }
+    if (colorHexInput)
+    {
+        colorHexInput.value = normalizedColor;
+    }
+
+    setActiveColorPreset(normalizedColor);
+}
+
+function setModalWidthValue(width)
+{
+    const { widthRange, widthInput } = getStyleControls();
+    const safeWidth = Math.max(MinButtonFrameWidth, Math.min(MaxButtonFrameWidth, Number(width) || ButtonFrameWidth));
+
+    if (widthRange)
+    {
+        widthRange.value = safeWidth;
+    }
+    if (widthInput)
+    {
+        widthInput.value = safeWidth;
+    }
+}
+
+function setModalHeightValue(height)
+{
+    const { heightRange, heightInput } = getStyleControls();
+    const safeHeight = Math.max(MinButtonFrameHeight, Math.min(MaxButtonFrameHeight, Number(height) || ButtonFrameHeight));
+
+    if (heightRange)
+    {
+        heightRange.value = safeHeight;
+    }
+    if (heightInput)
+    {
+        heightInput.value = safeHeight;
+    }
+}
+
+function isWidthAdjustableButtonType(buttonType)
+{
+    return [
+        'simple',
+        'axis',
+        'hat4way',
+        'hat2way-vertical',
+        'hat2way-horizontal',
+        'toggle3way-vertical',
+        'toggle3way-horizontal',
+        'rotary3way',
+        'rotary4way'
+    ].includes(buttonType);
+}
+
+function isHeightAdjustableButtonType(buttonType)
+{
+    return isWidthAdjustableButtonType(buttonType);
+}
+
+function getDefaultButtonWidth(buttonType)
+{
+    return buttonType && buttonType !== 'simple' && buttonType !== 'axis'
+        ? HatFrameWidth
+        : ButtonFrameWidth;
+}
+
+function getDefaultButtonHeight(buttonType)
+{
+    return buttonType && buttonType !== 'simple' && buttonType !== 'axis'
+        ? HatFrameHeight
+        : ButtonFrameHeight;
+}
+
+function setButtonAppearancePanelVisible(isVisible)
+{
+    const { panel } = getStyleControls();
+    if (!panel)
+    {
+        return;
+    }
+
+    panel.classList.toggle('visible', Boolean(isVisible));
+    panel.setAttribute('aria-hidden', String(!isVisible));
+}
+
+function updateButtonAppearancePanelHeading(button = getActiveStyleButton())
+{
+    const eyebrow = document.getElementById('button-appearance-panel-eyebrow');
+    if (!eyebrow)
+    {
+        return;
+    }
+
+    const buttonName = String(button?.name || '').trim();
+    eyebrow.textContent = buttonName ? `Button Appearance - ${buttonName}` : 'Button Appearance';
+}
+
+function populateButtonStyleControls(button)
+{
+    const style = normalizeButtonStyle(button?.style);
+    setModalWidthValue(style.width || getDefaultButtonWidth(button?.buttonType));
+    setModalHeightValue(style.height || getDefaultButtonHeight(button?.buttonType));
+    setModalColorValue(style.color || '');
+    updateButtonAppearancePanelHeading(button);
+}
+
+function getSelectedButton()
+{
+    if (selectedButtonId === null)
+    {
+        return null;
+    }
+
+    return getCurrentButtons().find(button => String(button.id) === String(selectedButtonId)) || null;
+}
+
+function getActiveStyleButton()
+{
+    return tempButton || getSelectedButton();
+}
+
+function getNextButtonZOrder(buttons)
+{
+    return (buttons || []).reduce((highestZ, button, index) =>
+    {
+        const buttonZ = Number.isFinite(Number(button?.z)) ? Number(button.z) : index;
+        return Math.max(highestZ, buttonZ);
+    }, -1) + 1;
+}
+
+function getButtonsInDrawOrder(buttons = getCurrentButtons())
+{
+    return (buttons || [])
+        .map((button, index) => ({
+            button,
+            index,
+            z: Number.isFinite(Number(button?.z)) ? Number(button.z) : index
+        }))
+        .sort((left, right) =>
+        {
+            if (left.z !== right.z)
+            {
+                return left.z - right.z;
+            }
+
+            return left.index - right.index;
+        })
+        .map(entry => entry.button);
+}
+
+function getButtonsInHitTestOrder(buttons = getCurrentButtons())
+{
+    return [...getButtonsInDrawOrder(buttons)].reverse();
+}
+
+function createUniqueButtonId(buttons)
+{
+    const usedIds = new Set((buttons || []).map(button => String(button?.id)));
+    let nextId = Date.now();
+
+    while (usedIds.has(String(nextId)))
+    {
+        nextId += 1;
+    }
+
+    return nextId;
+}
+
+function getNextDuplicateButtonName(sourceName, buttons)
+{
+    const trimmedName = String(sourceName || '').trim() || 'Button';
+    const suffixMatch = trimmedName.match(/^(.*?)(\d+)$/);
+    const usedNames = new Set(
+        (buttons || [])
+            .map(button => String(button?.name || '').trim().toLowerCase())
+            .filter(Boolean)
+    );
+
+    let namePrefix = `${trimmedName} `;
+    let nextNumber = 2;
+
+    if (suffixMatch)
+    {
+        namePrefix = suffixMatch[1];
+        nextNumber = Number.parseInt(suffixMatch[2], 10) + 1;
+    }
+
+    let candidateName = `${namePrefix}${nextNumber}`;
+    while (usedNames.has(candidateName.toLowerCase()))
+    {
+        nextNumber += 1;
+        candidateName = `${namePrefix}${nextNumber}`;
+    }
+
+    return candidateName;
+}
+
+function duplicateButton(button, buttons)
+{
+    if (!button)
+    {
+        return null;
+    }
+
+    const duplicate = JSON.parse(JSON.stringify(button));
+    duplicate.id = createUniqueButtonId(buttons);
+    duplicate.name = getNextDuplicateButtonName(button.name, buttons);
+    duplicate.z = getNextButtonZOrder(buttons);
+
+    if (duplicate.buttonPos)
+    {
+        duplicate.buttonPos = {
+            ...duplicate.buttonPos,
+            x: snapToGrid(duplicate.buttonPos.x + SNAP_GRID),
+            y: snapToGrid(duplicate.buttonPos.y + SNAP_GRID)
+        };
+    }
+
+    if (duplicate.labelPos)
+    {
+        duplicate.labelPos = {
+            ...duplicate.labelPos,
+            x: snapToGrid(duplicate.labelPos.x + SNAP_GRID),
+            y: snapToGrid(duplicate.labelPos.y + SNAP_GRID)
+        };
+    }
+
+    return duplicate;
+}
+
+function duplicateSelectedButton(event)
+{
+    if (event)
+    {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+
+    const selectedButton = getSelectedButton();
+    if (!selectedButton)
+    {
+        return;
+    }
+
+    const buttons = getCurrentButtons();
+    const duplicate = duplicateButton(selectedButton, buttons);
+    if (!duplicate)
+    {
+        return;
+    }
+
+    setCurrentButtons([...buttons, duplicate]);
+    markAsChanged();
+    updateButtonList();
+    selectButton(duplicate.id);
+    redraw();
+
+    if (window.toast)
+    {
+        window.toast.success(`Duplicated "${selectedButton.name}" as "${duplicate.name}"`);
+    }
+}
+
+function applyAppearanceControlsToActiveButton()
+{
+    const button = getActiveStyleButton();
+    if (!button)
+    {
+        return;
+    }
+
+    const buttonType = tempButton
+        ? (document.getElementById('button-type-select')?.value || button.buttonType || 'simple')
+        : (button.buttonType || 'simple');
+
+    try
+    {
+        const style = getButtonStyleFromModal(buttonType);
+        if (style)
+        {
+            button.style = style;
+        }
+        else
+        {
+            delete button.style;
+        }
+    }
+    catch
+    {
+        return;
+    }
+
+    if (!tempButton)
+    {
+        markAsChanged();
+    }
+
+    updateButtonList();
+    redraw();
+    refreshButtonGraphic();
+}
+
+function getButtonStyleFromModal(buttonType)
+{
+    const { widthInput, heightInput, colorHexInput } = getStyleControls();
+    const style = {};
+
+    const rawColor = (colorHexInput?.value || '').trim();
+    if (rawColor)
+    {
+        if (!isValidHexColor(rawColor))
+        {
+            throw new Error('Button color must be a hex value like #4ec9b0.');
+        }
+        style.color = rawColor.toLowerCase();
+    }
+
+    if (isWidthAdjustableButtonType(buttonType))
+    {
+        const rawWidth = Number(widthInput?.value);
+        const defaultWidth = getDefaultButtonWidth(buttonType);
+        if (Number.isFinite(rawWidth) && rawWidth !== defaultWidth)
+        {
+            style.width = Math.max(MinButtonFrameWidth, Math.min(MaxButtonFrameWidth, Math.round(rawWidth)));
+        }
+    }
+
+    if (isHeightAdjustableButtonType(buttonType))
+    {
+        const rawHeight = Number(heightInput?.value);
+        const defaultHeight = getDefaultButtonHeight(buttonType);
+        if (Number.isFinite(rawHeight) && rawHeight !== defaultHeight)
+        {
+            style.height = Math.max(MinButtonFrameHeight, Math.min(MaxButtonFrameHeight, Math.round(rawHeight)));
+        }
+    }
+
+    return Object.keys(style).length > 0 ? style : null;
+}
+
+function initializeButtonStyleControls()
+{
+    const { widthRange, widthInput, heightRange, heightInput, colorInput, colorHexInput, presetButtons } = getStyleControls();
+
+    const syncWidth = (value) =>
+    {
+        setModalWidthValue(value);
+        applyAppearanceControlsToActiveButton();
+    };
+    widthRange?.addEventListener('input', (event) => syncWidth(event.target.value));
+    widthInput?.addEventListener('input', (event) => syncWidth(event.target.value));
+
+    const syncHeight = (value) =>
+    {
+        setModalHeightValue(value);
+        applyAppearanceControlsToActiveButton();
+    };
+    heightRange?.addEventListener('input', (event) => syncHeight(event.target.value));
+    heightInput?.addEventListener('input', (event) => syncHeight(event.target.value));
+
+    document.getElementById('button-width-reset-btn')?.addEventListener('click', () =>
+    {
+        const activeButton = getActiveStyleButton();
+        const buttonType = tempButton
+            ? (document.getElementById('button-type-select')?.value || activeButton?.buttonType || 'simple')
+            : (activeButton?.buttonType || 'simple');
+
+        setModalWidthValue(getDefaultButtonWidth(buttonType));
+        applyAppearanceControlsToActiveButton();
+    });
+
+    document.getElementById('button-height-reset-btn')?.addEventListener('click', () =>
+    {
+        const activeButton = getActiveStyleButton();
+        const buttonType = tempButton
+            ? (document.getElementById('button-type-select')?.value || activeButton?.buttonType || 'simple')
+            : (activeButton?.buttonType || 'simple');
+
+        setModalHeightValue(getDefaultButtonHeight(buttonType));
+        applyAppearanceControlsToActiveButton();
+    });
+
+    colorInput?.addEventListener('input', (event) =>
+    {
+        setModalColorValue(event.target.value);
+        applyAppearanceControlsToActiveButton();
+    });
+    colorHexInput?.addEventListener('input', (event) =>
+    {
+        const value = event.target.value.trim();
+        if (value === '' || isValidHexColor(value))
+        {
+            setModalColorValue(value);
+            applyAppearanceControlsToActiveButton();
+        }
+    });
+
+    presetButtons.forEach(button =>
+    {
+        button.addEventListener('click', () =>
+        {
+            setModalColorValue(button.dataset.color || '');
+            applyAppearanceControlsToActiveButton();
+        });
+    });
+}
 
 function generatePageId()
 {
@@ -491,6 +1372,7 @@ let inputDetectionTimeout = null; // Track timeout to clear it when restarting
 let hatDetectionTimeout = null; // Track hat detection timeout to clear it when restarting
 let currentDetectionSessionId = null; // Track current detection session to prevent race conditions
 let currentHatDetectionSessionId = null; // Track current hat detection session
+let pendingBindingOverlayChoiceResolve = null;
 
 // Track unsaved changes
 let hasUnsavedChanges = false;
@@ -600,6 +1482,15 @@ function initializeEventListeners()
             fitToScreen();
         }
 
+        if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'd')
+        {
+            if (selectedButtonId !== null)
+            {
+                duplicateSelectedButton(e);
+            }
+            return;
+        }
+
         // Tab key to navigate pages
         if (e.key === 'Tab')
         {
@@ -618,35 +1509,121 @@ function initializeEventListeners()
     document.getElementById('button-modal-cancel').addEventListener('click', closeButtonModal);
     document.getElementById('button-modal-save').addEventListener('click', saveButtonDetails);
     document.getElementById('button-modal-delete').addEventListener('click', deleteCurrentButton);
-    document.getElementById('button-modal-detect').addEventListener('click', startInputDetection);
     document.getElementById('button-type-select').addEventListener('change', onButtonTypeChange);
-
-    // Hat detection buttons
-    document.querySelectorAll('.hat-detect-btn').forEach(btn =>
+    const buttonNameInput = document.getElementById('button-name-input');
+    if (buttonNameInput)
     {
-        btn.addEventListener('click', (e) =>
+        buttonNameInput.addEventListener('input', () =>
         {
-            const direction = e.target.dataset.direction;
-            startHatInputDetection(direction);
+            if (tempButton)
+            {
+                tempButton.name = buttonNameInput.value;
+            }
+            updateButtonAppearancePanelHeading();
+            refreshButtonGraphic();
+        });
+    }
+    initializeButtonStyleControls();
+    initializeButtonGraphicInteractions();
+
+    const simpleInputSocket = document.getElementById('button-input-socket');
+    if (simpleInputSocket)
+    {
+        // Clear button click - stop propagation to prevent input detection
+        const clearBtn = simpleInputSocket.querySelector('.socket-clear-btn');
+        if (clearBtn)
+        {
+            clearBtn.addEventListener('click', (event) =>
+            {
+                event.stopPropagation();
+                clearSimpleButtonInput();
+            });
+        }
+
+        simpleInputSocket.addEventListener('click', startInputDetection);
+        simpleInputSocket.addEventListener('mouseenter', () => setButtonGraphicHoverSlot('main', simpleInputSocket));
+        simpleInputSocket.addEventListener('mouseleave', clearButtonGraphicHoverSlot);
+        simpleInputSocket.addEventListener('contextmenu', (event) =>
+        {
+            event.preventDefault();
+            clearSimpleButtonInput();
+        });
+    }
+
+    document.querySelectorAll('.hat-input-socket').forEach(socket =>
+    {
+        // Clear button click - stop propagation to prevent input detection
+        const clearBtn = socket.querySelector('.socket-clear-btn');
+        if (clearBtn)
+        {
+            clearBtn.addEventListener('click', (event) =>
+            {
+                event.stopPropagation();
+                clearHatDirection(socket.dataset.direction);
+            });
+        }
+
+        socket.addEventListener('click', () =>
+        {
+            startHatInputDetection(socket.dataset.direction);
+        });
+        socket.addEventListener('mouseenter', () => setButtonGraphicHoverSlot(socket.dataset.direction, socket));
+        socket.addEventListener('mouseleave', clearButtonGraphicHoverSlot);
+        socket.addEventListener('contextmenu', (event) =>
+        {
+            event.preventDefault();
+            clearHatDirection(socket.dataset.direction);
         });
     });
-
-    // Hat clear buttons
-    document.querySelectorAll('.hat-clear-btn').forEach(btn =>
-    {
-        btn.addEventListener('click', (e) =>
-        {
-            const direction = e.target.dataset.direction;
-            clearHatDirection(direction);
-        });
-    });
-
-    // Simple button clear button
-    document.getElementById('button-modal-clear').addEventListener('click', clearSimpleButtonInput);
 
     // Hidden file inputs
     // Legacy image file input - removed since per-page images are now handled in page modal
     // Keep the element for backward compatibility if needed
+}
+
+function setButtonGraphicHoverSlot(slot, socket = null)
+{
+    const stage = document.querySelector('.button-graphic-stage');
+    if (!stage || !slot)
+    {
+        return;
+    }
+
+    clearButtonGraphicHoverSlot();
+    stage.dataset.hoverSlot = slot;
+
+    const targetSocket = socket || getButtonGraphicSocketForSlot(slot);
+    const isFilled = Boolean(targetSocket?.classList.contains('has-value'));
+    if (targetSocket)
+    {
+        targetSocket.classList.add('hovered-input');
+        targetSocket.classList.toggle('hovered-filled', isFilled);
+        targetSocket.classList.toggle('hovered-empty', !isFilled);
+    }
+
+    stage.querySelectorAll(`.button-graphic-svg .slot-${slot}`).forEach(element =>
+    {
+        element.classList.add('hovered-input');
+        element.classList.toggle('hovered-filled', isFilled);
+        element.classList.toggle('hovered-empty', !isFilled);
+    });
+}
+
+function clearButtonGraphicHoverSlot()
+{
+    const stage = document.querySelector('.button-graphic-stage');
+    if (stage)
+    {
+        delete stage.dataset.hoverSlot;
+        stage.querySelectorAll('.button-graphic-slot.hovered-input').forEach(element =>
+        {
+            element.classList.remove('hovered-input', 'hovered-filled', 'hovered-empty');
+        });
+        stage.querySelectorAll('.button-graphic-svg .hovered-input').forEach(element =>
+        {
+            element.classList.remove('hovered-input', 'hovered-filled', 'hovered-empty');
+        });
+    }
 }
 
 function navigatePages(direction)
@@ -743,11 +1720,13 @@ function switchStick(stick, skipRedraw = false)
     // Restore saved camera position for this stick
     if (stick === 'left')
     {
+        leftStickCamera = sanitizeCameraState(leftStickCamera);
         zoom = leftStickCamera.zoom;
         pan = { x: leftStickCamera.pan.x, y: leftStickCamera.pan.y };
     }
     else
     {
+        rightStickCamera = sanitizeCameraState(rightStickCamera);
         zoom = rightStickCamera.zoom;
         pan = { x: rightStickCamera.pan.x, y: rightStickCamera.pan.y };
     }
@@ -1061,27 +2040,91 @@ function getInputDisplayInfo(button, jsNumOverride = null)
     return info;
 }
 
+function formatPrettyInputLabel(inputValue, jsNumOverride = null)
+{
+    if (!inputValue)
+    {
+        return '—';
+    }
+
+    if (typeof inputValue === 'object')
+    {
+        if (inputValue.type === 'axis' && inputValue.id !== undefined)
+        {
+            const direction = inputValue.direction === 'positive'
+                ? ' +'
+                : inputValue.direction === 'negative'
+                    ? ' -'
+                    : '';
+            return `Axis ${inputValue.id}${direction}`;
+        }
+
+        if (inputValue.type === 'hat' && inputValue.id !== undefined)
+        {
+            const direction = inputValue.direction
+                ? ` ${String(inputValue.direction).charAt(0).toUpperCase()}${String(inputValue.direction).slice(1)}`
+                : '';
+            return `Hat ${inputValue.id}${direction}`;
+        }
+
+        if (inputValue.type === 'button' && inputValue.id !== undefined)
+        {
+            return `Button ${inputValue.id}`;
+        }
+
+        if (typeof inputValue.input === 'string')
+        {
+            return formatPrettyInputLabel(inputValue.input, jsNumOverride);
+        }
+
+        if (inputValue.id !== undefined)
+        {
+            return `Input ${inputValue.id}`;
+        }
+
+        return 'Input';
+    }
+
+    const displayInfo = getInputDisplayInfo({ inputs: { main: inputValue } }, jsNumOverride);
+    if (displayInfo.shortLabel)
+    {
+        return displayInfo.shortLabel;
+    }
+
+    return String(inputValue)
+        .replace(/^(js|gp)\d+_/i, '')
+        .replace(/_/g, ' ')
+        .replace(/([a-zA-Z])(\d)/g, '$1 $2')
+        .replace(/(\d)([a-zA-Z])/g, '$1 $2')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b\w/g, char => char.toUpperCase());
+}
+
 function updateSimpleInputPreview(button = null)
 {
     const displayInfo = getInputDisplayInfo(button);
-    const numberEl = document.getElementById('button-id-display');
-    const idEl = document.getElementById('button-full-id-display');
+    const socketEl = document.getElementById('button-input-socket');
 
-    if (!numberEl || !idEl)
+    if (!socketEl)
     {
         return;
     }
 
     if (displayInfo.shortLabel)
     {
-        numberEl.textContent = displayInfo.shortLabel;
-        idEl.textContent = displayInfo.fullId || displayInfo.shortLabel;
+        const textSpan = socketEl.querySelector('.socket-text');
+        if (textSpan) textSpan.textContent = displayInfo.shortLabel;
+        socketEl.classList.add('has-value');
     }
     else
     {
-        numberEl.textContent = '—';
-        idEl.textContent = '—';
+        const textSpan = socketEl.querySelector('.socket-text');
+        if (textSpan) textSpan.textContent = '—';
+        socketEl.classList.remove('has-value');
     }
+
+    refreshButtonGraphic();
 }
 
 // Set current stick's button array
@@ -1306,7 +2349,7 @@ function redraw()
 
     // Draw all buttons for current stick (without flip)
     // This works even if there's no background image
-    const buttons = getCurrentButtons();
+    const buttons = getButtonsInDrawOrder();
     if (Array.isArray(buttons))
     {
         // First pass: draw all connecting lines
@@ -1328,6 +2371,7 @@ function redraw()
     // Draw temp button while placing
     if (tempButton)
     {
+        drawPlacementPreview();
         drawButton(tempButton, true);
     }
 
@@ -1342,6 +2386,41 @@ window.setLoadedImage = function (img)
 {
     loadedImage = img;
 };
+
+function drawPlacementPreview()
+{
+    if (mode !== 'placing-label' || !tempButton?.buttonPos || !placementPreviewPos)
+    {
+        return;
+    }
+
+    const previewButton = {
+        ...tempButton,
+        labelPos: placementPreviewPos
+    };
+    const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim();
+    const frameWidth = getButtonFrameWidth(previewButton, ButtonFrameWidth);
+    const frameHeight = getButtonFrameHeight(previewButton, ButtonFrameHeight);
+    const frameX = placementPreviewPos.x - frameWidth / 2;
+    const frameY = placementPreviewPos.y - frameHeight / 2;
+
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    drawConnectingLine(ctx, previewButton.buttonPos, previewButton.labelPos, frameWidth / 2, accentPrimary, false);
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 0.42;
+    ctx.fillStyle = 'rgba(34, 34, 34, 0.56)';
+    ctx.strokeStyle = accentPrimary;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([8, 6]);
+    roundRect(ctx, frameX, frameY, frameWidth, frameHeight, 4);
+    ctx.fill();
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+}
 
 // Helper function to draw only the connecting line for a button
 function drawConnectingLineOnly(button)
@@ -1406,7 +2485,7 @@ function drawConnectingLineOnly(button)
 
     // Use shared drawConnectingLine function
     // Note: Need to scale offset for zoom level in template editor
-    const labelWidth = isMultiInput ? 0 : 140;
+    const labelWidth = isMultiInput ? 0 : getButtonFrameWidth(button);
     drawConnectingLine(ctx, button.buttonPos, button.labelPos, labelWidth / 2, lineColor, isMultiInput);
     ctx.restore();
 }
@@ -1459,8 +2538,11 @@ function drawButton(button, isTemp = false)
                     titleColor: '#aaa',
                     contentColor: '#ddd',
                     subtleColor: '#999',
-                    mutedColor: '#666'
-                }
+                    mutedColor: '#666',
+                    boxColor: getButtonBoxColor(button)
+                },
+                hatFrameWidth: getButtonFrameWidth(button, HatFrameWidth),
+                hatFrameHeight: getButtonFrameHeight(button, HatFrameHeight)
             });
         }
         else if (button.buttonType === 'hat2way-horizontal')
@@ -1483,8 +2565,11 @@ function drawButton(button, isTemp = false)
                     titleColor: '#aaa',
                     contentColor: '#ddd',
                     subtleColor: '#999',
-                    mutedColor: '#666'
-                }
+                    mutedColor: '#666',
+                    boxColor: getButtonBoxColor(button)
+                },
+                hatFrameWidth: getButtonFrameWidth(button, HatFrameWidth),
+                hatFrameHeight: getButtonFrameHeight(button, HatFrameHeight)
             });
         }
         else if (button.buttonType === 'toggle3way-vertical')
@@ -1508,8 +2593,11 @@ function drawButton(button, isTemp = false)
                     titleColor: '#aaa',
                     contentColor: '#ddd',
                     subtleColor: '#999',
-                    mutedColor: '#666'
-                }
+                    mutedColor: '#666',
+                    boxColor: getButtonBoxColor(button)
+                },
+                hatFrameWidth: getButtonFrameWidth(button, HatFrameWidth),
+                hatFrameHeight: getButtonFrameHeight(button, HatFrameHeight)
             });
         }
         else if (button.buttonType === 'toggle3way-horizontal')
@@ -1533,8 +2621,11 @@ function drawButton(button, isTemp = false)
                     titleColor: '#aaa',
                     contentColor: '#ddd',
                     subtleColor: '#999',
-                    mutedColor: '#666'
-                }
+                    mutedColor: '#666',
+                    boxColor: getButtonBoxColor(button)
+                },
+                hatFrameWidth: getButtonFrameWidth(button, HatFrameWidth),
+                hatFrameHeight: getButtonFrameHeight(button, HatFrameHeight)
             });
         }
         else if (button.buttonType === 'rotary3way')
@@ -1559,8 +2650,11 @@ function drawButton(button, isTemp = false)
                     titleColor: '#aaa',
                     contentColor: '#ddd',
                     subtleColor: '#999',
-                    mutedColor: '#666'
-                }
+                    mutedColor: '#666',
+                    boxColor: getButtonBoxColor(button)
+                },
+                hatFrameWidth: getButtonFrameWidth(button, HatFrameWidth),
+                hatFrameHeight: getButtonFrameHeight(button, HatFrameHeight)
             });
         }
         else if (button.buttonType === 'rotary4way')
@@ -1585,8 +2679,11 @@ function drawButton(button, isTemp = false)
                     titleColor: '#aaa',
                     contentColor: '#ddd',
                     subtleColor: '#999',
-                    mutedColor: '#666'
-                }
+                    mutedColor: '#666',
+                    boxColor: getButtonBoxColor(button)
+                },
+                hatFrameWidth: getButtonFrameWidth(button, HatFrameWidth),
+                hatFrameHeight: getButtonFrameHeight(button, HatFrameHeight)
             });
         }
         else
@@ -1620,7 +2717,7 @@ function drawButton(button, isTemp = false)
                 button.buttonType === 'rotary3way' ||
                 button.buttonType === 'rotary4way'
             );
-            drawConnectingLine(ctx, button.buttonPos, button.labelPos, isMultiInput ? 0 : ButtonFrameWidth / 2, accentPrimary, isMultiInput);
+            drawConnectingLine(ctx, button.buttonPos, button.labelPos, isMultiInput ? 0 : getButtonFrameWidth(button) / 2, accentPrimary, isMultiInput);
         }
 
         // Highlight the label box border
@@ -1648,8 +2745,8 @@ function drawButton(button, isTemp = false)
             else
             {
                 // For simple buttons, highlight the label box
-                const labelWidth = ButtonFrameWidth;
-                const labelHeight = ButtonFrameHeight;
+                const labelWidth = getButtonFrameWidth(button);
+                const labelHeight = getButtonFrameHeight(button, ButtonFrameHeight);
                 const x = button.labelPos.x - labelWidth / 2;
                 const y = button.labelPos.y - labelHeight / 2;
 
@@ -1670,7 +2767,9 @@ function getGroupedFrameBounds(button)
     }
 
     const frames = [];
-    const addFrame = (centerPos, width = HatFrameWidth, height = HatFrameHeight) =>
+    const frameWidth = getButtonFrameWidth(button, HatFrameWidth);
+    const frameHeight = getButtonFrameHeight(button, HatFrameHeight);
+    const addFrame = (centerPos, width = frameWidth, height = frameHeight) =>
     {
         if (!centerPos)
         {
@@ -1687,7 +2786,7 @@ function getGroupedFrameBounds(button)
     if (button.buttonType === 'hat4way')
     {
         const hasPush = !!button.inputs?.push;
-        const positions = getHat4WayPositions(button.labelPos.x, button.labelPos.y, hasPush);
+        const positions = getHat4WayPositions(button.labelPos.x, button.labelPos.y, hasPush, frameWidth, frameHeight);
         ['up', 'down', 'left', 'right', 'push'].forEach(dir =>
         {
             if (button.inputs && button.inputs[dir])
@@ -1699,7 +2798,7 @@ function getGroupedFrameBounds(button)
     else if (button.buttonType === 'hat2way-vertical')
     {
         const hasPush = !!button.inputs?.push;
-        const positions = getHat2WayVerticalPositions(button.labelPos.x, button.labelPos.y, hasPush);
+        const positions = getHat2WayVerticalPositions(button.labelPos.x, button.labelPos.y, hasPush, frameWidth, frameHeight);
         ['up', 'down', 'push'].forEach(dir =>
         {
             if (button.inputs && button.inputs[dir])
@@ -1711,7 +2810,7 @@ function getGroupedFrameBounds(button)
     else if (button.buttonType === 'hat2way-horizontal')
     {
         const hasPush = !!button.inputs?.push;
-        const positions = getHat2WayHorizontalPositions(button.labelPos.x, button.labelPos.y, hasPush);
+        const positions = getHat2WayHorizontalPositions(button.labelPos.x, button.labelPos.y, hasPush, frameWidth, frameHeight);
         ['left', 'right', 'push'].forEach(dir =>
         {
             if (button.inputs && button.inputs[dir])
@@ -1722,18 +2821,18 @@ function getGroupedFrameBounds(button)
     }
     else if (button.buttonType === 'toggle3way-vertical')
     {
-        const positions = getToggle3WayPositions(button.labelPos.x, button.labelPos.y, 'vertical');
+        const positions = getToggle3WayPositions(button.labelPos.x, button.labelPos.y, 'vertical', frameWidth, frameHeight);
         ['up', 'middle', 'down'].forEach(dir => addFrame(positions[dir]));
     }
     else if (button.buttonType === 'toggle3way-horizontal')
     {
-        const positions = getToggle3WayPositions(button.labelPos.x, button.labelPos.y, 'horizontal');
+        const positions = getToggle3WayPositions(button.labelPos.x, button.labelPos.y, 'horizontal', frameWidth, frameHeight);
         ['left', 'middle', 'right'].forEach(dir => addFrame(positions[dir]));
     }
     else if (button.buttonType === 'rotary3way')
     {
         const hasPush = !!button.inputs?.push;
-        const positions = getRotaryPositions(button.labelPos.x, button.labelPos.y, 3, hasPush);
+        const positions = getRotaryPositions(button.labelPos.x, button.labelPos.y, 3, hasPush, frameWidth, frameHeight);
         ['1', '2', '3'].forEach(dir => addFrame(positions[dir]));
         if (hasPush)
         {
@@ -1743,7 +2842,7 @@ function getGroupedFrameBounds(button)
     else if (button.buttonType === 'rotary4way')
     {
         const hasPush = !!button.inputs?.push;
-        const positions = getRotaryPositions(button.labelPos.x, button.labelPos.y, 4, hasPush);
+        const positions = getRotaryPositions(button.labelPos.x, button.labelPos.y, 4, hasPush, frameWidth, frameHeight);
         ['1', '2', '3', '4'].forEach(dir => addFrame(positions[dir]));
         if (hasPush)
         {
@@ -1837,12 +2936,14 @@ function onCanvasMouseDown(event)
             buttonPos: { ...coords },
             labelPos: null
         };
+        placementPreviewPos = { ...coords };
         mode = 'placing-label';
         redraw();
     } else if (mode === 'placing-label')
     {
         // Place the label position
         tempButton.labelPos = { ...coords };
+        placementPreviewPos = null;
         mode = 'view';
         redraw();
 
@@ -1898,6 +2999,14 @@ function onCanvasMouseMove(event)
             markAsChanged();
             redraw();
         }
+    }
+
+    if (mode === 'placing-label' && tempButton)
+    {
+        placementPreviewPos = getCanvasCoords(event);
+        canvas.style.cursor = 'crosshair';
+        redraw();
+        return;
     }
 
     // Update cursor
@@ -1975,7 +3084,7 @@ function onCanvasDoubleClick(event)
 function findHandleAtPosition(pos)
 {
     const handleSize = 12 / zoom; // For button position markers
-    const buttons = getCurrentButtons();
+    const buttons = getButtonsInHitTestOrder();
 
     for (const button of buttons)
     {
@@ -2037,8 +3146,8 @@ function findHandleAtPosition(pos)
             {
                 // For simple buttons, check the single label box
                 // Use world coordinates (don't divide by zoom)
-                const labelWidth = ButtonFrameWidth;
-                const labelHeight = ButtonFrameHeight;
+                const labelWidth = getButtonFrameWidth(button);
+                const labelHeight = getButtonFrameHeight(button, ButtonFrameHeight);
                 const x = button.labelPos.x - labelWidth / 2;
                 const y = button.labelPos.y - labelHeight / 2;
 
@@ -2057,7 +3166,7 @@ function findHandleAtPosition(pos)
 function findButtonAtPosition(pos)
 {
     const handleSize = 12 / zoom;
-    const buttons = getCurrentButtons();
+    const buttons = getButtonsInHitTestOrder();
 
     for (const button of buttons)
     {
@@ -2077,6 +3186,8 @@ function findButtonAtPosition(pos)
             if (button.buttonType && button.buttonType.startsWith('hat'))
             {
                 const hasPush = button.inputs && button.inputs['push'];
+                const frameWidth = getButtonFrameWidth(button, HatFrameWidth);
+                const frameHeight = getButtonFrameHeight(button, HatFrameHeight);
                 let directions, getBoundsFn;
 
                 if (button.buttonType === 'hat4way')
@@ -2103,7 +3214,7 @@ function findButtonAtPosition(pos)
                         continue;
                     }
 
-                    const bounds = getBoundsFn(dir, button.labelPos.x, button.labelPos.y, hasPush);
+                    const bounds = getBoundsFn(dir, button.labelPos.x, button.labelPos.y, hasPush, frameWidth, frameHeight);
                     if (bounds &&
                         pos.x >= bounds.x && pos.x <= bounds.x + bounds.width &&
                         pos.y >= bounds.y && pos.y <= bounds.y + bounds.height)
@@ -2114,8 +3225,8 @@ function findButtonAtPosition(pos)
             }
             else
             {
-                const labelWidth = ButtonFrameWidth;
-                const labelHeight = ButtonFrameHeight;
+                const labelWidth = getButtonFrameWidth(button);
+                const labelHeight = getButtonFrameHeight(button, ButtonFrameHeight);
                 const x = button.labelPos.x - labelWidth / 2;
                 const y = button.labelPos.y - labelHeight / 2;
 
@@ -2157,41 +3268,294 @@ function resetZoom()
 {
     if (!loadedImage) return;
 
+    const viewport = getCanvasViewportSize();
+
     // Reset to 100% zoom
     zoom = 1.0;
 
     // Center image in canvas at actual size
     const scaledWidth = loadedImage.width * zoom;
     const scaledHeight = loadedImage.height * zoom;
-    pan.x = (canvas.width - scaledWidth) / 2;
-    pan.y = (canvas.height - scaledHeight) / 2;
+    pan.x = (viewport.width - scaledWidth) / 2;
+    pan.y = (viewport.height - scaledHeight) / 2;
 
     updateZoomDisplay();
     saveCameraPosition();
     redraw();
 }
 
+function getCanvasViewportBounds()
+{
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const panel = canvas.closest('.editor-panel');
+    const margin = 16;
+    let top = rect.top;
+    let bottom = rect.bottom;
+
+    const getVisibleRect = (selector) =>
+    {
+        const element = panel?.querySelector(selector);
+        if (!element)
+        {
+            return null;
+        }
+
+        const style = window.getComputedStyle(element);
+        if (style.display === 'none' || style.visibility === 'hidden')
+        {
+            return null;
+        }
+
+        const elementRect = element.getBoundingClientRect();
+        const overlapsCanvas = elementRect.right > rect.left &&
+            elementRect.left < rect.right &&
+            elementRect.bottom > rect.top &&
+            elementRect.top < rect.bottom;
+
+        return overlapsCanvas ? elementRect : null;
+    };
+
+    const toolbarRect = getVisibleRect('.template-controls-panel');
+    if (toolbarRect)
+    {
+        top = Math.max(top, Math.min(rect.bottom, toolbarRect.bottom + margin));
+    }
+
+    const editControlsRect = getVisibleRect('.edit-controls');
+    if (editControlsRect)
+    {
+        bottom = Math.min(bottom, Math.max(rect.top, editControlsRect.top - margin));
+    }
+
+    const zoomControlsRect = getVisibleRect('.zoom-controls');
+    if (zoomControlsRect)
+    {
+        bottom = Math.min(bottom, Math.max(rect.top, zoomControlsRect.top - margin));
+    }
+
+    const width = rect.width || (canvas.width / dpr);
+    const height = Math.max(0, bottom - top) || Math.max(0, rect.height) || (canvas.height / dpr);
+
+    return {
+        left: 0,
+        top: top - rect.top,
+        right: width,
+        bottom: (top - rect.top) + height,
+        width,
+        height,
+        centerX: width / 2,
+        centerY: (top - rect.top) + (height / 2)
+    };
+}
+
+function getCanvasViewportSize()
+{
+    const viewportBounds = getCanvasViewportBounds();
+    return {
+        width: viewportBounds.width,
+        height: viewportBounds.height
+    };
+}
+
+function toFiniteNumber(value)
+{
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function sanitizeCameraState(camera)
+{
+    const safeZoom = toFiniteNumber(camera?.zoom);
+    const safePanX = toFiniteNumber(camera?.pan?.x);
+    const safePanY = toFiniteNumber(camera?.pan?.y);
+
+    return {
+        zoom: safeZoom !== null && safeZoom > 0 ? safeZoom : 1.0,
+        pan: {
+            x: safePanX ?? 0,
+            y: safePanY ?? 0
+        }
+    };
+}
+
+function isValidWorldBounds(bounds)
+{
+    return Boolean(bounds) &&
+        Number.isFinite(bounds.minX) &&
+        Number.isFinite(bounds.minY) &&
+        Number.isFinite(bounds.maxX) &&
+        Number.isFinite(bounds.maxY) &&
+        bounds.maxX >= bounds.minX &&
+        bounds.maxY >= bounds.minY;
+}
+
+function expandWorldBounds(bounds, rect)
+{
+    if (!rect ||
+        !Number.isFinite(rect.x) ||
+        !Number.isFinite(rect.y) ||
+        !Number.isFinite(rect.width) ||
+        !Number.isFinite(rect.height) ||
+        rect.width < 0 ||
+        rect.height < 0)
+    {
+        return bounds;
+    }
+
+    if (!bounds)
+    {
+        return {
+            minX: rect.x,
+            minY: rect.y,
+            maxX: rect.x + rect.width,
+            maxY: rect.y + rect.height
+        };
+    }
+
+    bounds.minX = Math.min(bounds.minX, rect.x);
+    bounds.minY = Math.min(bounds.minY, rect.y);
+    bounds.maxX = Math.max(bounds.maxX, rect.x + rect.width);
+    bounds.maxY = Math.max(bounds.maxY, rect.y + rect.height);
+    return bounds;
+}
+
+function getFrameRect(centerX, centerY, width, height)
+{
+    const safeCenterX = toFiniteNumber(centerX);
+    const safeCenterY = toFiniteNumber(centerY);
+    const safeWidth = toFiniteNumber(width);
+    const safeHeight = toFiniteNumber(height);
+
+    if (safeCenterX === null || safeCenterY === null || safeWidth === null || safeHeight === null || safeWidth < 0 || safeHeight < 0)
+    {
+        return null;
+    }
+
+    return {
+        x: safeCenterX - (safeWidth / 2),
+        y: safeCenterY - (safeHeight / 2),
+        width: safeWidth,
+        height: safeHeight
+    };
+}
+
+function getButtonVisualBounds(button)
+{
+    if (!button)
+    {
+        return null;
+    }
+
+    let bounds = null;
+    const labelPosX = toFiniteNumber(button.labelPos?.x);
+    const labelPosY = toFiniteNumber(button.labelPos?.y);
+    const isMultiInput = button.buttonType && (
+        button.buttonType.startsWith('hat') ||
+        button.buttonType === 'toggle3way-vertical' ||
+        button.buttonType === 'toggle3way-horizontal' ||
+        button.buttonType === 'rotary3way' ||
+        button.buttonType === 'rotary4way'
+    );
+    const markerRadius = isMultiInput ? 6 : 7;
+
+    if (button.buttonPos)
+    {
+        bounds = expandWorldBounds(bounds, getFrameRect(button.buttonPos.x, button.buttonPos.y, markerRadius * 2, markerRadius * 2));
+    }
+
+    if (labelPosX === null || labelPosY === null)
+    {
+        return bounds;
+    }
+
+    const groupedFrameBounds = getGroupedFrameBounds(button);
+    if (groupedFrameBounds)
+    {
+        return expandWorldBounds(bounds, groupedFrameBounds);
+    }
+
+    bounds = expandWorldBounds(bounds, getFrameRect(
+        labelPosX,
+        labelPosY,
+        getButtonFrameWidth(button),
+        getButtonFrameHeight(button, ButtonFrameHeight)
+    ));
+
+    return bounds;
+}
+
+function getFitContentBounds()
+{
+    let bounds = null;
+
+    for (const button of getCurrentButtons())
+    {
+        bounds = expandWorldBounds(bounds, getButtonVisualBounds(button));
+    }
+
+    if (isValidWorldBounds(bounds))
+    {
+        return bounds;
+    }
+
+    if (loadedImage)
+    {
+        return {
+            minX: 0,
+            minY: 0,
+            maxX: loadedImage.width,
+            maxY: loadedImage.height
+        };
+    }
+
+    return null;
+}
+
 function fitToScreen()
 {
-    if (!loadedImage) return;
+    const bounds = getFitContentBounds();
+    if (!bounds) return;
 
-    // Fit image to canvas with padding
-    const padding = 80; // More generous padding for better visibility
-    const availableWidth = canvas.width - (padding * 2);
-    const availableHeight = canvas.height - (padding * 2);
+    const viewport = getCanvasViewportBounds();
+    if (!Number.isFinite(viewport.width) || !Number.isFinite(viewport.height) || viewport.width <= 0 || viewport.height <= 0)
+    {
+        return;
+    }
 
-    const scaleX = availableWidth / loadedImage.width;
-    const scaleY = availableHeight / loadedImage.height;
-    zoom = Math.min(scaleX, scaleY);
+    // Fit button frames within the visible canvas with a little breathing room.
+    const padding = 146;
+    const availableWidth = Math.max(1, viewport.width - (padding * 2));
+    const availableHeight = Math.max(1, viewport.height - (padding * 2));
+    const contentWidth = Math.max(1, bounds.maxX - bounds.minX);
+    const contentHeight = Math.max(1, bounds.maxY - bounds.minY);
+
+    const scaleX = availableWidth / contentWidth;
+    const scaleY = availableHeight / contentHeight;
+    const nextZoom = Math.min(scaleX, scaleY);
+
+    if (!Number.isFinite(nextZoom) || nextZoom <= 0)
+    {
+        return;
+    }
+
+    zoom = nextZoom;
 
     // Clamp zoom to reasonable bounds
     zoom = Math.max(0.1, Math.min(5, zoom));
 
-    // Center image in viewport
-    const scaledWidth = loadedImage.width * zoom;
-    const scaledHeight = loadedImage.height * zoom;
-    pan.x = (canvas.width - scaledWidth) / 2;
-    pan.y = (canvas.height - scaledHeight) / 2;
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerY = (bounds.minY + bounds.maxY) / 2;
+    const nextPanX = viewport.centerX - (centerX * zoom);
+    const nextPanY = viewport.centerY - (centerY * zoom);
+
+    if (!Number.isFinite(nextPanX) || !Number.isFinite(nextPanY))
+    {
+        return;
+    }
+
+    pan.x = nextPanX;
+    pan.y = nextPanY;
 
     updateZoomDisplay();
     saveCameraPosition();
@@ -2200,7 +3564,13 @@ function fitToScreen()
 
 function updateZoomDisplay()
 {
-    document.getElementById('zoom-level').textContent = `${Math.round(zoom * 100)}%`;
+    const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1.0;
+    if (zoom !== safeZoom)
+    {
+        zoom = safeZoom;
+    }
+
+    document.getElementById('zoom-level').textContent = `${Math.round(safeZoom * 100)}%`;
 }
 
 // Button management
@@ -2229,6 +3599,7 @@ async function startAddButton()
     }
 
     mode = 'placing-button';
+    placementPreviewPos = null;
     canvas.style.cursor = 'crosshair';
     selectButton(null);
 }
@@ -2244,6 +3615,7 @@ function highlightLoadImageButton()
 function selectButton(buttonId)
 {
     selectedButtonId = buttonId;
+    const selectedButton = getSelectedButton();
 
     // Update button list UI
     document.querySelectorAll('.button-item').forEach(item =>
@@ -2259,6 +3631,16 @@ function selectButton(buttonId)
 
     // Enable/disable delete button
     document.getElementById('delete-button-btn').disabled = (buttonId === null);
+
+    setButtonAppearancePanelVisible(Boolean(selectedButton) || document.getElementById('button-modal')?.style.display === 'flex');
+    if (selectedButton)
+    {
+        populateButtonStyleControls(selectedButton);
+    }
+    else
+    {
+        updateButtonAppearancePanelHeading(null);
+    }
 
     redraw();
 }
@@ -2302,6 +3684,13 @@ async function deleteSelectedButton(event)
     const updatedButtons = buttons.filter(b => b.id !== selectedButtonId);
     setCurrentButtons(updatedButtons);
     selectedButtonId = null;
+    setButtonAppearancePanelVisible(false);
+    updateButtonAppearancePanelHeading(null);
+    const deleteButton = document.getElementById('delete-button-btn');
+    if (deleteButton)
+    {
+        deleteButton.disabled = true;
+    }
 
     markAsChanged();
     updateButtonList();
@@ -2599,15 +3988,21 @@ window.editButtonFromList = function (buttonId)
 
     // Open modal with current values
     document.getElementById('button-modal').style.display = 'flex';
+    setButtonAppearancePanelVisible(true);
     document.getElementById('button-name-input').value = button.name || '';
 
     // Set button type
     const buttonType = button.buttonType || 'simple';
     document.getElementById('button-type-select').value = buttonType;
     onButtonTypeChange(); // Update UI sections
+    populateButtonStyleControls(tempButton);
 
-    // Load buttonId for simple buttons
-    if (buttonType === 'simple')
+    // Clear stale modal socket state before repopulating current button data.
+    updateSimpleInputPreview(null);
+    resetHatDetectionButtons();
+
+    // Load single-input button bindings
+    if (buttonType === 'simple' || buttonType === 'axis')
     {
         updateSimpleInputPreview(tempButton);
     }
@@ -2641,19 +4036,19 @@ window.editButtonFromList = function (buttonId)
 function openButtonModal(button)
 {
     document.getElementById('button-modal').style.display = 'flex';
+    setButtonAppearancePanelVisible(true);
     document.getElementById('button-name-input').value = button.name || '';
 
     // Default to simple button type
     document.getElementById('button-type-select').value = 'simple';
     onButtonTypeChange();
+    populateButtonStyleControls(button);
 
-    // Clear buttonId display for new buttons
-    document.getElementById('button-id-display').textContent = '—';
-    document.getElementById('button-full-id-display').textContent = '—';
+    // Clear button input preview for new buttons
+    updateSimpleInputPreview(null);
 
-    // Reset hat detection buttons and displays
+    // Reset hat detection sockets
     resetHatDetectionButtons();
-    document.querySelectorAll('.hat-id-display').forEach(display => display.textContent = '—');
 
     // Clear any pending timeouts from previous detection session
     if (inputDetectionTimeout !== null)
@@ -2677,6 +4072,8 @@ function openButtonModal(button)
     document.getElementById('hat-detection-status').style.display = 'none';
     document.getElementById('hat-detection-status').textContent = '';
     document.getElementById('hat-detection-status').style.color = '';
+
+    resetBindingOverlayState();
 
     // Reset detectingInput flag
     detectingInput = false;
@@ -2705,11 +4102,13 @@ function closeButtonModal()
     }
 
     document.getElementById('button-modal').style.display = 'none';
+    setButtonAppearancePanelVisible(false);
 
     // Only cancel if this was a new button being placed
     if (tempButton && mode === 'placing-label')
     {
         tempButton = null;
+        placementPreviewPos = null;
         mode = 'view';
         redraw();
     }
@@ -2736,6 +4135,25 @@ async function saveButtonDetails()
 
         const buttonType = document.getElementById('button-type-select').value;
         tempButton.buttonType = buttonType;
+
+        try
+        {
+            const style = getButtonStyleFromModal(buttonType);
+            if (style)
+            {
+                tempButton.style = style;
+            }
+            else
+            {
+                delete tempButton.style;
+            }
+        }
+        catch (error)
+        {
+            const showAlert = window.showAlert || alert;
+            await showAlert(error.message, 'Invalid Style');
+            return;
+        }
 
         // Save buttonId for simple buttons
         if (buttonType === 'simple')
@@ -2866,9 +4284,33 @@ async function deleteCurrentButton(event)
 function onButtonTypeChange()
 {
     const buttonType = document.getElementById('button-type-select').value;
+    const isWidthType = isWidthAdjustableButtonType(buttonType);
+    const isHeightType = isHeightAdjustableButtonType(buttonType);
+    const styleControls = getStyleControls();
+    if (styleControls.widthSection)
+    {
+        styleControls.widthSection.style.display = isWidthType ? 'grid' : 'none';
+    }
+
+    if (styleControls.heightSection)
+    {
+        styleControls.heightSection.style.display = isHeightType ? 'grid' : 'none';
+    }
+
+    const currentWidth = normalizeButtonStyle(tempButton?.style).width;
+    if (isWidthType)
+    {
+        setModalWidthValue(currentWidth || getDefaultButtonWidth(buttonType));
+    }
+
+    const currentHeight = normalizeButtonStyle(tempButton?.style).height;
+    if (isHeightType)
+    {
+        setModalHeightValue(currentHeight || getDefaultButtonHeight(buttonType));
+    }
 
     // Show/hide appropriate input sections
-    if (buttonType === 'simple')
+    if (buttonType === 'simple' || buttonType === 'axis')
     {
         document.getElementById('simple-input-section').style.display = 'block';
         document.getElementById('hat-input-section').style.display = 'none';
@@ -2901,6 +4343,8 @@ function onButtonTypeChange()
     {
         tempButton.buttonType = buttonType;
     }
+
+    refreshButtonGraphic();
 }
 
 function updateMultiInputDisplays(inputs)
@@ -2909,10 +4353,9 @@ function updateMultiInputDisplays(inputs)
     {
         return;
     }
-
-    document.querySelectorAll('.hat-id-display').forEach(displayEl =>
+    document.querySelectorAll('.hat-input-socket').forEach(socket =>
     {
-        const dir = displayEl.dataset.direction;
+        const dir = socket.dataset.direction;
         if (!dir)
         {
             return;
@@ -2921,22 +4364,28 @@ function updateMultiInputDisplays(inputs)
         const input = inputs[dir];
         if (!input)
         {
-            displayEl.textContent = '—';
+            const textSpan = socket.querySelector('.socket-text');
+            if (textSpan) textSpan.textContent = '—';
+            socket.classList.remove('has-value');
             return;
         }
 
+        let displayText = '—';
         if (typeof input === 'string')
         {
-            const short = (typeof parseInputShortName === 'function') ? parseInputShortName(input) : input;
-            displayEl.textContent = `${short} (${input})`;
-            return;
+            displayText = formatPrettyInputLabel(input);
+        }
+        else if (typeof input === 'object')
+        {
+            displayText = formatPrettyInputLabel(input);
         }
 
-        if (typeof input === 'object' && input.id !== undefined)
-        {
-            displayEl.textContent = `Btn ${input.id}`;
-        }
+        const textSpan = socket.querySelector('.socket-text');
+        if (textSpan) textSpan.textContent = displayText;
+        socket.classList.add('has-value');
     });
+
+    refreshButtonGraphic();
 }
 
 // Helper function to update visibility of hat direction UI elements
@@ -2961,35 +4410,69 @@ function updateHatDirectionVisibility(hatType)
 
 // Helper function to detect input with dual-stage trigger support
 // When a second button is detected before the first releases, use the second one
-async function detectInputWithDualStageSupport(sessionId, timeoutSecs = 10)
+async function detectInputWithDualStageSupport(sessionId, timeoutSecs = 10, options = {})
 {
     return new Promise((resolve) =>
     {
         const detectedInputs = [];
         const collectDurationSecs = 1; // Collect inputs for 1 second after first detection (must be integer)
+        const sessionIdString = sessionId.toString();
+        let unlistenInputDetected = null;
+        let unlistenDetectionComplete = null;
+
+        const cleanupListeners = () =>
+        {
+            if (typeof unlistenInputDetected === 'function')
+            {
+                unlistenInputDetected();
+                unlistenInputDetected = null;
+            }
+
+            if (typeof unlistenDetectionComplete === 'function')
+            {
+                unlistenDetectionComplete();
+                unlistenDetectionComplete = null;
+            }
+        };
 
         // Set up event listeners for input detection
         const handleInputDetected = (event) =>
         {
-            console.log('[DUAL-STAGE] Input detected:', event.payload.input_string);
-            detectedInputs.push(event.payload);
+            const payload = event.payload;
+            if (!payload || !payload.input_string)
+            {
+                return;
+            }
+
+            if (payload.session_id && payload.session_id !== sessionIdString)
+            {
+                return;
+            }
+
+            if (typeof options.filterInput === 'function' && !options.filterInput(payload))
+            {
+                return;
+            }
+
+            if (detectedInputs.some(input => input.input_string === payload.input_string))
+            {
+                return;
+            }
+
+            console.log('[DUAL-STAGE] Input detected:', payload.input_string);
+            detectedInputs.push(payload);
+            updateBindingOverlayCapturedInputs(detectedInputs);
         };
 
-        const handleDetectionComplete = (event) =>
+        const handleDetectionComplete = async (event) =>
         {
-            if (event.payload.session_id !== sessionId.toString())
+            if (event.payload.session_id !== sessionIdString)
             {
                 return; // Ignore events from other sessions
             }
 
             console.log('[DUAL-STAGE] Detection complete, received', detectedInputs.length, 'input(s)');
-
-            // Clean up listeners
-            if (window.__TAURI__)
-            {
-                window.__TAURI__.event.once('input-detected', () => { });
-                window.__TAURI__.event.once('input-detection-complete', () => { });
-            }
+            cleanupListeners();
 
             // Determine which input to use
             if (detectedInputs.length === 0)
@@ -3004,19 +4487,23 @@ async function detectInputWithDualStageSupport(sessionId, timeoutSecs = 10)
             }
             else
             {
-                // Multiple inputs detected - use the LAST one (second stage of trigger)
-                const lastInput = detectedInputs[detectedInputs.length - 1];
                 console.log('[DUAL-STAGE] Multiple inputs detected:', detectedInputs.map(i => i.input_string).join(', '));
-                console.log('[DUAL-STAGE] Using last input (second stage):', lastInput.input_string);
-                resolve(lastInput);
+                const selectedInput = await chooseBindingOverlayInput(detectedInputs);
+                resolve(selectedInput);
             }
         };
 
         // Register event listeners
         if (window.__TAURI__)
         {
-            window.__TAURI__.event.listen('input-detected', handleInputDetected);
-            window.__TAURI__.event.listen('input-detection-complete', handleDetectionComplete);
+            window.__TAURI__.event.listen('input-detected', handleInputDetected).then(unlisten =>
+            {
+                unlistenInputDetected = unlisten;
+            });
+            window.__TAURI__.event.listen('input-detection-complete', handleDetectionComplete).then(unlisten =>
+            {
+                unlistenDetectionComplete = unlisten;
+            });
         }
 
         // Start the detection process
@@ -3027,6 +4514,7 @@ async function detectInputWithDualStageSupport(sessionId, timeoutSecs = 10)
         }).catch(error =>
         {
             console.error('[DUAL-STAGE] Detection error:', error);
+            cleanupListeners();
             resolve(null);
         });
     });
@@ -3041,17 +4529,19 @@ async function startHatInputDetection(direction)
     }
 
     detectingInput = true;
-    const btn = document.querySelector(`[data-direction="${direction}"]`);
-    const originalText = btn.textContent;
-    btn.textContent = 'Detecting...';
+    const btn = document.querySelector(`.hat-input-socket[data-direction="${direction}"]`);
+    if (!btn)
+    {
+        detectingInput = false;
+        return;
+    }
+    btn.classList.add('detecting');
     btn.disabled = true;
-
-    document.getElementById('hat-detection-status').textContent = `Press ${direction}...`;
-    document.getElementById('hat-detection-status').style.display = 'block';
-    document.getElementById('hat-detection-status').style.color = '';
+    showBindingOverlay(`Press ${formatBindingOverlayLabel(direction)}`, 'Waiting for hat input...', 10);
 
     // Generate unique session ID for this detection
     const thisSessionId = Date.now() + Math.random();
+    let delayOverlayDismiss = false;
     currentHatDetectionSessionId = thisSessionId;
     console.log('[HAT-DETECTION] Starting hat detection session:', thisSessionId, 'for direction:', direction);
 
@@ -3131,41 +4621,16 @@ async function startHatInputDetection(direction)
 
                 // Store the complete SC format string (e.g., "js1_hat1_up" or "js1_button15")
                 tempButton.inputs[direction] = adjustedInputString;
-
-                // Update display to show the detected input
-                const match = adjustedInputString.match(/button(\d+)/);
-                if (match)
-                {
-                    const buttonId = parseInt(match[1]);
-                    const display = document.querySelector(`[data-direction="${direction}"].hat-id-display`);
-                    if (display)
-                    {
-                        display.textContent = `${buttonId} (${adjustedInputString})`;
-                    }
-                }
-                else
-                {
-                    // For hat inputs, just show the full string
-                    const display = document.querySelector(`[data-direction="${direction}"].hat-id-display`);
-                    if (display)
-                    {
-                        display.textContent = adjustedInputString;
-                    }
-                }
             }
 
             // Use shared utility for display name
             const displayText = parseInputShortName(result.input_string);
 
-            // Update button to show it's detected
-            btn.textContent = `✓ (${displayText})`;
-
             const hatDisplayText = (typeof parseInputShortName === 'function')
                 ? parseInputShortName(adjustedInputString)
                 : (result.display_name || adjustedInputString);
 
-            document.getElementById('hat-detection-status').textContent = `${direction}: ${hatDisplayText}`;
-            document.getElementById('hat-detection-status').style.color = '#5cb85c';
+            updateMultiInputDisplays(tempButton?.inputs || {});
 
             // Clear any existing timeout
             if (hatDetectionTimeout !== null)
@@ -3182,28 +4647,35 @@ async function startHatInputDetection(direction)
         }
         else
         {
-            btn.textContent = originalText;
-            document.getElementById('hat-detection-status').textContent = 'Timeout - try again';
-            document.getElementById('hat-detection-status').style.color = '#ef4444';
+            stopBindingOverlayCountdown({ hideTimer: false });
+            setBindingOverlayTimer('Timed Out', { isError: true });
+            delayOverlayDismiss = true;
         }
     }
     catch (error)
     {
         console.error('Error detecting input:', error);
-        btn.textContent = originalText;
-        document.getElementById('hat-detection-status').textContent = `Error: ${error}`;
-        document.getElementById('hat-detection-status').style.color = '#ef4444';
+        stopBindingOverlayCountdown({ hideTimer: false });
+        setBindingOverlayTimer(`Error: ${error}`, { isError: true });
+        delayOverlayDismiss = true;
     }
     finally
     {
-        // Only clear session if this was the active session
-        if (currentHatDetectionSessionId === thisSessionId)
+        const isActiveSession = currentHatDetectionSessionId === thisSessionId;
+        if (isActiveSession)
         {
+            if (delayOverlayDismiss)
+            {
+                await delay(1500);
+            }
+
+            hideBindingOverlay();
             console.log('[HAT-DETECTION] Cleaning up session:', thisSessionId);
             currentHatDetectionSessionId = null;
+            detectingInput = false;
+            btn.disabled = false;
+            btn.classList.remove('detecting');
         }
-        detectingInput = false;
-        btn.disabled = false;
     }
 }
 
@@ -3217,21 +4689,43 @@ async function startInputDetection()
     }
 
     detectingInput = true;
-    document.getElementById('button-modal-detect').textContent = 'Detecting...';
-    document.getElementById('button-modal-detect').classList.add('btn-primary');
-    document.getElementById('button-modal-detect').disabled = true;
-    document.getElementById('input-detection-status').textContent = 'Press any button or move any axis on your joystick...';
-    document.getElementById('input-detection-status').style.display = 'block';
+    const selectedButtonType = document.getElementById('button-type-select')?.value || tempButton?.buttonType || 'simple';
+    const axisOnlyDetection = selectedButtonType === 'axis';
+    const simpleSocket = document.getElementById('button-input-socket');
+    simpleSocket?.classList.add('detecting');
+    if (simpleSocket)
+    {
+        simpleSocket.disabled = true;
+    }
+    showBindingOverlay(
+        axisOnlyDetection ? 'Move Axis' : 'Press Button',
+        axisOnlyDetection ? 'Listening for axis input...' : 'Listening for joystick input...',
+        10
+    );
 
     // Generate unique session ID for this detection
     const thisSessionId = Date.now() + Math.random();
+    let delayOverlayDismiss = false;
     currentDetectionSessionId = thisSessionId;
     console.log('[INPUT-DETECTION] Starting detection session:', thisSessionId);
 
     try
     {
         // Use enhanced detection with dual-stage trigger support
-        const result = await detectInputWithDualStageSupport(thisSessionId, 10);
+        const result = await detectInputWithDualStageSupport(thisSessionId, 10, {
+            filterInput: axisOnlyDetection
+                ? (payload) =>
+                {
+                    if (!payload || typeof payload.input_string !== 'string')
+                    {
+                        return false;
+                    }
+
+                    const hidName = payload.hid_axis_name ? payload.hid_axis_name.toLowerCase().replace(/\s+/g, '') : '';
+                    return payload.input_string.includes('_axis') && hidName !== 'hatswitch';
+                }
+                : null
+        });
 
         // Check if this session is still active
         if (currentDetectionSessionId !== thisSessionId)
@@ -3321,7 +4815,7 @@ async function startInputDetection()
             // Store the adjusted Star Citizen format string in tempButton
             if (tempButton)
             {
-                tempButton.buttonType = 'simple';
+                tempButton.buttonType = axisOnlyDetection ? 'axis' : 'simple';
                 // Only set name if it's currently empty
                 if (!tempButton.name)
                 {
@@ -3337,7 +4831,7 @@ async function startInputDetection()
 
                 const buttonMatch = adjustedInputString.match(/button(\d+)/);
                 const axisNumericMatch = adjustedInputString.match(/axis(\d+)(?:_(positive|negative))?/);
-                const axisSCMatch = adjustedInputString.match(/^(js|gp)\d+_(x|y|z|rotx|roty|rotz|slider1|slider2)$/);
+                const axisSCMatch = adjustedInputString.match(/^(js|gp)\d+_(x|y|z|rotx|roty|rotz|slider1|slider2)(?:_(positive|negative))?$/);
                 const hatMatch = adjustedInputString.match(/hat(\d+)_(up|down|left|right)/);
 
                 if (hatMatch)
@@ -3375,7 +4869,7 @@ async function startInputDetection()
                     tempButton.inputId = typeof ensureSliderNumber === 'function'
                         ? ensureSliderNumber(axisSCMatch[2])
                         : ensureTemplateSliderNumber(axisSCMatch[2]);
-                    delete tempButton.axisDirection;
+                    tempButton.axisDirection = axisSCMatch[3] || null;
                 }
                 else
                 {
@@ -3389,9 +4883,6 @@ async function startInputDetection()
             }
 
             // Show confirmation
-            document.getElementById('input-detection-status').textContent = `Detected: ${inputName}`;
-            document.getElementById('input-detection-status').style.color = '#5cb85c';
-
             // Clear any existing timeout
             if (inputDetectionTimeout !== null)
             {
@@ -3408,9 +4899,9 @@ async function startInputDetection()
         }
         else
         {
-            // Timeout
-            document.getElementById('input-detection-status').textContent = 'No input detected - timed out';
-            document.getElementById('input-detection-status').style.color = '#ef4444';
+            stopBindingOverlayCountdown({ hideTimer: false });
+            setBindingOverlayTimer('Timed Out', { isError: true });
+            delayOverlayDismiss = true;
 
             // Clear any existing timeout
             if (inputDetectionTimeout !== null)
@@ -3429,21 +4920,31 @@ async function startInputDetection()
     catch (error)
     {
         console.error('Error detecting input:', error);
-        document.getElementById('input-detection-status').textContent = `Error: ${error}`;
-        document.getElementById('input-detection-status').style.color = '#ef4444';
+        stopBindingOverlayCountdown({ hideTimer: false });
+        setBindingOverlayTimer(`Error: ${error}`, { isError: true });
+        delayOverlayDismiss = true;
     }
     finally
     {
-        // Only clear session if this was the active session
-        if (currentDetectionSessionId === thisSessionId)
+        const isActiveSession = currentDetectionSessionId === thisSessionId;
+        if (isActiveSession)
         {
+            if (delayOverlayDismiss)
+            {
+                await delay(1500);
+            }
+
+            hideBindingOverlay();
             console.log('[INPUT-DETECTION] Cleaning up session:', thisSessionId);
             currentDetectionSessionId = null;
+            detectingInput = false;
+            const simpleSocket = document.getElementById('button-input-socket');
+            simpleSocket?.classList.remove('detecting');
+            if (simpleSocket)
+            {
+                simpleSocket.disabled = false;
+            }
         }
-        detectingInput = false;
-        document.getElementById('button-modal-detect').textContent = '🎮 Detect Input';
-        document.getElementById('button-modal-detect').classList.remove('btn-primary');
-        document.getElementById('button-modal-detect').disabled = false;
     }
 }
 
@@ -3468,10 +4969,14 @@ function stopInputDetection()
     currentHatDetectionSessionId = null;
 
     detectingInput = false;
-    document.getElementById('button-modal-detect').textContent = '🎮 Detect Input';
-    document.getElementById('button-modal-detect').classList.remove('btn-primary');
-    document.getElementById('button-modal-detect').disabled = false;
+    const simpleSocket = document.getElementById('button-input-socket');
+    simpleSocket?.classList.remove('detecting');
+    if (simpleSocket)
+    {
+        simpleSocket.disabled = false;
+    }
     document.getElementById('input-detection-status').style.display = 'none';
+    resetBindingOverlayState();
 }
 
 // Clear simple button input
@@ -3500,21 +5005,9 @@ function clearHatDirection(direction)
         delete tempButton.inputs[direction];
     }
 
-    const display = document.querySelector(`[data-direction="${direction}"].hat-id-display`);
-    if (display)
-    {
-        display.textContent = '—';
-    }
-
-    const btn = document.querySelector(`[data-direction="${direction}"].hat-detect-btn`);
-    if (btn)
-    {
-        const direction_label = direction.charAt(0).toUpperCase() + direction.slice(1);
-        const emoji = { up: '⬆️', down: '⬇️', left: '⬅️', right: '➡️', push: '⬇️' }[direction];
-        btn.textContent = `${emoji} Detect ${direction_label}`;
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-secondary');
-    }
+    updateMultiInputDisplays(tempButton.inputs || {});
+    document.getElementById('hat-detection-status').style.display = 'none';
+    resetBindingOverlayState();
 
     markAsChanged();
 }
@@ -3523,6 +5016,28 @@ function clearHatDirection(direction)
 // Helper function to prepare save data
 function prepareSaveData()
 {
+    const serializeButton = (b) =>
+    {
+        const style = normalizeButtonStyle(b.style);
+        const savedButton = {
+            id: b.id,
+            name: b.name,
+            buttonPos: b.buttonPos,
+            labelPos: b.labelPos,
+            buttonType: b.buttonType || 'simple',
+            inputs: b.inputs || {},
+            inputType: b.inputType,
+            inputId: b.inputId
+        };
+
+        if (Object.keys(style).length > 0)
+        {
+            savedButton.style = style;
+        }
+
+        return savedButton;
+    };
+
     // Prepare data for saving - only pages array is used now
     return {
         name: templateData.name,
@@ -3541,16 +5056,7 @@ function prepareSaveData()
             image_path: page.image_path || '',
             image_data_url: page.image_data_url || null,
             mirror_from_page_id: page.mirror_from_page_id || '',
-            buttons: (page.buttons || []).map(b => ({
-                id: b.id,
-                name: b.name,
-                buttonPos: b.buttonPos,
-                labelPos: b.labelPos,
-                buttonType: b.buttonType || 'simple',
-                inputs: b.inputs || {},
-                inputType: b.inputType,
-                inputId: b.inputId
-            }))
+            buttons: (page.buttons || []).map(serializeButton)
         })) : []
     };
 }
@@ -3591,7 +5097,7 @@ function showSaveNotification(viewerUpdated = false)
 }
 
 // Helper function to save template to a given file path
-async function performSave(filePath, showNotification = true)
+async function performSave(filePath, showNotification = true, showErrorAlert = true)
 {
     const showAlert = window.showAlert || alert;
 
@@ -3603,6 +5109,7 @@ async function performSave(filePath, showNotification = true)
             filePath,
             templateJson: JSON.stringify(saveData, null, 2)
         });
+        hideBindingOverlay();
 
         // Update current file path for future saves
         currentTemplateFilePath = filePath;
@@ -3654,13 +5161,38 @@ async function performSave(filePath, showNotification = true)
             showSaveNotification(viewerUpdated);
         }
 
-        return true;
+        return { success: true };
     } catch (error)
     {
         console.error('Error saving template:', error);
-        await showAlert(`Failed to save template: ${error}`, 'Error');
-        return false;
+        if (showErrorAlert)
+        {
+            await showAlert(`Failed to save template: ${error}`, 'Error');
+        }
+        return { success: false, error };
     }
+}
+
+async function promptForTemplateSavePath(defaultPath = undefined)
+{
+    return await save({
+        filters: [{
+            name: 'Joystick Template',
+            extensions: ['json']
+        }],
+        defaultPath
+    });
+}
+
+async function saveTemplateWithDialog(defaultPath = undefined)
+{
+    const filePath = await promptForTemplateSavePath(defaultPath);
+    if (!filePath)
+    {
+        return { success: false, cancelled: true };
+    }
+
+    return await performSave(filePath, true);
 }
 
 // Save to current file (auto-save), or show dialog if no current file
@@ -3701,7 +5233,21 @@ async function saveTemplate()
     // If we have a current file path, save directly without dialog
     if (currentTemplateFilePath)
     {
-        await performSave(currentTemplateFilePath, true);
+        const result = await performSave(currentTemplateFilePath, true, false);
+        if (result.success)
+        {
+            return;
+        }
+
+        if (isMissingPathSaveError(result.error))
+        {
+            clearCurrentTemplateFilePath();
+            await showAlert('The previous template save location is no longer available. Choose a new location to save this template.', 'Save Location Missing');
+            await saveTemplateWithDialog();
+            return;
+        }
+
+        await showAlert(`Failed to save template: ${result.error}`, 'Error');
         return;
     }
 
@@ -3719,17 +5265,7 @@ async function saveTemplate()
             resourceDir = undefined;
         }
 
-        const filePath = await save({
-            filters: [{
-                name: 'Joystick Template',
-                extensions: ['json']
-            }],
-            defaultPath: resourceDir
-        });
-
-        if (!filePath) return; // User cancelled
-
-        await performSave(filePath, true);
+        await saveTemplateWithDialog(resourceDir);
     } catch (error)
     {
         console.error('Error saving template:', error);
@@ -3791,18 +5327,7 @@ async function saveTemplateAs()
             resourceDir = undefined;
         }
 
-        // Always show file picker for Save As
-        const filePath = await save({
-            filters: [{
-                name: 'Joystick Template',
-                extensions: ['json']
-            }],
-            defaultPath: resourceDir
-        });
-
-        if (!filePath) return; // User cancelled
-
-        await performSave(filePath, true);
+        await saveTemplateWithDialog(resourceDir);
     } catch (error)
     {
         console.error('Error saving template:', error);
@@ -3949,6 +5474,7 @@ async function loadTemplate()
         }
         else if (templateData.imageDataUrl)
         {
+            hideBindingOverlay();
             const img = new Image();
             img.onload = () =>
             {
@@ -3977,34 +5503,16 @@ async function loadTemplate()
 // Helper functions for hat detection buttons
 function resetHatDetectionButtons()
 {
-    document.querySelectorAll('.hat-detect-btn').forEach(btn =>
+    document.querySelectorAll('.hat-input-socket').forEach(btn =>
     {
-        const direction = btn.dataset.direction;
-        const emojiMap = {
-            up: '⬆️',
-            down: '⬇️',
-            left: '⬅️',
-            right: '➡️',
-            middle: '⏺',
-            push: '⏺',
-            '1': '1️⃣',
-            '2': '2️⃣',
-            '3': '3️⃣',
-            '4': '4️⃣'
-        };
-
-        const emoji = emojiMap[direction] || '🎮';
-        const label = (direction === 'middle')
-            ? 'Middle'
-            : (direction === 'push')
-                ? 'Push'
-                : (String(direction).match(/^\d+$/) ? `Position ${direction}` : direction.charAt(0).toUpperCase() + direction.slice(1));
-
-        btn.textContent = `${emoji} Detect ${label}`;
-        btn.classList.remove('btn-primary');
-        btn.classList.add('btn-secondary');
+        btn.classList.remove('has-value', 'detecting');
+        btn.disabled = false;
+        const textSpan = btn.querySelector('.socket-text');
+        if (textSpan) textSpan.textContent = '—';
     });
     document.getElementById('hat-detection-status').style.display = 'none';
+    resetBindingOverlayState();
+    hideBindingOverlay();
 }
 
 function updateHatDetectionButtons(inputs)
@@ -4012,39 +5520,10 @@ function updateHatDetectionButtons(inputs)
     Object.keys(inputs).forEach(direction =>
     {
         const input = inputs[direction];
-        const btn = document.querySelector(`[data-direction="${direction}"].hat-detect-btn`);
-        if (btn && input)
+        const socket = document.querySelector(`.hat-input-socket[data-direction="${direction}"]`);
+        if (socket && input)
         {
-            const emojiMap = {
-                up: '⬆️',
-                down: '⬇️',
-                left: '⬅️',
-                right: '➡️',
-                middle: '⏺',
-                push: '⏺',
-                '1': '1️⃣',
-                '2': '2️⃣',
-                '3': '3️⃣',
-                '4': '4️⃣'
-            };
-            const emoji = emojiMap[direction] || '🎮';
-
-            // Handle both string format (js1_button3) and object format ({id: 3})
-            let displayText = '';
-            if (typeof input === 'string')
-            {
-                displayText = parseInputShortName(input);
-            }
-            else if (typeof input === 'object' && input.id !== undefined)
-            {
-                displayText = `Btn ${input.id}`;
-            }
-            else
-            {
-                return; // Skip if we can't parse it
-            }
-
-            btn.textContent = `${emoji} ✓ (${displayText})`;
+            socket.classList.add('has-value');
         }
     });
 }
@@ -4119,11 +5598,11 @@ function loadPersistedTemplate()
 
             if (savedLeftCamera)
             {
-                leftStickCamera = JSON.parse(savedLeftCamera);
+                leftStickCamera = sanitizeCameraState(JSON.parse(savedLeftCamera));
             }
             if (savedRightCamera)
             {
-                rightStickCamera = JSON.parse(savedRightCamera);
+                rightStickCamera = sanitizeCameraState(JSON.parse(savedRightCamera));
             }
 
             // Load the data

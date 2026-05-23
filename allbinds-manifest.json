@@ -1,0 +1,8 @@
+{
+    "dataVersion": "2026-05-23-initial",
+    "gameVersion": "",
+    "minAppVersion": "1.2.0",
+    "sha256": "43359cf399c34d2257d65abccd11699a0d0248549451930082ca693a1487edf1",
+    "downloadUrl": "https://raw.githubusercontent.com/BoxximusPrime/Boxxy-Binder/main/AllBinds.xml",
+    "notes": "Initial manifest for remotely updating the bundled base bindings database."
+}

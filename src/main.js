@@ -5,21 +5,7 @@ import { toStarCitizenFormat } from './input-utils.js';
 import { initializeUpdateChecker } from './update-checker.js';
 import { Tooltip } from './tooltip.js';
 import { CustomDropdown } from './custom-dropdown.js';
-
-// Track if any errors have been logged this session
-let hasLoggedErrors = false;
-
-// Helper function to show error indicator
-function showErrorIndicator()
-{
-  if (hasLoggedErrors) return; // Already showing
-  hasLoggedErrors = true;
-  const errorIcon = document.getElementById('debug-log-error-icon');
-  if (errorIcon)
-  {
-    errorIcon.style.display = 'inline';
-  }
-}
+import patchNotesData from './patch-notes.json';
 
 // Global error handler for uncaught errors
 window.addEventListener('error', async (event) =>
@@ -31,7 +17,6 @@ window.addEventListener('error', async (event) =>
       message: event.error?.message || event.message || 'Unknown error',
       stack: event.error?.stack || null
     });
-    showErrorIndicator();
   } catch (e)
   {
     console.error('Failed to log error to backend:', e);
@@ -48,7 +33,6 @@ window.addEventListener('unhandledrejection', async (event) =>
       message: event.reason?.message || String(event.reason) || 'Unknown promise rejection',
       stack: event.reason?.stack || null
     });
-    showErrorIndicator();
   } catch (e)
   {
     console.error('Failed to log promise rejection to backend:', e);
@@ -85,7 +69,6 @@ window.logError = async (message, stack = null) =>
   try
   {
     await invoke('log_error', { message, stack });
-    showErrorIndicator();
   } catch (e)
   {
     console.error('Failed to log error to backend:', e);
@@ -258,10 +241,205 @@ window.showAlert = showAlert;
 // WHAT'S NEW MODAL
 // ============================================================================
 
+function parseSeriesValue(series)
+{
+  const [majorPart = '0', minorPart = '0'] = String(series).split('.');
+  return {
+    major: Number.parseInt(majorPart, 10) || 0,
+    minor: Number.parseInt(minorPart, 10) || 0
+  };
+}
+
+function compareSeriesDescending(leftSeries, rightSeries)
+{
+  const left = parseSeriesValue(leftSeries);
+  const right = parseSeriesValue(rightSeries);
+
+  if (left.major !== right.major)
+  {
+    return right.major - left.major;
+  }
+
+  return right.minor - left.minor;
+}
+
+function parseVersionValue(version)
+{
+  const [majorPart = '0', minorPart = '0', patchPart = '0'] = String(version).split('.');
+  return {
+    major: Number.parseInt(majorPart, 10) || 0,
+    minor: Number.parseInt(minorPart, 10) || 0,
+    patch: Number.parseInt(patchPart, 10) || 0
+  };
+}
+
+function compareVersionsDescending(leftVersion, rightVersion)
+{
+  const left = parseVersionValue(leftVersion);
+  const right = parseVersionValue(rightVersion);
+
+  if (left.major !== right.major)
+  {
+    return right.major - left.major;
+  }
+
+  if (left.minor !== right.minor)
+  {
+    return right.minor - left.minor;
+  }
+
+  return right.patch - left.patch;
+}
+
+function getReleaseSeries(version)
+{
+  const [majorPart = '0', minorPart = '0'] = String(version).split('.');
+  return `${Number.parseInt(majorPart, 10) || 0}.${Number.parseInt(minorPart, 10) || 0}`;
+}
+
+function getVisiblePatchNoteGroups(currentVersion, maxGroups = 2)
+{
+  const currentSeries = getReleaseSeries(currentVersion);
+  const groupedReleaseMap = new Map();
+
+  (patchNotesData.releases || []).forEach(release =>
+  {
+    const series = getReleaseSeries(release.version);
+
+    if (!groupedReleaseMap.has(series))
+    {
+      groupedReleaseMap.set(series, []);
+    }
+
+    groupedReleaseMap.get(series).push(release);
+  });
+
+  const sortedGroups = [...groupedReleaseMap.entries()]
+    .map(([series, releases]) => ({
+      series,
+      label: `v${series}.x`,
+      releases: [...releases].sort((left, right) => compareVersionsDescending(left.version, right.version))
+    }))
+    .sort((left, right) => compareSeriesDescending(left.series, right.series));
+
+  const currentIndex = sortedGroups.findIndex(group => group.series === currentSeries);
+
+  if (currentIndex === -1)
+  {
+    return sortedGroups.slice(0, maxGroups);
+  }
+
+  return sortedGroups.slice(currentIndex, currentIndex + maxGroups);
+}
+
+function createWhatsNewList(items)
+{
+  const list = document.createElement('ul');
+
+  items.forEach(item =>
+  {
+    const listItem = document.createElement('li');
+    listItem.innerHTML = item;
+    list.appendChild(listItem);
+  });
+
+  return list;
+}
+
+function renderPatchNoteSection(title, items)
+{
+  if (!Array.isArray(items) || items.length === 0) return null;
+
+  const wrapper = document.createElement('div');
+
+  if (title)
+  {
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    wrapper.appendChild(heading);
+  }
+
+  wrapper.appendChild(createWhatsNewList(items));
+
+  return wrapper.childElementCount > 0 ? wrapper : null;
+}
+
+function renderPatchNoteRelease(release)
+{
+  const releaseFragment = document.createDocumentFragment();
+  const releaseHeading = document.createElement('h3');
+  releaseHeading.textContent = `v${release.version}`;
+  releaseFragment.appendChild(releaseHeading);
+
+  Object.entries(release.notes || {}).forEach(([title, items]) =>
+  {
+    const sectionElement = renderPatchNoteSection(title, items);
+
+    if (sectionElement)
+    {
+      releaseFragment.appendChild(sectionElement);
+    }
+  });
+
+  return releaseFragment;
+}
+
+function renderWhatsNewContent(currentVersion)
+{
+  const container = document.getElementById('whats-new-content');
+  if (!container) return;
+
+  container.innerHTML = '';
+
+  const visibleGroups = getVisiblePatchNoteGroups(currentVersion, 2);
+
+  visibleGroups.forEach(group =>
+  {
+    const section = document.createElement('div');
+    section.className = 'whats-new-version-section';
+
+    const toggleButton = document.createElement('button');
+    toggleButton.className = 'whats-new-version-toggle';
+    toggleButton.dataset.target = `whats-new-${group.series.replace(/\./g, '-')}`;
+    toggleButton.type = 'button';
+
+    const arrow = document.createElement('span');
+    arrow.className = 'version-toggle-arrow';
+    arrow.textContent = '▼';
+
+    const label = document.createElement('span');
+    label.className = 'version-toggle-label';
+    label.textContent = group.label;
+
+    toggleButton.appendChild(arrow);
+    toggleButton.appendChild(label);
+
+    const content = document.createElement('div');
+    content.className = 'whats-new-version-content';
+    content.id = toggleButton.dataset.target;
+    content.style.display = 'block';
+
+    const contentSection = document.createElement('div');
+    contentSection.className = 'whats-new-section';
+
+    (group.releases || []).forEach(release =>
+    {
+      contentSection.appendChild(renderPatchNoteRelease(release));
+    });
+
+    content.appendChild(contentSection);
+    section.appendChild(toggleButton);
+    section.appendChild(content);
+    container.appendChild(section);
+  });
+}
+
 function initializeWhatsNewModal()
 {
-  const CURRENT_VERSION = '1.1.4';
+  const CURRENT_VERSION = '1.2.0';
   const WHATS_NEW_KEY = 'whatsNew';
+
+  renderWhatsNewContent(CURRENT_VERSION);
 
   // Check if the stored version matches the current version
   const storedVersion = localStorage.getItem(WHATS_NEW_KEY);
@@ -275,7 +453,7 @@ function initializeWhatsNewModal()
 
 function showWhatsNewModal()
 {
-  const CURRENT_VERSION = '1.1.4';
+  const CURRENT_VERSION = '1.2.0';
   const WHATS_NEW_KEY = 'whatsNew';
 
   const modal = document.getElementById('whats-new-modal');
@@ -329,15 +507,13 @@ function setupWhatsNewToggles()
       e.preventDefault();
       e.stopPropagation();
 
-      const version = newButton.dataset.version;
-      // Convert 0.9.1 to 091, 0.9.0 to 090
-      const contentId = `whats-new-${version.replace(/\./g, '')}`;
+      const contentId = newButton.dataset.target;
       const content = document.getElementById(contentId);
       const arrow = newButton.querySelector('.version-toggle-arrow');
 
       if (!content || !arrow)
       {
-        console.warn(`Could not find content for version ${version}, id: ${contentId}`);
+        console.warn(`Could not find patch notes content for target: ${contentId}`);
         return;
       }
 
@@ -762,6 +938,15 @@ function switchBindingsView(viewName)
       window.refreshVisualView(preserveView);
     }
   }
+  else if (window.setVisualInputHighlightActive)
+  {
+    window.setVisualInputHighlightActive(false);
+  }
+
+  if ((viewName === 'visual' || viewName === 'split') && window.setVisualInputHighlightActive)
+  {
+    window.setVisualInputHighlightActive(true);
+  }
 
   // If switching to controls view, initialize it
   if (viewName === 'controls')
@@ -1068,6 +1253,11 @@ function switchTab(tabName)
     {
       window.initializeDeviceManager();
     }
+  }
+
+  if (tabName !== 'bindings' && window.setVisualInputHighlightActive)
+  {
+    window.setVisualInputHighlightActive(false);
   }
 }
 
@@ -1838,47 +2028,55 @@ window.updateUnsavedIndicator = updateUnsavedIndicator;
 })();
 
 // =====================
-// INITIALIZE LOG FILE PATH
+// INITIALIZE SETTINGS LOG SECTION
 // =====================
 (async () =>
 {
   try
   {
     const logPath = await invoke('get_log_file_path');
-    const logPathElement = document.getElementById('debug-log-path');
+    const logPathDisplay = document.getElementById('log-path-display');
+    const copyLogPathBtn = document.getElementById('copy-log-path-btn');
 
-    if (logPathElement)
+    if (!logPathDisplay || !copyLogPathBtn)
     {
-      logPathElement.title = `Log file: ${logPath}\nClick to copy path`;
-      logPathElement.addEventListener('click', async () =>
+      return;
+    }
+
+    logPathDisplay.textContent = logPath;
+    logPathDisplay.title = `Log file: ${logPath}`;
+    copyLogPathBtn.addEventListener('click', async () =>
+    {
+      try
       {
-        try
+        await navigator.clipboard.writeText(logPath);
+        if (window.toast)
         {
-          await navigator.clipboard.writeText(logPath);
-          if (window.toast)
-          {
-            window.toast.success('Log path copied to clipboard');
-          } else
-          {
-            const originalText = logPathElement.textContent;
-            logPathElement.textContent = '✓ Copied!';
-            setTimeout(() =>
-            {
-              logPathElement.textContent = originalText;
-            }, 2000);
-          }
-        } catch (e)
+          window.toast.success('Log path copied to clipboard');
+        } else
         {
-          console.error('Failed to copy to clipboard:', e);
           await showAlert(`Log file path:\n${logPath}`, 'Log File Path');
         }
-      });
-
-      await logInfo(`Application started - version ${await invoke('get_app_version')}`);
-    }
+      } catch (error)
+      {
+        console.error('Failed to copy to clipboard:', error);
+        await showAlert(`Log file path:\n${logPath}`, 'Log File Path');
+      }
+    });
   } catch (error)
   {
-    console.error('Failed to get log file path:', error);
+    console.error('Failed to initialize settings log section:', error);
+
+    const logPathDisplay = document.getElementById('log-path-display');
+    const copyLogPathBtn = document.getElementById('copy-log-path-btn');
+    if (logPathDisplay)
+    {
+      logPathDisplay.textContent = 'Unable to load log path';
+    }
+    if (copyLogPathBtn)
+    {
+      copyLogPathBtn.disabled = true;
+    }
   }
 })();
 

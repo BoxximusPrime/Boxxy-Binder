@@ -11,11 +11,11 @@
 
   /* Background Palette */
   --bg-darkest: #000000;
-  --bg-dark: #050b14;
-  --bg-medium: #0f172a;
-  --bg-medium-light: #1e293b;
-  --bg-light: #1e293b;
-  --bg-lighter: #334155;
+  --bg-dark: #0a0806;
+  --bg-medium: #141210;
+  --bg-medium-light: #1e1c1a;
+  --bg-light: #1e1c1a;
+  --bg-lighter: #353330;
   --bg-modal: #121214;
 
   /* Accent Colors */
@@ -1972,6 +1972,7 @@ body.is-action-dragging {
   align-items: center;
   gap: 0.5rem;
   transition: all 0.2s ease;
+  margin: 2px;
 }
 
 .binding-tag.keyboard {
@@ -2662,6 +2663,15 @@ body.is-action-dragging {
   font-weight: 500;
 }
 
+#button-type-select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: #000 !important;
+  color-scheme: dark;
+  color: inherit;
+  border-color: var(--bg-light);
+}
+
 .modal-content input,
 .modal-content select {
   width: 100%;
@@ -2772,6 +2782,911 @@ body.is-action-dragging {
 
 .hat-clear-btn {
   width: 100px;
+}
+
+#button-modal .modal-content {
+  max-width: 720px;
+  max-height: 92vh;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  padding: 1.5rem;
+  padding-top: 0;
+}
+
+#button-modal .modal-content h2 {
+  margin: 0 -1.5rem 1rem -1.5rem;
+}
+
+#button-modal .modal-content>label {
+  margin-bottom: 0.75rem;
+}
+
+.button-modal-section {
+  padding: 0.95rem;
+  margin-bottom: 0.85rem;
+  background: rgba(15, 23, 42, 0.34);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  border-radius: 6px;
+}
+
+.button-modal-section-title {
+  margin-bottom: 0.75rem;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.button-modal-identity-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+.button-modal-identity-section .button-modal-section-title {
+  grid-column: 1 / -1;
+}
+
+.button-modal-identity-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.button-modal-input-section {
+  background: rgba(15, 23, 42, 0.46);
+}
+
+.button-modal-appearance-section {
+  display: grid;
+  gap: 0.75rem;
+}
+
+/* ===== Button graphic preview ===== */
+.button-modal-graphic-section {
+  background:
+    radial-gradient(circle at top, rgba(15, 20, 30, 0.7) 0%, rgba(6, 9, 18, 0.9) 48%, rgba(2, 3, 7, 0.98) 100%),
+    url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='1.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.1'/%3E%3C/svg%3E");
+  background-blend-mode: overlay;
+  padding: 1rem 0.75rem 1.25rem;
+}
+
+.button-graphic-stage {
+  position: relative;
+  min-height: 396px;
+  --graphic-center-x: 50%;
+  --graphic-center-y: 184px;
+  --graphic-radius: 120px;
+  --socket-gap: 14px;
+  --slot-width: 176px;
+  --bound-green: #71d94f;
+  --bound-green-rgb: 113, 217, 79;
+  --socket-empty-hover-rgb: 125, 211, 252;
+  --socket-filled-hover-rgb: 188, 227, 94;
+}
+
+.button-graphic-container {
+  position: absolute;
+  top: calc(var(--graphic-center-y) - var(--graphic-radius));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 260px;
+  height: 260px;
+}
+
+.button-graphic-canvas {
+  width: 260px;
+  height: 260px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.button-graphic-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.button-graphic-overlay-simple,
+.button-graphic-overlay-hat {
+  display: none;
+}
+
+.button-graphic-status {
+  display: none;
+  margin-top: 0.6rem;
+  text-align: center;
+}
+
+.button-binding-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 8, 15, 0.2);
+  backdrop-filter: blur(10px);
+}
+
+.button-binding-overlay.active {
+  display: flex;
+}
+
+.button-binding-overlay-card {
+  min-width: 220px;
+  padding: 1rem 1.2rem;
+  border: 1px solid rgb(135 134 134 / 37%);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(12, 18, 29, 0.96) 0%, rgba(7, 11, 19, 0.94) 100%);
+  box-shadow: 0 22px 42px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  text-align: center;
+}
+
+.button-binding-overlay-title {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.button-binding-overlay-subtitle {
+  margin-top: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.button-binding-overlay-timer {
+  margin-top: 0.7rem;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.button-binding-overlay-captured {
+  margin-top: 0.8rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgba(var(--bound-green-rgb), 0.26);
+  border-radius: 10px;
+  background: rgba(var(--bound-green-rgb), 0.08);
+  color: var(--bound-green, #71d94f);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+
+.button-binding-overlay-options {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+
+.button-binding-overlay-option {
+  width: 100%;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(20, 28, 43, 0.98) 0%, rgba(11, 16, 27, 0.96) 100%);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+}
+
+.button-binding-overlay-option:hover {
+  border-color: rgba(var(--bound-green-rgb), 0.58);
+  background: rgba(var(--bound-green-rgb), 0.12);
+  transform: translateY(-1px);
+}
+
+.button-graphic-slot {
+  position: absolute;
+  width: var(--slot-width);
+  min-width: 0;
+  max-width: none;
+  padding: 0.65rem 0.9rem 0.55rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(18, 25, 39, 0.96) 0%, rgba(10, 15, 26, 0.94) 100%);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  text-align: left;
+  line-height: 1.25;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.button-graphic-slot::before {
+  content: attr(data-slot-label);
+  display: block;
+  margin-bottom: 0.3rem;
+  color: #9caabf;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.button-graphic-slot.has-value::before {
+  color: var(--bound-green);
+}
+
+.button-graphic-slot.has-value {
+  border-color: rgba(var(--bound-green-rgb), 0.44);
+}
+
+.button-graphic-slot::after {
+  content: '';
+  position: absolute;
+  background: rgba(148, 163, 184, 0.34);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.24);
+  pointer-events: none;
+}
+
+.button-graphic-slot.has-value::after {
+  background: rgba(var(--bound-green-rgb), 0.78);
+}
+
+.button-graphic-slot:not(.has-value):is(:hover, .hovered-empty) {
+  border-color: rgba(var(--socket-empty-hover-rgb), 0.72);
+  background: linear-gradient(180deg, rgba(24, 42, 52, 0.98) 0%, rgba(11, 24, 35, 0.96) 100%);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(var(--socket-empty-hover-rgb), 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.button-graphic-slot:not(.has-value):is(:hover, .hovered-empty)::before {
+  color: rgb(var(--socket-empty-hover-rgb));
+}
+
+.button-graphic-slot:not(.has-value):is(:hover, .hovered-empty)::after {
+  background: rgba(var(--socket-empty-hover-rgb), 0.88);
+  box-shadow: 0 0 14px rgba(var(--socket-empty-hover-rgb), 0.45);
+}
+
+.button-graphic-slot.has-value:is(:hover, .hovered-filled) {
+  border-color: rgba(var(--socket-filled-hover-rgb), 0.82);
+  background: linear-gradient(180deg, rgba(21, 62, 30, 0.98) 0%, rgba(9, 38, 18, 0.96) 100%);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(var(--socket-filled-hover-rgb), 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.button-graphic-slot.has-value:is(:hover, .hovered-filled)::before {
+  color: rgb(var(--socket-filled-hover-rgb));
+}
+
+.button-graphic-slot.has-value:is(:hover, .hovered-filled)::after {
+  background: rgba(var(--socket-filled-hover-rgb), 0.96);
+  box-shadow: 0 0 16px rgba(var(--socket-filled-hover-rgb), 0.52);
+}
+
+.button-graphic-svg [class*="slot-"] {
+  cursor: pointer;
+}
+
+.button-graphic-svg .hovered-input.hovered-empty:is(.btn-face, .hat-center, .toggle-pos, .rotary-pos, .axis-track, .axis-thumb),
+.button-graphic-svg .hovered-input.hovered-empty .arrow-body {
+  fill: rgba(var(--socket-empty-hover-rgb), 0.2);
+  stroke: rgb(var(--socket-empty-hover-rgb));
+  filter: drop-shadow(0 0 9px rgba(var(--socket-empty-hover-rgb), 0.58));
+}
+
+.button-graphic-svg .hovered-input.hovered-empty:is(.axis-guide, .rotary-indicator),
+.button-graphic-svg .hovered-input.hovered-empty .arrow-chevron {
+  stroke: rgb(var(--socket-empty-hover-rgb));
+  filter: drop-shadow(0 0 6px rgba(var(--socket-empty-hover-rgb), 0.55));
+}
+
+.button-graphic-svg .hovered-input.hovered-empty:is(.face-label, .axis-label, .rotary-pos-num) {
+  fill: rgb(var(--socket-empty-hover-rgb));
+}
+
+.button-graphic-svg .hovered-input.hovered-filled:is(.btn-face, .hat-center, .toggle-pos, .rotary-pos, .axis-track, .axis-thumb),
+.button-graphic-svg .hovered-input.hovered-filled .arrow-body {
+  fill: rgba(var(--socket-filled-hover-rgb), 0.25);
+  stroke: rgb(var(--socket-filled-hover-rgb));
+  filter: drop-shadow(0 0 10px rgba(var(--socket-filled-hover-rgb), 0.66));
+}
+
+.button-graphic-svg .hovered-input.hovered-filled:is(.axis-guide, .rotary-indicator),
+.button-graphic-svg .hovered-input.hovered-filled .arrow-chevron {
+  stroke: rgb(var(--socket-filled-hover-rgb));
+  filter: drop-shadow(0 0 7px rgba(var(--socket-filled-hover-rgb), 0.62));
+}
+
+.button-graphic-svg .hovered-input.hovered-filled:is(.face-label, .axis-label, .rotary-pos-num) {
+  fill: rgb(var(--socket-filled-hover-rgb));
+}
+
+.button-graphic-slot-simple {
+  top: calc(var(--graphic-center-y) + var(--graphic-radius) + var(--socket-gap));
+  left: var(--graphic-center-x);
+  transform: translateX(-50%);
+}
+
+.button-graphic-slot-simple::after {
+  left: 50%;
+  bottom: 100%;
+  width: 2px;
+  transform: translateX(-50%);
+  height: 64px;
+}
+
+.button-graphic-stage[data-button-type="axis"] #button-input-socket::after {
+  height: 46px;
+}
+
+.button-graphic-slot-top {
+  top: calc(var(--graphic-center-y) - var(--graphic-radius) - var(--socket-gap) - 56px);
+  left: var(--graphic-center-x);
+  transform: translateX(-50%);
+}
+
+.button-graphic-slot-top::after,
+.button-graphic-slot-rotary-1::after {
+  left: 50%;
+  top: 100%;
+  width: 2px;
+  height: 56px;
+  transform: translateX(-50%);
+}
+
+.button-graphic-slot-bottom {
+  top: calc(var(--graphic-center-y) + var(--graphic-radius) + var(--socket-gap) + 20px);
+  left: var(--graphic-center-x);
+  transform: translateX(-50%);
+}
+
+.button-graphic-slot-bottom::after,
+.button-graphic-slot-rotary-3::after {
+  left: 50%;
+  bottom: 100%;
+  width: 2px;
+  height: 50px;
+  transform: translateX(-50%);
+}
+
+.button-graphic-slot-push {
+  top: calc(var(--graphic-center-y) + 72px);
+  left: calc(var(--graphic-center-x) - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: none;
+}
+
+.button-graphic-slot-push::after {
+  left: 100%;
+  top: 50%;
+  width: 112px;
+  height: 2px;
+  transform-origin: left center;
+  transform: rotate(-32deg);
+}
+
+.button-graphic-slot-left {
+  top: 194px;
+  left: calc(var(--graphic-center-x) - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: translateY(-50%);
+}
+
+.button-graphic-slot-left::after {
+  left: 100%;
+  top: 50%;
+  width: calc(var(--socket-gap) + 16px);
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-slot-rotary-4::after {
+  left: 100%;
+  top: 50%;
+  width: calc(var(--socket-gap) + 16px);
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-slot-right {
+  top: 194px;
+  right: calc(50% - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: translateY(-50%);
+}
+
+.button-graphic-slot-right::after {
+  right: 100%;
+  top: 50%;
+  width: calc(var(--socket-gap) + 16px);
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-slot-rotary-2::after {
+  right: 100%;
+  top: 50%;
+  width: calc(var(--socket-gap) + 26px);
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-slot-center::after {
+  right: 100%;
+  top: 50%;
+  width: calc(var(--socket-gap) + 92px);
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-slot-center {
+  top: 194px;
+  right: calc(50% - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: translateY(-50%);
+}
+
+.button-graphic-slot-rotary-1 {
+  top: calc(var(--graphic-center-y) - var(--graphic-radius) - var(--socket-gap) - 56px);
+  left: var(--graphic-center-x);
+  transform: translateX(-50%);
+}
+
+.button-graphic-slot-rotary-2 {
+  top: var(--graphic-center-y);
+  right: calc(50% - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: translateY(-50%);
+}
+
+.button-graphic-slot-rotary-3 {
+  top: calc(var(--graphic-center-y) + var(--graphic-radius) + var(--socket-gap) + 20px);
+  left: var(--graphic-center-x);
+  transform: translateX(-50%);
+}
+
+.button-graphic-slot-rotary-4 {
+  top: var(--graphic-center-y);
+  left: calc(var(--graphic-center-x) - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: translateY(-50%);
+}
+
+/* Socket clear button */
+.socket-clear-btn {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.socket-clear-btn:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+/* Only show clear button on filled sockets */
+.button-graphic-slot.has-value .socket-clear-btn {
+  opacity: 0.6;
+}
+
+.button-graphic-slot.has-value .socket-clear-btn:hover {
+  opacity: 1;
+}
+
+.button-graphic-stage[data-button-type="rotary4way"] .button-graphic-slot-rotary-2 {
+  top: 194px;
+  right: calc(50% - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: translateY(-50%);
+}
+
+.button-graphic-stage[data-button-type="rotary4way"] .button-graphic-slot-rotary-4 {
+  top: 194px;
+  left: calc(var(--graphic-center-x) - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: translateY(-50%);
+}
+
+.button-graphic-stage[data-button-type="rotary4way"] .button-graphic-slot-rotary-2::after {
+  right: 100%;
+  top: 50%;
+  width: calc(var(--socket-gap) + 26px);
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-stage[data-button-type="rotary4way"] .button-graphic-slot-rotary-4::after {
+  left: 100%;
+  top: 50%;
+  width: calc(var(--socket-gap) + 26px);
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-stage[data-button-type="hat2way-vertical"] .button-graphic-slot-push {
+  top: 194px;
+  bottom: auto;
+  left: calc(var(--graphic-center-x) - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: translateY(-50%);
+}
+
+.button-graphic-stage[data-button-type="hat4way"] .button-graphic-slot-top::after,
+.button-graphic-stage[data-button-type="hat2way-vertical"] .button-graphic-slot-top::after {
+  height: 47px;
+}
+
+.button-graphic-stage[data-button-type="hat4way"] .button-graphic-slot-bottom::after,
+.button-graphic-stage[data-button-type="hat2way-vertical"] .button-graphic-slot-bottom::after {
+  height: 40px;
+}
+
+.button-graphic-stage[data-button-type="hat2way-vertical"] .button-graphic-slot-push::after {
+  left: 100%;
+  top: 50%;
+  width: 100px;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-stage[data-button-type="hat4way"] .button-graphic-slot-push::after {
+  left: 100%;
+  top: 50%;
+  width: 127px;
+  height: 2px;
+  transform-origin: left center;
+  transform: rotate(-32deg);
+}
+
+.button-graphic-stage[data-button-type="hat2way-horizontal"] .button-graphic-slot-push {
+  bottom: auto;
+  top: calc(var(--graphic-center-y) + var(--graphic-radius) + var(--socket-gap));
+  left: var(--graphic-center-x);
+  transform: translateX(-50%);
+}
+
+.button-graphic-stage[data-button-type="hat2way-horizontal"] .button-graphic-slot-push::after {
+  top: auto;
+  right: auto;
+  left: 50%;
+  bottom: 100%;
+  width: 2px;
+  height: 91px;
+  transform: translateX(-50%);
+}
+
+.button-graphic-stage[data-button-type="toggle3way-horizontal"] .button-graphic-slot-center {
+  right: auto;
+  bottom: auto;
+  top: calc(var(--graphic-center-y) + var(--graphic-radius) + var(--socket-gap));
+  left: var(--graphic-center-x);
+  transform: translateX(-50%);
+}
+
+.button-graphic-stage[data-button-type="toggle3way-horizontal"] .button-graphic-slot-center::after {
+  top: auto;
+  right: auto;
+  left: 50%;
+  bottom: 100%;
+  width: 2px;
+  height: calc(var(--graphic-radius) + var(--socket-gap) - 38px);
+  transform: translateX(-50%);
+}
+
+.button-graphic-stage[data-button-type="toggle3way-horizontal"] .button-graphic-slot-left::after {
+  left: 100%;
+  top: 50%;
+  width: calc(var(--graphic-radius) - 69px);
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-stage[data-button-type="toggle3way-horizontal"] .button-graphic-slot-right::after {
+  right: 100%;
+  top: 50%;
+  width: calc(var(--graphic-radius) - 69px);
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.button-graphic-stage[data-button-type="toggle3way-vertical"] .button-graphic-slot-toggle-up::after {
+  left: 50%;
+  top: 100%;
+  width: 2px;
+  height: 66px;
+  transform: translateX(-50%);
+}
+
+.button-graphic-stage[data-button-type="toggle3way-vertical"] .button-graphic-slot-toggle-down::after {
+  left: 50%;
+  bottom: 100%;
+  width: 2px;
+  height: 60px;
+  transform: translateX(-50%);
+}
+
+.button-graphic-stage[data-button-type="rotary3way"] .button-graphic-slot-rotary-1 {
+  bottom: auto;
+  top: calc(var(--graphic-center-y) + var(--graphic-radius) + var(--socket-gap));
+  left: calc(var(--graphic-center-x) - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  right: auto;
+  transform: none;
+}
+
+.button-graphic-stage[data-button-type="rotary3way"] .button-graphic-slot-rotary-1::after {
+  left: 100%;
+  top: 50%;
+  width: 114px;
+  height: 2px;
+  transform-origin: left center;
+  transform: rotate(-60deg);
+}
+
+.button-graphic-stage[data-button-type="rotary3way"] .button-graphic-slot-rotary-2 {
+  top: calc(var(--graphic-center-y) - var(--graphic-radius) - var(--socket-gap) - 56px);
+  right: auto;
+  left: var(--graphic-center-x);
+  transform: translateX(-50%);
+}
+
+.button-graphic-stage[data-button-type="rotary3way"] .button-graphic-slot-rotary-2::after {
+  left: 50%;
+  top: 100%;
+  width: 2px;
+  height: 56px;
+  transform: translateX(-50%);
+}
+
+.button-graphic-stage[data-button-type="rotary3way"] .button-graphic-slot-rotary-3 {
+  bottom: auto;
+  top: calc(var(--graphic-center-y) + var(--graphic-radius) + var(--socket-gap));
+  left: auto;
+  right: calc(50% - var(--graphic-radius) - var(--socket-gap) - var(--slot-width));
+  transform: none;
+}
+
+.button-graphic-stage[data-button-type="rotary3way"] .button-graphic-slot-rotary-3::after {
+  left: -66%;
+  top: 50%;
+  width: 114px;
+  height: 2px;
+  transform-origin: right center;
+  transform: rotate(60deg);
+}
+
+.button-graphic-stage[data-button-type="rotary3way"] .button-graphic-slot-push {
+  top: calc(var(--graphic-center-y) + var(--graphic-radius) + var(--socket-gap));
+  bottom: auto;
+  left: var(--graphic-center-x);
+  transform: translateX(-50%);
+}
+
+.button-graphic-stage[data-button-type="rotary3way"] .button-graphic-slot-push::after {
+  left: 50%;
+  right: auto;
+  top: auto;
+  bottom: 100%;
+  width: 2px;
+  height: 74px;
+  transform: translateX(-50%);
+}
+
+.button-graphic-svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+/* shared */
+.button-graphic-svg .glow-ring {
+  fill: none;
+  stroke: var(--bound-green, #71d94f);
+  stroke-width: 2;
+  opacity: 0.9;
+  filter: drop-shadow(0 0 8px rgba(var(--bound-green-rgb), 0.85));
+}
+
+/* simple button face */
+.button-graphic-svg .btn-face {
+  stroke: rgb(77 81 86 / 50%);
+  stroke-width: 1;
+  filter: drop-shadow(0 14px 20px rgba(0, 0, 0, 1));
+}
+
+.button-graphic-svg .btn-face.bound {
+  fill: rgba(var(--bound-green-rgb), 0.18);
+  stroke: var(--bound-green, #71d94f);
+  filter: drop-shadow(0 0 10px rgba(var(--bound-green-rgb), 0.6));
+}
+
+.button-graphic-svg .face-label {
+  fill: var(--text-secondary);
+  font-family: inherit;
+  font-size: 46px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.button-graphic-svg .face-label.bound {
+  fill: var(--bound-green, #71d94f);
+}
+
+/* axis */
+.button-graphic-svg .axis-track {
+  fill: rgba(21, 28, 39, 0.95);
+  stroke: rgba(148, 163, 184, 0.28);
+  stroke-width: 2;
+}
+
+.button-graphic-svg .axis-track.bound {
+  fill: rgba(var(--bound-green-rgb), 0.08);
+  stroke: rgba(var(--bound-green-rgb), 0.7);
+}
+
+.button-graphic-svg .axis-guide {
+  stroke: rgba(148, 163, 184, 0.34);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.button-graphic-svg .axis-guide.bound {
+  stroke: rgba(var(--bound-green-rgb), 0.78);
+}
+
+.button-graphic-svg .axis-thumb {
+  fill: url(#face-grad);
+  stroke: rgba(148, 163, 184, 0.4);
+  stroke-width: 2;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.48));
+}
+
+.button-graphic-svg .axis-thumb.bound {
+  fill: rgba(var(--bound-green-rgb), 1);
+  stroke: var(--bound-green, #71d94f);
+  filter: drop-shadow(0 0 10px rgba(var(--bound-green-rgb), 0.55));
+}
+
+.button-graphic-svg .axis-label {
+  fill: var(--text-secondary);
+  font-family: inherit;
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  translate: 0 4px;
+}
+
+.button-graphic-svg .axis-label.bound {
+  fill: #000;
+}
+
+/* hat center */
+.button-graphic-svg .hat-center {
+  fill: url(#face-grad);
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 2;
+}
+
+.button-graphic-svg .hat-center.bound {
+  fill: rgba(var(--bound-green-rgb), 0.18);
+  stroke: var(--bound-green, #71d94f);
+  filter: drop-shadow(0 0 8px rgba(var(--bound-green-rgb), 0.55));
+}
+
+/* arrow keys */
+.button-graphic-svg .arrow-key .arrow-body {
+  fill: rgba(30, 35, 45, 0.85);
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 2;
+}
+
+.button-graphic-svg .arrow-key .arrow-chevron {
+  fill: none;
+  stroke: var(--text-muted);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.button-graphic-svg .arrow-key.bound .arrow-body {
+  fill: rgba(var(--bound-green-rgb), 0.18);
+  stroke: var(--bound-green, #71d94f);
+  filter: drop-shadow(0 0 6px rgba(var(--bound-green-rgb), 0.6));
+}
+
+.button-graphic-svg .arrow-key.bound .arrow-chevron {
+  stroke: var(--bound-green, #71d94f);
+}
+
+/* toggle */
+.button-graphic-svg .toggle-track {
+  fill: rgba(30, 35, 45, 0.85);
+  stroke: rgba(148, 163, 184, 0.25);
+  stroke-width: 1;
+}
+
+.button-graphic-svg .toggle-pos {
+  fill: rgba(30, 35, 45, 0.95);
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 2;
+}
+
+.button-graphic-svg .toggle-pos.bound {
+  fill: rgba(var(--bound-green-rgb), 0.22);
+  stroke: var(--bound-green, #71d94f);
+  filter: drop-shadow(0 0 6px rgba(var(--bound-green-rgb), 0.6));
+}
+
+/* rotary */
+.button-graphic-svg .rotary-dial {
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 2;
+}
+
+.button-graphic-svg .rotary-dial.bound {
+  stroke: var(--bound-green, #71d94f);
+}
+
+.button-graphic-svg .rotary-hub {
+  fill: var(--text-muted);
+}
+
+.button-graphic-svg .rotary-indicator {
+  stroke: var(--text-muted);
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.button-graphic-svg .rotary-indicator.bound {
+  stroke: var(--bound-green, #71d94f);
+  filter: drop-shadow(0 0 4px rgba(var(--bound-green-rgb), 0.7));
+}
+
+.button-graphic-svg .rotary-pos {
+  fill: rgba(30, 35, 45, 0.95);
+  stroke: rgba(148, 163, 184, 0.35);
+  stroke-width: 2;
+}
+
+.button-graphic-svg .rotary-pos.bound {
+  fill: rgba(var(--bound-green-rgb), 0.25);
+  stroke: var(--bound-green, #71d94f);
+  filter: drop-shadow(0 0 6px rgba(var(--bound-green-rgb), 0.6));
+}
+
+.button-graphic-svg .rotary-pos-num {
+  fill: var(--text-muted);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.button-graphic-svg .rotary-pos-num.bound {
+  fill: var(--bound-green, #71d94f);
+}
+
+#button-modal .modal-buttons {
+  position: sticky;
+  bottom: 0;
+  align-items: center;
+  margin: 0 -1.5rem -1.5rem -1.5rem;
+  padding: 0.85rem 1.5rem;
+  background: linear-gradient(to top, var(--bg-modal) 82%, rgba(0, 0, 0, 0));
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
 }
 
 .mapping-help {
@@ -3445,29 +4360,11 @@ body.is-action-dragging {
 }
 
 /* HAT Input Section Styles */
-.hat-id-box {
-  padding: 0.5rem;
-  background: var(--bg-medium);
-  border-radius: 4px;
-}
-
-.hat-id-label {
-  font-size: 1rem;
-  color: var(--text-secondary);
-  margin-bottom: 0.25rem;
-}
-
-.hat-id-display {
-  font-size: 0.95rem;
-  font-weight: 500;
-  color: var(--status-success);
-}
-
-.hat-id-grid {
+.hat-input-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.5rem;
 }
 
 .hat-button-group {
@@ -3476,21 +4373,349 @@ body.is-action-dragging {
   gap: 0.5rem;
 }
 
-.hat-button-container {
+#button-modal .input-target {
+  appearance: none;
+  display: block;
+  border: 1px solid var(--bg-light);
+  background: #0a0a0c;
+  color: var(--text-secondary);
+  font-family: 'Monaco', 'Courier New', monospace;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+#button-modal .button-graphic-slot {
+  width: var(--slot-width);
+  padding: 0.65rem 0.9rem 0.55rem;
+  border-color: rgb(46 53 62);
+  background: linear-gradient(180deg, rgb(19 19 19 / 96%) 0%, rgb(17 17 18 / 94%) 100%);
+  transition: none;
+}
+
+#button-modal .button-graphic-slot.has-value {
+  background: linear-gradient(180deg, rgba(13, 48, 26, 0.96) 0%, rgba(7, 31, 17, 0.94) 100%);
+  border-color: rgba(var(--bound-green-rgb), 0.44);
+  color: #bce35e;
+}
+
+#button-modal .button-graphic-slot:not(.has-value):is(:hover, .hovered-empty) {
+  border-color: rgba(var(--socket-empty-hover-rgb), 0.72);
+  background: linear-gradient(180deg, rgba(24, 42, 52, 0.98) 0%, rgba(11, 24, 35, 0.96) 100%);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(var(--socket-empty-hover-rgb), 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+#button-modal .button-graphic-slot:not(.has-value):is(:hover, .hovered-empty)::before {
+  color: rgb(var(--socket-empty-hover-rgb));
+}
+
+#button-modal .button-graphic-slot.has-value:is(:hover, .hovered-filled) {
+  border-color: rgba(var(--socket-filled-hover-rgb), 0.82);
+  background: linear-gradient(180deg, rgba(21, 62, 30, 0.98) 0%, rgba(9, 38, 18, 0.96) 100%);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.34), 0 0 0 3px rgba(var(--socket-filled-hover-rgb), 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+#button-modal .button-graphic-slot.has-value:is(:hover, .hovered-filled)::before {
+  color: rgb(var(--socket-filled-hover-rgb));
+}
+
+#button-modal .input-target.has-value:not(.button-graphic-slot) {
+  background: #0a5523;
+  color: var(--text-primary);
+  border-color: rgb(56 193 107 / 53%);
+}
+
+#button-modal .input-target.detecting {
+  opacity: 0.6;
+}
+
+#button-modal label {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  padding: 0.25rem 0;
+}
+
+#button-modal label:first-child {
+  padding-top: 0;
+}
+
+#button-modal .hat-input-grid {
   display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.button-style-section {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.85rem;
+  margin-top: 1rem;
+  background: var(--bg-medium);
+  border: 1px solid var(--bg-light);
+  border-radius: 6px;
+}
+
+#button-modal .button-style-section {
+  margin-top: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+}
+
+.button-style-header {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+#button-modal .button-style-header {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.button-width-row,
+.button-height-row,
+.button-color-row {
+  display: grid;
+  grid-template-columns: 1fr 96px;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.button-appearance-panel .button-width-row,
+.button-appearance-panel .button-height-row {
+  grid-template-columns: minmax(0, 1fr) auto 108px;
+  gap: 0.75rem;
+}
+
+.button-appearance-panel .button-color-row {
+  grid-template-columns: minmax(0, 1fr) 108px;
+  gap: 0.75rem;
+}
+
+.button-appearance-panel #button-width-input,
+.button-appearance-panel #button-height-input,
+.button-appearance-panel #button-color-hex-input {
+  height: 46px;
+  padding: 0.7rem 0.85rem;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(10, 14, 22, 0.9) 100%);
+  color: var(--text-primary);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.button-appearance-panel #button-width-input:focus,
+.button-appearance-panel #button-height-input:focus,
+.button-appearance-panel #button-color-hex-input:focus {
+  border-color: rgba(var(--accent-primary-rgb), 0.65);
+  box-shadow: 0 0 0 3px rgba(var(--accent-primary-rgb), 0.16);
+}
+
+.button-appearance-panel .button-width-reset-btn {
+  height: 46px;
+  padding: 0 0.9rem;
+  border-radius: 14px;
+  white-space: nowrap;
+}
+
+.button-appearance-panel .button-height-reset-btn {
+  height: 46px;
+  padding: 0 0.9rem;
+  border-radius: 14px;
+  white-space: nowrap;
+}
+
+.button-appearance-panel #button-width-range,
+.button-appearance-panel #button-height-range {
+  width: 100%;
+  height: 46px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.button-appearance-panel #button-width-range::-webkit-slider-runnable-track,
+.button-appearance-panel #button-height-range::-webkit-slider-runnable-track {
+  height: 14px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(var(--accent-primary-rgb), 0.8) 0%, rgba(var(--accent-primary-rgb), 0.35) 40%, rgba(148, 163, 184, 0.22) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  border: 1px solid black;
+}
+
+.button-appearance-panel #button-width-range::-moz-range-track,
+.button-appearance-panel #button-height-range::-moz-range-track {
+  height: 14px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, rgba(var(--accent-primary-rgb), 0.8) 0%, rgba(var(--accent-primary-rgb), 0.35) 40%, rgba(148, 163, 184, 0.22) 100%);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  box-shadow: inset 0 1px 3px rgba(2, 6, 23, 0.65), 0 0 0 4px rgba(15, 23, 42, 0.3);
+}
+
+.button-appearance-panel #button-width-range::-webkit-slider-thumb,
+.button-appearance-panel #button-height-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -6px;
+  border: 2px solid rgba(255, 255, 255, 1);
+  border-radius: 50%;
+  background: rgba(var(--accent-primary-rgb), 0.86);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.34), 0 0 0 6px rgba(var(--accent-primary-rgb), 0.14);
+}
+
+.button-appearance-panel #button-width-range::-moz-range-thumb,
+.button-appearance-panel #button-height-range::-moz-range-thumb {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(255, 255, 255, 0.86);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 35%, #ffffff 0%, rgba(255, 255, 255, 0.92) 28%, var(--accent-primary) 30%, color-mix(in srgb, var(--accent-primary) 72%, #0f172a 28%) 100%);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.34), 0 0 0 6px rgba(var(--accent-primary-rgb), 0.14);
+}
+
+.button-appearance-panel #button-color-input {
+  width: 100%;
+  min-height: 46px;
+  padding: 0.35rem;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.12), rgba(148, 163, 184, 0.03));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  overflow: hidden;
+}
+
+.button-appearance-panel #button-color-input:hover {
+  border-color: rgba(var(--accent-primary-rgb), 0.72);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.18), 0 0 0 3px rgba(var(--accent-primary-rgb), 0.14);
+}
+
+.button-appearance-panel #button-color-input::-webkit-color-swatch-wrapper {
+  border: none;
+  padding: 0.3em;
+}
+
+.button-appearance-panel #button-color-input::-webkit-color-swatch,
+.button-appearance-panel #button-color-input::-moz-color-swatch {
+  border: none;
+}
+
+.button-appearance-panel .button-color-presets {
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+
+.button-appearance-panel .button-color-preset {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.button-appearance-panel .button-color-preset:hover,
+.button-appearance-panel .button-color-preset.active {
+  transform: translateY(-1px);
+  border-color: rgba(var(--accent-primary-rgb), 0.72);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.18), 0 0 0 3px rgba(var(--accent-primary-rgb), 0.14);
+}
+
+.button-appearance-panel .button-color-preset[data-color=""] {
+  width: auto;
+  min-width: 84px;
+  padding: 0 0.85rem;
+  background: linear-gradient(180deg, rgba(30, 41, 59, 0.92) 0%, rgba(15, 23, 42, 0.98) 100%);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+#button-width-input,
+#button-height-input,
+#button-color-hex-input {
+  font-family: 'Monaco', 'Courier New', monospace;
+}
+
+#button-color-input {
+  min-height: 40px;
+  padding: 0.25rem;
+}
+
+.button-color-presets {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 
+.button-color-preset {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--bg-light);
+  border-radius: 4px;
+  background: var(--preset-color, var(--bg-dark));
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+#button-modal .button-color-preset {
+  width: 36px;
+  height: 36px;
+  border-radius: 5px;
+}
+
+.button-color-preset[data-color=""] {
+  width: auto;
+  padding: 0 0.7rem;
+  background: var(--bg-dark);
+  font-size: 0.8rem;
+}
+
+.button-color-preset:hover,
+.button-color-preset.active {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(var(--accent-primary-rgb), 0.18);
+}
+
+.detected-input-line {
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.detected-input-code {
+  display: none;
+}
+
 #simple-input-section {
-  margin-top: 1rem;
+  margin-top: 0;
 }
 
 #hat-input-section {
   display: none;
-  margin-top: 1rem;
+  margin-top: 0;
 }
 
 #hat-input-section.visible {
+  display: block;
+}
+
+#simple-input-section.visible,
+#simple-input-section[style*="display: block"] {
   display: block;
 }
 
@@ -3504,6 +4729,21 @@ body.is-action-dragging {
   display: none;
   margin-top: 0.5rem;
   text-align: center;
+}
+
+@media (max-width: 780px) {
+  .button-graphic-stage {
+    min-height: 520px;
+    padding-top: 0.5rem;
+    --graphic-center-y: 238px;
+    --graphic-radius: 108px;
+    --socket-gap: 12px;
+    --slot-width: 150px;
+  }
+
+  .button-graphic-slot {
+    width: var(--slot-width);
+  }
 }
 
 /* Help Page */

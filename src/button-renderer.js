@@ -12,10 +12,19 @@ export const ButtonFrameWidth = 220;
 export const ButtonFrameHeight = 120;
 export const HatFrameWidth = 140;
 export const HatFrameHeight = 100;
+export const MinButtonFrameHeight = 60;
+export const MaxButtonFrameHeight = 240;
 export const HatButtonGap = 4;
 export const NumLines = 6;
 export const HatSpacing = 6;
 export const ActionTextSize = '14px';
+export const MinButtonFrameWidth = 140;
+export const MaxButtonFrameWidth = 420;
+export const ButtonDefaultFill = 'rgba(34, 34, 34, 1)';
+export const ButtonDefaultFillWithBinding = 'rgba(26, 26, 26, 1)';
+export const ButtonDefaultStroke = '#464646';
+export const ButtonDefaultStrokeWithBinding = '#545454';
+const TemplateEditorMutedTextColor = '#ababab';
 
 // Font sizes
 export const TitleFontSize = '16px';
@@ -25,6 +34,88 @@ export const ContentFontSizeCompact = '14px';
 export const HatTitleFontSize = '16px';
 export const TextLineHeight = 12;
 export const TextLineHeightCompact = 11;
+
+export function isValidHexColor(value)
+{
+    return typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value.trim());
+}
+
+export function normalizeButtonStyle(style)
+{
+    if (!style || typeof style !== 'object')
+    {
+        return {};
+    }
+
+    const normalized = {};
+
+    if (isValidHexColor(style.color))
+    {
+        normalized.color = style.color.trim().toLowerCase();
+    }
+
+    const rawWidth = Number(style.width);
+    if (Number.isFinite(rawWidth))
+    {
+        normalized.width = Math.max(MinButtonFrameWidth, Math.min(MaxButtonFrameWidth, Math.round(rawWidth)));
+    }
+
+    const rawHeight = Number(style.height);
+    if (Number.isFinite(rawHeight))
+    {
+        normalized.height = Math.max(MinButtonFrameHeight, Math.min(MaxButtonFrameHeight, Math.round(rawHeight)));
+    }
+
+    return normalized;
+}
+
+export function getButtonFrameWidth(button, fallbackWidth = ButtonFrameWidth)
+{
+    const style = normalizeButtonStyle(button?.style);
+    return style.width || fallbackWidth;
+}
+
+export function getButtonFrameHeight(button, fallbackHeight = ButtonFrameHeight)
+{
+    const style = normalizeButtonStyle(button?.style);
+    return style.height || fallbackHeight;
+}
+
+export function getButtonBoxColor(button)
+{
+    return normalizeButtonStyle(button?.style).color || null;
+}
+
+function hexToRgba(hexColor, alpha)
+{
+    if (!isValidHexColor(hexColor))
+    {
+        return null;
+    }
+
+    const value = hexColor.trim().substring(1);
+    const red = parseInt(value.substring(0, 2), 16);
+    const green = parseInt(value.substring(2, 4), 16);
+    const blue = parseInt(value.substring(4, 6), 16);
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function brightenHexColor(hexColor, mix = 0.32)
+{
+    if (!isValidHexColor(hexColor))
+    {
+        return hexColor;
+    }
+
+    const clampedMix = Math.max(0, Math.min(1, mix));
+    const value = hexColor.trim().substring(1);
+    const red = parseInt(value.substring(0, 2), 16);
+    const green = parseInt(value.substring(2, 4), 16);
+    const blue = parseInt(value.substring(4, 6), 16);
+
+    const brighten = (channel) => Math.round(channel + ((255 - channel) * clampedMix));
+    return `rgb(${brighten(red)}, ${brighten(green)}, ${brighten(blue)})`;
+}
 
 // ========================================
 // Drawing Helper Functions
@@ -88,7 +179,7 @@ export function drawConnectingLine(ctx, buttonPos, labelPos, boxHalfWidth, lineC
     }
 
     // For regular buttons, calculate label box dimensions using constants
-    const labelWidth = ButtonFrameWidth;
+    const labelWidth = boxHalfWidth ? boxHalfWidth * 2 : ButtonFrameWidth;
     const labelHeight = ButtonFrameHeight;
     const labelX = labelPos.x - labelWidth / 2;
     const labelY = labelPos.y - labelHeight / 2;
@@ -209,8 +300,10 @@ export function drawButtonBox(ctx, x, y, title, contentLines = [], compact = fal
     const boxY = y - height / 2;
 
     // Box background
-    ctx.fillStyle = hasBinding ? 'rgba(15, 18, 21, 0.95)' : 'rgba(30, 30, 30, 0.85)';
-    ctx.strokeStyle = hasBinding ? '#c9c9c9ff' : '#555';
+    const boxColor = isValidHexColor(options.boxColor) ? options.boxColor : null;
+    const useCustomBoxColor = Boolean(boxColor);
+    ctx.fillStyle = useCustomBoxColor ? hexToRgba(boxColor, 1) : (hasBinding ? ButtonDefaultFillWithBinding : ButtonDefaultFill);
+    ctx.strokeStyle = useCustomBoxColor ? brightenHexColor(boxColor) : (hasBinding ? ButtonDefaultStrokeWithBinding : ButtonDefaultStroke);
     ctx.lineWidth = 1;
 
     // Rounded rectangle
@@ -281,10 +374,12 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
     const lineHeight = compact ? TextLineHeightCompact : TextLineHeight;
     const titleFont = titleFontSize || (compact ? TitleFontSizeCompact : TitleFontSize);
     const contentFont = contentFontSize || (compact ? ContentFontSizeCompact : ContentFontSize);
+    const frameMutedColor = isTemplateEditor ? TemplateEditorMutedTextColor : mutedColor;
     // Use contentFont for action text too if contentFontSize is provided (for viewer config)
     const actionFont = contentFontSize || ActionTextSize;
     const countFontSize = ActionTextSize;
     const titleSpacing = compact ? 14 : 18;
+    const hasActionLines = !isTemplateEditor && Array.isArray(contentLines) && contentLines.some(line => line.startsWith('[action]'));
 
     // Helper function to truncate text to fit width
     const truncateText = (text, font, maxWidth, ellipsis = true) =>
@@ -323,7 +418,7 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
     // If no content, show placeholder
     if (!contentLines || contentLines.length === 0)
     {
-        ctx.fillStyle = mutedColor;
+        ctx.fillStyle = frameMutedColor;
         ctx.font = `italic ${contentFont} "Segoe UI", sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -358,7 +453,9 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
     }
 
     const contentAreaStartY = y - (boxHeight / 2) + titleSpacing;
-    const startY = contentAreaStartY + (contentHeight - totalTextHeight) / 2;
+    const startY = hasActionLines
+        ? contentAreaStartY + padding + (parseInt((contentLines[0] || '').startsWith('[action]') || (contentLines[0] || '').startsWith('[muted]') ? actionFont : contentFont) / 2)
+        : contentAreaStartY + (contentHeight - totalTextHeight) / 2;
 
     // Render content lines
     for (let i = 0; i < actualLines; i++)
@@ -382,7 +479,7 @@ export function RenderFrameText(ctx, x, y, boxWidth, boxHeight, title, contentLi
         } else if (line.startsWith('[muted]'))
         {
             displayText = line.substring(7);
-            color = mutedColor;
+            color = frameMutedColor;
             isLeftAligned = true;
         } else if (line.startsWith('[bright]'))
         {
@@ -494,14 +591,16 @@ export function buildButtonLabelContent(button)
         else
         {
             // Try to match Star Citizen axis format: js1_x, js1_y, js1_z, js1_rotx, js1_roty, js1_rotz, js1_slider1
-            const scAxisMatch = button.inputs.main.match(/_(x|y|z|rotx|roty|rotz|slider1|slider2)$/i);
+            const scAxisMatch = button.inputs.main.match(/_(x|y|z|rotx|roty|rotz|slider1|slider2)(?:_(positive|negative))?$/i);
             if (scAxisMatch)
             {
                 const axisKey = scAxisMatch[1].toLowerCase();
                 const axisName = axisKey === 'slider1' ? 'Slider 1'
                     : axisKey === 'slider2' ? 'Slider 2'
                         : axisKey.toUpperCase();
-                contentLines.push(`[subtle]Axis ${axisName}`);
+                const dirSymbol = scAxisMatch[2] === 'positive' ? '+' : scAxisMatch[2] === 'negative' ? '-' : '';
+                const suffix = dirSymbol ? ` ${dirSymbol}` : '';
+                contentLines.push(`[subtle]Axis ${axisName}${suffix}`);
             }
         }
     }
@@ -535,20 +634,23 @@ export function buildButtonLabelContent(button)
  * @param {number} alpha - Opacity (0-1)
  * @param {Object} colors - Optional color overrides
  */
-export function DrawButtonFrame(ctx, x, y, title, contentLines, compact = false, alpha = 1, colors = {}, isTemplateEditor = false)
+export function DrawButtonFrame(ctx, x, y, title, contentLines, compact = false, alpha = 1, colors = {}, isTemplateEditor = false, frameOptions = {})
 {
     ctx.save();
     ctx.globalAlpha = alpha;
 
-    const width = compact ? HatFrameWidth : ButtonFrameWidth;
-    const height = compact ? HatFrameHeight : ButtonFrameHeight;
+    const width = compact ? (frameOptions.hatFrameWidth || HatFrameWidth) : (frameOptions.frameWidth || ButtonFrameWidth);
+    const height = compact ? (frameOptions.hatFrameHeight || HatFrameHeight) : (frameOptions.frameHeight || ButtonFrameHeight);
     const boxX = x - width / 2;
     const boxY = y - height / 2;
     const radius = 4;
 
     // Box background
-    ctx.fillStyle = 'rgba(30, 30, 30, 0.85)';
-    ctx.strokeStyle = '#555';
+    const boxColor = isValidHexColor(colors.boxColor) ? colors.boxColor : null;
+    const hasBinding = contentLines && contentLines.length > 0;
+    const useCustomBoxColor = Boolean(boxColor);
+    ctx.fillStyle = useCustomBoxColor ? hexToRgba(boxColor, 1) : ButtonDefaultFill;
+    ctx.strokeStyle = useCustomBoxColor ? brightenHexColor(boxColor) : ButtonDefaultStroke;
     ctx.lineWidth = 1.0;
 
     roundRect(ctx, boxX, boxY, width, height, radius);
@@ -578,7 +680,10 @@ export function DrawButtonFrame(ctx, x, y, title, contentLines, compact = false,
  */
 export function drawButtonLabel(ctx, button, title, contentLines, alpha, isTemplateEditor = false)
 {
-    DrawButtonFrame(ctx, button.labelPos.x, button.labelPos.y, title, contentLines, false, alpha, {}, isTemplateEditor);
+    DrawButtonFrame(ctx, button.labelPos.x, button.labelPos.y, title, contentLines, false, alpha, { boxColor: getButtonBoxColor(button) }, isTemplateEditor, {
+        frameWidth: getButtonFrameWidth(button),
+        frameHeight: getButtonFrameHeight(button)
+    });
 }
 
 /**
@@ -664,23 +769,23 @@ export function getHat2WayHorizontalPositions(centerX, centerY, hasPush = false,
  * Get box bounds for a specific hat direction
  * Useful for hit testing and bounds checking
  */
-export function getHat4WayBoxBounds(direction, centerX, centerY, hasPush = false)
+export function getHat4WayBoxBounds(direction, centerX, centerY, hasPush = false, width = HatFrameWidth, height = HatFrameHeight)
 {
-    const positions = getHat4WayPositions(centerX, centerY, hasPush);
+    const positions = getHat4WayPositions(centerX, centerY, hasPush, width, height);
     if (!positions[direction])
     {
         return null;
     }
 
     const pos = positions[direction];
-    const halfWidth = HatFrameWidth / 2;
-    const halfHeight = HatFrameHeight / 2;
+    const halfWidth = width / 2;
+    const halfHeight = height / 2;
 
     return {
         x: pos.x - halfWidth,
         y: pos.y - halfHeight,
-        width: HatFrameWidth,
-        height: HatFrameHeight
+        width,
+        height
     };
 }
 
@@ -688,23 +793,23 @@ export function getHat4WayBoxBounds(direction, centerX, centerY, hasPush = false
  * Get box bounds for a specific hat direction in a 2-way vertical hat
  * Useful for hit testing and bounds checking
  */
-export function getHat2WayVerticalBoxBounds(direction, centerX, centerY, hasPush = false)
+export function getHat2WayVerticalBoxBounds(direction, centerX, centerY, hasPush = false, width = HatFrameWidth, height = HatFrameHeight)
 {
-    const positions = getHat2WayVerticalPositions(centerX, centerY, hasPush);
+    const positions = getHat2WayVerticalPositions(centerX, centerY, hasPush, width, height);
     if (!positions[direction])
     {
         return null;
     }
 
     const pos = positions[direction];
-    const halfWidth = HatFrameWidth / 2;
-    const halfHeight = HatFrameHeight / 2;
+    const halfWidth = width / 2;
+    const halfHeight = height / 2;
 
     return {
         x: pos.x - halfWidth,
         y: pos.y - halfHeight,
-        width: HatFrameWidth,
-        height: HatFrameHeight
+        width,
+        height
     };
 }
 
@@ -712,23 +817,23 @@ export function getHat2WayVerticalBoxBounds(direction, centerX, centerY, hasPush
  * Get box bounds for a specific hat direction in a 2-way horizontal hat
  * Useful for hit testing and bounds checking
  */
-export function getHat2WayHorizontalBoxBounds(direction, centerX, centerY, hasPush = false)
+export function getHat2WayHorizontalBoxBounds(direction, centerX, centerY, hasPush = false, width = HatFrameWidth, height = HatFrameHeight)
 {
-    const positions = getHat2WayHorizontalPositions(centerX, centerY, hasPush);
+    const positions = getHat2WayHorizontalPositions(centerX, centerY, hasPush, width, height);
     if (!positions[direction])
     {
         return null;
     }
 
     const pos = positions[direction];
-    const halfWidth = HatFrameWidth / 2;
-    const halfHeight = HatFrameHeight / 2;
+    const halfWidth = width / 2;
+    const halfHeight = height / 2;
 
     return {
         x: pos.x - halfWidth,
         y: pos.y - halfHeight,
-        width: HatFrameWidth,
-        height: HatFrameHeight
+        width,
+        height
     };
 }
 
@@ -759,6 +864,7 @@ export function drawHat4WayBoxes(ctx, hat, options = {})
         // Allow overriding dimensions and font sizes
         hatFrameWidth = HatFrameWidth,
         hatFrameHeight = HatFrameHeight,
+        showDirectionLabels = true,
         numLines = NumLines,
         titleFontSize = null,
         contentFontSize = null
@@ -807,12 +913,12 @@ export function drawHat4WayBoxes(ctx, hat, options = {})
         }
 
         // Determine label
-        const label = dir === 'push' ? 'Push' : dir.charAt(0).toUpperCase();
+        const label = showDirectionLabels ? (dir === 'push' ? 'Push' : dir.charAt(0).toUpperCase()) : '';
 
         // For template mode, use unified label drawing
         if (mode === 'template')
         {
-            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor);
+            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor, { hatFrameWidth, hatFrameHeight });
         }
         else
         {
@@ -830,6 +936,7 @@ export function drawHat4WayBoxes(ctx, hat, options = {})
                 subtleColor: colors.subtleColor || '#999',
                 mutedColor: colors.mutedColor || '#666',
                 actionColor: colors.actionColor || null,
+                boxColor: colors.boxColor || null,
                 bindingsData: actualBindings || contentLines,
                 // Pass through configuration overrides
                 hatFrameWidth,
@@ -857,6 +964,8 @@ export function drawHat4WayFrames(ctx, button, alpha, handleSize, zoom)
         mode: 'template',
         alpha: alpha,
         isTemplateEditor: true,
+        hatFrameWidth: getButtonFrameWidth(button, HatFrameWidth),
+        hatFrameHeight: getButtonFrameHeight(button, HatFrameHeight),
         getContentForDirection: (dir, input) =>
         {
             const contentLines = [];
@@ -872,7 +981,8 @@ export function drawHat4WayFrames(ctx, button, alpha, handleSize, zoom)
             titleColor: '#aaa',
             contentColor: '#ddd',
             subtleColor: '#999',
-            mutedColor: '#666'
+            mutedColor: '#666',
+            boxColor: getButtonBoxColor(button)
         }
     });
 }
@@ -895,8 +1005,9 @@ export function drawHat2WayVerticalBoxes(ctx, hat, options = {})
         bindingsByDirection = null,
         isTemplateEditor = false,
         // Allow overriding dimensions and font sizes
-        hatFrameWidth = HatFrameWidth,
-        hatFrameHeight = HatFrameHeight,
+        hatFrameWidth = getButtonFrameWidth(hat, HatFrameWidth),
+        hatFrameHeight = getButtonFrameHeight(hat, HatFrameHeight),
+        showDirectionLabels = true,
         numLines = NumLines,
         titleFontSize = null,
         contentFontSize = null
@@ -940,11 +1051,11 @@ export function drawHat2WayVerticalBoxes(ctx, hat, options = {})
             contentLines = getContentForDirection(dir, input);
         }
 
-        const label = dir === 'push' ? 'Push' : dir.charAt(0).toUpperCase();
+        const label = showDirectionLabels ? (dir === 'push' ? 'Push' : dir.charAt(0).toUpperCase()) : '';
 
         if (mode === 'template')
         {
-            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor);
+            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor, { hatFrameWidth, hatFrameHeight });
         }
         else
         {
@@ -959,7 +1070,13 @@ export function drawHat2WayVerticalBoxes(ctx, hat, options = {})
                 subtleColor: colors.subtleColor || '#999',
                 mutedColor: colors.mutedColor || '#666',
                 actionColor: colors.actionColor || null,
-                bindingsData: actualBindings || contentLines
+                boxColor: colors.boxColor || null,
+                bindingsData: actualBindings || contentLines,
+                hatFrameWidth,
+                hatFrameHeight,
+                numLines,
+                titleFontSize,
+                contentFontSize
             };
             drawButtonBox(ctx, pos.x, pos.y, label, contentLines, true, boxOptions);
         }
@@ -986,8 +1103,9 @@ export function drawHat2WayHorizontalBoxes(ctx, hat, options = {})
         bindingsByDirection = null,
         isTemplateEditor = false,
         // Allow overriding dimensions and font sizes
-        hatFrameWidth = HatFrameWidth,
-        hatFrameHeight = HatFrameHeight,
+        hatFrameWidth = getButtonFrameWidth(hat, HatFrameWidth),
+        hatFrameHeight = getButtonFrameHeight(hat, HatFrameHeight),
+        showDirectionLabels = true,
         numLines = NumLines,
         titleFontSize = null,
         contentFontSize = null
@@ -1031,11 +1149,11 @@ export function drawHat2WayHorizontalBoxes(ctx, hat, options = {})
             contentLines = getContentForDirection(dir, input);
         }
 
-        const label = dir === 'push' ? 'Push' : (dir === 'left' ? '◄' : '►');
+        const label = showDirectionLabels ? (dir === 'push' ? 'Push' : (dir === 'left' ? '◄' : '►')) : '';
 
         if (mode === 'template')
         {
-            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor);
+            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor, { hatFrameWidth, hatFrameHeight });
         }
         else
         {
@@ -1050,6 +1168,7 @@ export function drawHat2WayHorizontalBoxes(ctx, hat, options = {})
                 subtleColor: colors.subtleColor || '#999',
                 mutedColor: colors.mutedColor || '#666',
                 actionColor: colors.actionColor || null,
+                boxColor: colors.boxColor || null,
                 bindingsData: actualBindings || contentLines,
                 // Pass through configuration overrides
                 hatFrameWidth,

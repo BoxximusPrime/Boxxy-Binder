@@ -1,0 +1,18 @@
+{
+    "releases": [
+        {
+            "version": "1.2.0",
+            "notes": {
+                "📋 Updates": [
+                    "<strong>Template editor button redesign:</strong> Completely redesigned the button details modal.",
+                    "<strong>Templates now support custom size/colors:</strong> You can now customize the size and colors of individual button frames.",
+                    "<strong>Beta Testing Bind Updater:</strong> Added a new feature for updating the base binds file directly from GitHub.",
+                    "<strong>Element Duplication Shortcut:</strong> Added a new feature to duplicate elements using the Ctrl + D shortcut."
+                ],
+                "🐛 Bug Fixes": [
+                    ""
+                ]
+            }
+        }
+    ]
+}

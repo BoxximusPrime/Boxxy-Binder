@@ -207,6 +207,8 @@ function createDeviceCard(device, categoryIndex, isGp)
     const card = document.createElement('div');
     card.className = 'dm-device-card';
 
+    const deviceName = getSafeDeviceName(device);
+
     const typeClass = isGp ? 'gamepad' : 'joystick';
     const autoDetectedId = isGp ? `gp${categoryIndex}` : `js${categoryIndex}`;
     const statusClass = device.is_connected ? 'connected' : 'disconnected';
@@ -219,7 +221,7 @@ function createDeviceCard(device, categoryIndex, isGp)
     const savedPrefix = devicePrefixMapping[deviceUuid] || '';
 
     console.log(`[DEVICE-MANAGER] Device card created:`, {
-        name: device.name,
+        name: deviceName,
         uuid: deviceUuid,
         autoDetectedId: autoDetectedId,
         savedPrefix: savedPrefix || '(using default)'
@@ -229,7 +231,7 @@ function createDeviceCard(device, categoryIndex, isGp)
     <div class="dm-device-header">
       <div class="dm-device-icon ${typeClass}">${deviceEmoji}</div>
       <div class="dm-device-info">
-        <div class="dm-device-name">${device.name}</div>
+        <div class="dm-device-name">${deviceName}</div>
         <div class="dm-device-type">${device.device_type} • UUID: <code>${deviceUuid}</code></div>
       </div>
       <div class="dm-device-badge ${statusClass}">${device.is_connected ? '✓ Connected' : '✗ Disconnected'}</div>
@@ -251,7 +253,7 @@ function createDeviceCard(device, categoryIndex, isGp)
       <div class="dm-device-detail">
         <span class="dm-detail-label">Assigned Prefix:</span>
         <div class="dm-prefix-wrapper">
-          <select class="dm-prefix-select" data-device-uuid="${deviceUuid}" data-device-name="${device.name}">
+          <select class="dm-prefix-select" data-device-uuid="${deviceUuid}" data-device-name="${deviceName}">
             ${generateJoystickPrefixOptions(savedPrefix)}
           </select>
           <div class="dm-prefix-badge dm-override-badge">OVERRIDE</div>
@@ -265,7 +267,7 @@ function createDeviceCard(device, categoryIndex, isGp)
       <div class="dm-device-detail">
         <span class="dm-detail-label">Assigned Prefix:</span>
         <div class="dm-prefix-wrapper">
-          <select class="dm-prefix-select" data-device-uuid="${deviceUuid}" data-device-name="${device.name}">
+          <select class="dm-prefix-select" data-device-uuid="${deviceUuid}" data-device-name="${deviceName}">
             ${generateJoystickPrefixOptions(savedPrefix)}
           </select>
           <div class="dm-prefix-badge dm-default-badge">DEFAULT</div>
@@ -283,7 +285,7 @@ function createDeviceCard(device, categoryIndex, isGp)
         {
             select.addEventListener('change', (e) =>
             {
-                handlePrefixChange(deviceUuid, e.target.value, device.name, autoDetectedId);
+                handlePrefixChange(deviceUuid, e.target.value, deviceName, autoDetectedId);
             });
         }
     }, 0);
@@ -342,10 +344,26 @@ function generateDeviceIdentifier(device)
     }
 
     // Fallback to device name hash if no hardware IDs available
-    const nameHash = hashString(device.name);
+    const deviceName = getSafeDeviceName(device);
+    const nameHash = hashString(deviceName);
     const id = `name-${nameHash}`;
-    console.log(`[DEVICE-MANAGER] Generated name-based ID: ${id} (from "${device.name}")`);
+    console.log(`[DEVICE-MANAGER] Generated name-based ID: ${id} (from "${deviceName}")`);
     return id;
+}
+
+function getSafeDeviceName(device)
+{
+    if (device && typeof device.name === 'string' && device.name.trim())
+    {
+        return device.name.trim();
+    }
+
+    if (device && device.vendor_id && device.product_id)
+    {
+        return `HID Device ${device.vendor_id}:${device.product_id}`;
+    }
+
+    return 'Unknown Device';
 }
 
 /**
@@ -353,6 +371,7 @@ function generateDeviceIdentifier(device)
  */
 function hashString(str)
 {
+    str = String(str || 'Unknown Device');
     let hash = 0;
     for (let i = 0; i < str.length; i++)
     {

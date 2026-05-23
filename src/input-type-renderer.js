@@ -7,11 +7,14 @@
 // It is intentionally renderer-only: callers supply callbacks for content lines,
 // clickable registration, and mode-specific behavior.
 
-import {
+import
+{
     HatFrameWidth,
     HatFrameHeight,
     HatSpacing,
     HatTitleFontSize,
+    getButtonFrameWidth,
+    getButtonFrameHeight,
     simplifyButtonName,
     DrawButtonFrame,
     drawButtonBox
@@ -96,8 +99,8 @@ export function drawToggle3WayBoxes(ctx, toggle, options = {})
         buttonDataForDirection = null,
         bindingsByDirection = null,
         isTemplateEditor = false,
-        hatFrameWidth = HatFrameWidth,
-        hatFrameHeight = HatFrameHeight,
+        hatFrameWidth = getButtonFrameWidth(toggle, HatFrameWidth),
+        hatFrameHeight = getButtonFrameHeight(toggle, HatFrameHeight),
         numLines = null,
         titleFontSize = null,
         contentFontSize = null,
@@ -127,7 +130,7 @@ export function drawToggle3WayBoxes(ctx, toggle, options = {})
         {
             // In template mode, always draw all direction boxes
             const contentLines = (input && getContentForDirection) ? (getContentForDirection(dir, input) || []) : [];
-            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor);
+            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor, { hatFrameWidth, hatFrameHeight });
             return;
         }
 
@@ -149,6 +152,7 @@ export function drawToggle3WayBoxes(ctx, toggle, options = {})
             subtleColor: colors.subtleColor || '#999',
             mutedColor: colors.mutedColor || '#666',
             actionColor: colors.actionColor || null,
+            boxColor: colors.boxColor || null,
             bindingsData: actualBindings || contentLines,
             hatFrameWidth,
             hatFrameHeight,
@@ -250,8 +254,8 @@ export function drawRotaryBoxes(ctx, rotary, options = {})
         buttonDataForDirection = null,
         bindingsByDirection = null,
         isTemplateEditor = false,
-        hatFrameWidth = HatFrameWidth,
-        hatFrameHeight = HatFrameHeight,
+        hatFrameWidth = getButtonFrameWidth(rotary, HatFrameWidth),
+        hatFrameHeight = getButtonFrameHeight(rotary, HatFrameHeight),
         numLines = null,
         titleFontSize = null,
         contentFontSize = null,
@@ -289,7 +293,7 @@ export function drawRotaryBoxes(ctx, rotary, options = {})
                 return; // Skip push if not bound in template mode
             }
             const contentLines = (input && getContentForDirection) ? (getContentForDirection(dir, input) || []) : [];
-            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor);
+            DrawButtonFrame(ctx, pos.x, pos.y, label, contentLines, true, alpha, colors, isTemplateEditor, { hatFrameWidth, hatFrameHeight });
             return;
         }
 
@@ -311,6 +315,7 @@ export function drawRotaryBoxes(ctx, rotary, options = {})
             subtleColor: colors.subtleColor || '#999',
             mutedColor: colors.mutedColor || '#666',
             actionColor: colors.actionColor || null,
+            boxColor: colors.boxColor || null,
             bindingsData: actualBindings || contentLines,
             hatFrameWidth,
             hatFrameHeight,

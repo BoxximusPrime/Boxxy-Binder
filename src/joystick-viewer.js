@@ -19,7 +19,10 @@ import
     drawHat4WayBoxes,
     drawHat2WayVerticalBoxes,
     drawHat2WayHorizontalBoxes,
-    roundRect
+    roundRect,
+    getButtonFrameWidth,
+    getButtonFrameHeight,
+    getButtonBoxColor
 } from './button-renderer.js';
 import
 {
@@ -64,6 +67,14 @@ let currentBindings = null;
 // Canvas elements
 let canvas, ctx;
 
+const VIEWER_TEXT_COLORS = {
+    titleColor: '#9d9d9d',
+    contentColor: '#ddd',
+    subtleColor: '#9ca3af',
+    mutedColor: '#666',
+    actionColor: '#a7a7a7'
+};
+
 // UI state
 let selectedButton = null;
 let selectedBox = null; // Track the currently selected/clicked box for highlighting
@@ -84,6 +95,12 @@ let liveInputHighlightTimeout = null;
 let viewerInputUnlisten = null;
 let viewerDetectionLoop = null;
 let isViewerInputDetectionActive = false;
+let viewerInputSessionId = null;
+let viewerInputSessionCounter = 0;
+
+const VIEWER_INPUT_SESSION_PREFIX = 'viewer-live-highlight';
+const VIEWER_INPUT_EVENT_NAME = 'viewer-input-detected';
+const VIEWER_INPUT_COMPLETE_EVENT_NAME = 'viewer-input-detection-complete';
 
 // View transform
 let zoom = 1.0;
@@ -522,8 +539,7 @@ window.initializeVisualView = function ()
         }
     });
 
-    // Start live input detection for the currently shown device
-    startViewerInputDetection();
+    syncViewerInputDetectionState();
 };
 
 function initializeEventListeners()
@@ -675,16 +691,24 @@ function startViewerInputDetection()
     if (isViewerInputDetectionActive) return;
 
     isViewerInputDetectionActive = true;
+    viewerInputSessionCounter++;
+    viewerInputSessionId = `${VIEWER_INPUT_SESSION_PREFIX}-${viewerInputSessionCounter}`;
 
     if (window.__TAURI__?.event?.listen)
     {
-        window.__TAURI__.event.listen('input-detected', (event) =>
+        window.__TAURI__.event.listen(VIEWER_INPUT_EVENT_NAME, (event) =>
         {
             if (!isViewerInputDetectionActive) return;
             if (!event || !event.payload) return;
             handleViewerInputDetected(event.payload);
         }).then(unlisten =>
         {
+            if (!isViewerInputDetectionActive)
+            {
+                unlisten();
+                return;
+            }
+
             viewerInputUnlisten = unlisten;
         }).catch(error =>
         {
@@ -692,12 +716,13 @@ function startViewerInputDetection()
         });
     }
 
-    runViewerDetectionLoop();
+    runViewerDetectionLoop(viewerInputSessionId);
 }
 
 function stopViewerInputDetection()
 {
     isViewerInputDetectionActive = false;
+    viewerInputSessionId = null;
     if (viewerDetectionLoop)
     {
         clearTimeout(viewerDetectionLoop);
@@ -710,31 +735,73 @@ function stopViewerInputDetection()
     }
 }
 
-async function runViewerDetectionLoop()
+async function runViewerDetectionLoop(sessionId)
 {
-    if (!isViewerInputDetectionActive) return;
+    if (!isViewerInputDetectionActive || viewerInputSessionId !== sessionId) return;
 
     try
     {
         await invoke('wait_for_inputs_with_events', {
-            sessionId: 'viewer-live-highlight',
-            initialTimeoutSecs: 60,
-            collectDurationSecs: 60
+            sessionId,
+            initialTimeoutSecs: 10,
+            collectDurationSecs: 10,
+            inputEventName: VIEWER_INPUT_EVENT_NAME,
+            completionEventName: VIEWER_INPUT_COMPLETE_EVENT_NAME,
+            emitButtonsOnly: true
         });
     } catch (error)
     {
         console.warn('[Joystick Viewer] Live input detection loop error:', error);
     }
 
-    if (isViewerInputDetectionActive)
+    if (isViewerInputDetectionActive && viewerInputSessionId === sessionId)
     {
-        viewerDetectionLoop = setTimeout(runViewerDetectionLoop, 10);
+        viewerDetectionLoop = setTimeout(() => runViewerDetectionLoop(sessionId), 10);
     }
 }
+
+function isViewerInputHighlightVisible()
+{
+    if (document.hidden) return false;
+
+    const bindingsTab = document.getElementById('tab-content-bindings');
+    const visualView = document.getElementById('bindings-visual-view');
+
+    return !!(
+        bindingsTab?.classList.contains('active') &&
+        visualView?.classList.contains('active')
+    );
+}
+
+function syncViewerInputDetectionState()
+{
+    if (isViewerInputHighlightVisible())
+    {
+        startViewerInputDetection();
+    }
+    else
+    {
+        stopViewerInputDetection();
+    }
+}
+
+window.setVisualInputHighlightActive = function (isActive)
+{
+    if (isActive)
+    {
+        startViewerInputDetection();
+    }
+    else
+    {
+        stopViewerInputDetection();
+    }
+};
 
 function handleViewerInputDetected(inputData)
 {
     if (!inputData || !inputData.input_string) return;
+    if (inputData.session_id !== viewerInputSessionId) return;
+    if (!isViewerInputHighlightVisible()) return;
     if (!window.viewerImage || !getCurrentTemplate()) return;
 
     const inputType = getInputType(inputData.input_string);
@@ -846,6 +913,7 @@ window.refreshVisualView = async function (preserveView = false)
 {
     try
     {
+        syncCurrentTemplateFromEditor();
         await loadCurrentBindings();
         // Redraw canvas if template is loaded
         if (window.viewerImage && getCurrentTemplate())
@@ -1177,6 +1245,45 @@ function loadPersistedTemplate()
     }
 }
 
+function syncCurrentTemplateFromEditor()
+{
+    const savedTemplateJson = localStorage.getItem('editorCurrentTemplate');
+    if (!savedTemplateJson || loadedTemplates.length === 0)
+    {
+        return false;
+    }
+
+    const savedFileName = localStorage.getItem('editorTemplateFileName');
+    let matchingIndex = -1;
+
+    if (savedFileName)
+    {
+        matchingIndex = loadedTemplates.findIndex(templateEntry => templateEntry.fileName === savedFileName);
+    }
+
+    if (matchingIndex === -1 && loadedTemplates.length === 1)
+    {
+        matchingIndex = 0;
+    }
+
+    if (matchingIndex === -1)
+    {
+        return false;
+    }
+
+    try
+    {
+        loadedTemplates[matchingIndex].template = normalizeTemplateData(JSON.parse(savedTemplateJson));
+        saveLoadedTemplates();
+        return true;
+    }
+    catch (error)
+    {
+        console.error('Error syncing editor template into visual view:', error);
+        return false;
+    }
+}
+
 // ========================================
 // Multi-Template Management Functions
 // ========================================
@@ -1378,6 +1485,8 @@ function getCurrentButtons()
 
 function displayTemplate()
 {
+    syncCurrentTemplateFromEditor();
+
     const template = getCurrentTemplate();
     if (!template) return;
 
@@ -1864,13 +1973,16 @@ function drawConnectingLineForButton(button, mode = DrawMode.NORMAL)
     const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim();
     const lineColor = bindings.length > 0 ? accentPrimary : textMuted;
 
-    drawConnectingLine(ctx, button.buttonPos, button.labelPos, displayConfig.frameWidth / 2, lineColor, isMultiInput);
+    const frameWidth = isMultiInput ? displayConfig.frameWidth : getButtonFrameWidth(button, displayConfig.frameWidth);
+    drawConnectingLine(ctx, button.buttonPos, button.labelPos, frameWidth / 2, lineColor, isMultiInput);
 }
 
 function drawToggle3WayVertical(toggle, mode = DrawMode.NORMAL)
 {
     const directions = ['up', 'middle', 'down'];
-    const positions = getToggle3WayPositions(toggle.labelPos.x, toggle.labelPos.y, 'vertical', displayConfig.hatWidth, displayConfig.hatHeight);
+    const hatFrameWidth = getButtonFrameWidth(toggle, displayConfig.hatWidth);
+    const hatFrameHeight = getButtonFrameHeight(toggle, displayConfig.hatHeight);
+    const positions = getToggle3WayPositions(toggle.labelPos.x, toggle.labelPos.y, 'vertical', hatFrameWidth, hatFrameHeight);
 
     if (mode === DrawMode.BOUNDS_ONLY)
     {
@@ -1880,7 +1992,7 @@ function drawToggle3WayVertical(toggle, mode = DrawMode.NORMAL)
             if (toggle.inputs && toggle.inputs[dir])
             {
                 const pos = positions[dir];
-                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+                updateBounds(pos.x, pos.y, hatFrameWidth, hatFrameHeight);
             }
         });
         return;
@@ -1911,17 +2023,14 @@ function drawToggle3WayVertical(toggle, mode = DrawMode.NORMAL)
         orientation: 'vertical',
         getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || []),
         colors: {
-            titleColor: '#aaa',
-            contentColor: '#ddd',
-            subtleColor: '#999',
-            mutedColor: '#888',
-            actionColor: '#7dd3c0'
+            ...VIEWER_TEXT_COLORS,
+            boxColor: getButtonBoxColor(toggle)
         },
         onClickableBox,
         bindingsByDirection,
         buttonDataForDirection: (dir) => ({ ...toggle, direction: dir }),
-        hatFrameWidth: displayConfig.hatWidth,
-        hatFrameHeight: displayConfig.hatHeight,
+        hatFrameWidth,
+        hatFrameHeight,
         numLines: displayConfig.numLines,
         titleFontSize: displayConfig.titleSize + 'px',
         contentFontSize: displayConfig.contentSize + 'px'
@@ -1931,7 +2040,9 @@ function drawToggle3WayVertical(toggle, mode = DrawMode.NORMAL)
 function drawToggle3WayHorizontal(toggle, mode = DrawMode.NORMAL)
 {
     const directions = ['left', 'middle', 'right'];
-    const positions = getToggle3WayPositions(toggle.labelPos.x, toggle.labelPos.y, 'horizontal', displayConfig.hatWidth, displayConfig.hatHeight);
+    const hatFrameWidth = getButtonFrameWidth(toggle, displayConfig.hatWidth);
+    const hatFrameHeight = getButtonFrameHeight(toggle, displayConfig.hatHeight);
+    const positions = getToggle3WayPositions(toggle.labelPos.x, toggle.labelPos.y, 'horizontal', hatFrameWidth, hatFrameHeight);
 
     if (mode === DrawMode.BOUNDS_ONLY)
     {
@@ -1941,7 +2052,7 @@ function drawToggle3WayHorizontal(toggle, mode = DrawMode.NORMAL)
             if (toggle.inputs && toggle.inputs[dir])
             {
                 const pos = positions[dir];
-                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+                updateBounds(pos.x, pos.y, hatFrameWidth, hatFrameHeight);
             }
         });
         return;
@@ -1972,17 +2083,14 @@ function drawToggle3WayHorizontal(toggle, mode = DrawMode.NORMAL)
         orientation: 'horizontal',
         getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || []),
         colors: {
-            titleColor: '#aaa',
-            contentColor: '#ddd',
-            subtleColor: '#999',
-            mutedColor: '#888',
-            actionColor: '#7dd3c0'
+            ...VIEWER_TEXT_COLORS,
+            boxColor: getButtonBoxColor(toggle)
         },
         onClickableBox,
         bindingsByDirection,
         buttonDataForDirection: (dir) => ({ ...toggle, direction: dir }),
-        hatFrameWidth: displayConfig.hatWidth,
-        hatFrameHeight: displayConfig.hatHeight,
+        hatFrameWidth,
+        hatFrameHeight,
         numLines: displayConfig.numLines,
         titleFontSize: displayConfig.titleSize + 'px',
         contentFontSize: displayConfig.contentSize + 'px'
@@ -2005,8 +2113,9 @@ function drawRotaryInternal(rotary, mode, steps)
     for (let i = 1; i <= steps; i++) baseDirections.push(String(i));
     const includePush = true;
     const hasPush = includePush && rotary.inputs && rotary.inputs.push;
-
-    const positions = getRotaryPositions(rotary.labelPos.x, rotary.labelPos.y, steps, hasPush, displayConfig.hatWidth, displayConfig.hatHeight);
+    const hatFrameWidth = getButtonFrameWidth(rotary, displayConfig.hatWidth);
+    const hatFrameHeight = getButtonFrameHeight(rotary, displayConfig.hatHeight);
+    const positions = getRotaryPositions(rotary.labelPos.x, rotary.labelPos.y, steps, hasPush, hatFrameWidth, hatFrameHeight);
 
     if (mode === DrawMode.BOUNDS_ONLY)
     {
@@ -2016,13 +2125,13 @@ function drawRotaryInternal(rotary, mode, steps)
             if (rotary.inputs && rotary.inputs[dir])
             {
                 const pos = positions[dir];
-                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+                updateBounds(pos.x, pos.y, hatFrameWidth, hatFrameHeight);
             }
         });
         if (hasPush)
         {
             const pos = positions.push;
-            updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+            updateBounds(pos.x, pos.y, hatFrameWidth, hatFrameHeight);
         }
         return;
     }
@@ -2057,17 +2166,14 @@ function drawRotaryInternal(rotary, mode, steps)
         includePush: true,
         getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || []),
         colors: {
-            titleColor: '#aaa',
-            contentColor: '#ddd',
-            subtleColor: '#999',
-            mutedColor: '#888',
-            actionColor: '#7dd3c0'
+            ...VIEWER_TEXT_COLORS,
+            boxColor: getButtonBoxColor(rotary)
         },
         onClickableBox,
         bindingsByDirection,
         buttonDataForDirection: (dir) => ({ ...rotary, direction: dir }),
-        hatFrameWidth: displayConfig.hatWidth,
-        hatFrameHeight: displayConfig.hatHeight,
+        hatFrameWidth,
+        hatFrameHeight,
         numLines: displayConfig.numLines,
         titleFontSize: displayConfig.titleSize + 'px',
         contentFontSize: displayConfig.contentSize + 'px'
@@ -2078,6 +2184,7 @@ function drawSingleButton(button, mode = DrawMode.NORMAL)
 {
     // Find ALL bindings for this button
     const bindings = findAllBindingsForButton(button);
+    const frameHeight = getButtonFrameHeight(button, displayConfig.frameHeight);
 
     // Only track bounds in bounds mode
     if (mode === DrawMode.BOUNDS_ONLY)
@@ -2088,7 +2195,7 @@ function drawSingleButton(button, mode = DrawMode.NORMAL)
         }
         if (button.labelPos)
         {
-            updateBounds(button.labelPos.x, button.labelPos.y, displayConfig.frameWidth, displayConfig.frameHeight);
+            updateBounds(button.labelPos.x, button.labelPos.y, getButtonFrameWidth(button, displayConfig.frameWidth), frameHeight);
         }
         return;
     }
@@ -2113,9 +2220,11 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
 
     // Check if push button exists
     const hasPush = hat.inputs && hat.inputs['push'];
+    const hatFrameWidth = getButtonFrameWidth(hat, displayConfig.hatWidth);
+    const hatFrameHeight = getButtonFrameHeight(hat, displayConfig.hatHeight);
 
     // Use centralized position calculation for consistency with template editor
-    const positions = getHat4WayPositions(hat.labelPos.x, hat.labelPos.y, hasPush, displayConfig.hatWidth, displayConfig.hatHeight);
+    const positions = getHat4WayPositions(hat.labelPos.x, hat.labelPos.y, hasPush, hatFrameWidth, hatFrameHeight);
 
     // Only track bounds in bounds mode
     if (mode === DrawMode.BOUNDS_ONLY)
@@ -2126,14 +2235,14 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
             if (hat.inputs && hat.inputs[dir])
             {
                 const pos = positions[dir];
-                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+                updateBounds(pos.x, pos.y, hatFrameWidth, hatFrameHeight);
             }
         });
 
         // Calculate title position using same logic as drawHat4WayBoxes
-        const boxHalfHeight = displayConfig.hatHeight / 2;
+        const boxHalfHeight = hatFrameHeight / 2;
         const verticalDistanceWithPush = boxHalfHeight + HatSpacing + boxHalfHeight;
-        const verticalDistanceNoPush = (displayConfig.hatHeight + HatSpacing) / 2;
+        const verticalDistanceNoPush = (hatFrameHeight + HatSpacing) / 2;
         const verticalDistance = hasPush ? verticalDistanceWithPush + (HatSpacing + HatSpacing / 2) : verticalDistanceNoPush + HatSpacing;
         const titleGap = 12;
         const titleY = hat.labelPos.y - verticalDistance - boxHalfHeight - titleGap;
@@ -2179,18 +2288,16 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
             return bindingsToContentLines(bindings);
         },
         colors: {
-            titleColor: '#aaa',
-            contentColor: '#ddd',
-            subtleColor: '#999',
-            mutedColor: '#888',
-            actionColor: '#7dd3c0'
+            ...VIEWER_TEXT_COLORS,
+            boxColor: getButtonBoxColor(hat)
         },
         onClickableBox: onClickableBox,
         bindingsByDirection: bindingsByDirection,
         buttonDataForDirection: (dir) => ({ ...hat, direction: dir }),
         // Pass display configuration
-        hatFrameWidth: displayConfig.hatWidth,
-        hatFrameHeight: displayConfig.hatHeight,
+        hatFrameWidth,
+        hatFrameHeight,
+        showDirectionLabels: false,
         numLines: displayConfig.numLines,
         titleFontSize: displayConfig.titleSize + 'px',
         contentFontSize: displayConfig.contentSize + 'px'
@@ -2204,9 +2311,11 @@ function drawHat2WayVertical(hat, mode = DrawMode.NORMAL)
 
     // Check if push button exists
     const hasPush = hat.inputs && hat.inputs['push'];
+    const hatFrameWidth = getButtonFrameWidth(hat, displayConfig.hatWidth);
+    const hatFrameHeight = getButtonFrameHeight(hat, displayConfig.hatHeight);
 
     // Use centralized position calculation
-    const positions = getHat2WayVerticalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, displayConfig.hatWidth, displayConfig.hatHeight);
+    const positions = getHat2WayVerticalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, hatFrameWidth, hatFrameHeight);
 
     // Only track bounds in bounds mode
     if (mode === DrawMode.BOUNDS_ONLY)
@@ -2217,13 +2326,13 @@ function drawHat2WayVertical(hat, mode = DrawMode.NORMAL)
             if (hat.inputs && hat.inputs[dir])
             {
                 const pos = positions[dir];
-                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+                updateBounds(pos.x, pos.y, hatFrameWidth, hatFrameHeight);
             }
         });
 
-        const boxHalfHeight = displayConfig.hatHeight / 2;
+        const boxHalfHeight = hatFrameHeight / 2;
         const verticalDistanceWithPush = boxHalfHeight + HatSpacing + boxHalfHeight;
-        const verticalDistanceNoPush = (displayConfig.hatHeight + HatSpacing) / 2;
+        const verticalDistanceNoPush = (hatFrameHeight + HatSpacing) / 2;
         const verticalDistance = hasPush ? verticalDistanceWithPush + (HatSpacing + HatSpacing / 2) : verticalDistanceNoPush + HatSpacing;
         const titleGap = 12;
         const titleY = hat.labelPos.y - verticalDistance - boxHalfHeight - titleGap;
@@ -2265,18 +2374,16 @@ function drawHat2WayVertical(hat, mode = DrawMode.NORMAL)
             return bindingsToContentLines(bindings);
         },
         colors: {
-            titleColor: '#aaa',
-            contentColor: '#ddd',
-            subtleColor: '#999',
-            mutedColor: '#888',
-            actionColor: '#7dd3c0'
+            ...VIEWER_TEXT_COLORS,
+            boxColor: getButtonBoxColor(hat)
         },
         onClickableBox: onClickableBox,
         bindingsByDirection: bindingsByDirection,
         buttonDataForDirection: (dir) => ({ ...hat, direction: dir }),
         // Pass display configuration
-        hatFrameWidth: displayConfig.hatWidth,
-        hatFrameHeight: displayConfig.hatHeight,
+        hatFrameWidth,
+        hatFrameHeight,
+        showDirectionLabels: false,
         numLines: displayConfig.numLines,
         titleFontSize: displayConfig.titleSize + 'px',
         contentFontSize: displayConfig.contentSize + 'px'
@@ -2290,9 +2397,11 @@ function drawHat2WayHorizontal(hat, mode = DrawMode.NORMAL)
 
     // Check if push button exists
     const hasPush = hat.inputs && hat.inputs['push'];
+    const hatFrameWidth = getButtonFrameWidth(hat, displayConfig.hatWidth);
+    const hatFrameHeight = getButtonFrameHeight(hat, displayConfig.hatHeight);
 
     // Use centralized position calculation
-    const positions = getHat2WayHorizontalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, displayConfig.hatWidth, displayConfig.hatHeight);
+    const positions = getHat2WayHorizontalPositions(hat.labelPos.x, hat.labelPos.y, hasPush, hatFrameWidth, hatFrameHeight);
 
     // Only track bounds in bounds mode
     if (mode === DrawMode.BOUNDS_ONLY)
@@ -2303,12 +2412,12 @@ function drawHat2WayHorizontal(hat, mode = DrawMode.NORMAL)
             if (hat.inputs && hat.inputs[dir])
             {
                 const pos = positions[dir];
-                updateBounds(pos.x, pos.y, displayConfig.hatWidth, displayConfig.hatHeight);
+                updateBounds(pos.x, pos.y, hatFrameWidth, hatFrameHeight);
             }
         });
 
         const titleGap = 12;
-        const titleY = hat.labelPos.y - displayConfig.hatHeight - HatSpacing - titleGap;
+        const titleY = hat.labelPos.y - hatFrameHeight - HatSpacing - titleGap;
 
         const textWidth = 60;
         updateBounds(hat.labelPos.x, titleY, textWidth, 13);
@@ -2347,18 +2456,16 @@ function drawHat2WayHorizontal(hat, mode = DrawMode.NORMAL)
             return bindingsToContentLines(bindings);
         },
         colors: {
-            titleColor: '#aaa',
-            contentColor: '#ddd',
-            subtleColor: '#999',
-            mutedColor: '#888',
-            actionColor: '#7dd3c0'
+            ...VIEWER_TEXT_COLORS,
+            boxColor: getButtonBoxColor(hat)
         },
         onClickableBox: onClickableBox,
         bindingsByDirection: bindingsByDirection,
         buttonDataForDirection: (dir) => ({ ...hat, direction: dir }),
         // Pass display configuration
-        hatFrameWidth: displayConfig.hatWidth,
-        hatFrameHeight: displayConfig.hatHeight,
+        hatFrameWidth,
+        hatFrameHeight,
+        showDirectionLabels: false,
         numLines: displayConfig.numLines,
         titleFontSize: displayConfig.titleSize + 'px',
         contentFontSize: displayConfig.contentSize + 'px'
@@ -2371,8 +2478,9 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
     // Always update bounds in export mode
     if (mode === DrawMode.EXPORT)
     {
-        const width = compact ? displayConfig.hatWidth : displayConfig.frameWidth;
-        updateBounds(x, y, width, displayConfig.frameHeight);
+        const width = compact ? getButtonFrameWidth(buttonData, displayConfig.hatWidth) : getButtonFrameWidth(buttonData, displayConfig.frameWidth);
+        const height = compact ? getButtonFrameHeight(buttonData, displayConfig.hatHeight) : getButtonFrameHeight(buttonData, displayConfig.frameHeight);
+        updateBounds(x, y, width, height);
     }
 
     // Callback to register clickable boxes
@@ -2392,17 +2500,14 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
         buttonData: buttonData,
         mode: mode,
         onClickableBox: onClickableBox,
-        titleColor: '#ccc',
-        contentColor: '#ddd',
-        subtleColor: '#999',
-        mutedColor: '#888',
-        actionColor: '#7dd3c0',
+        ...VIEWER_TEXT_COLORS,
+        boxColor: getButtonBoxColor(buttonData),
         bindingsData: bindings,
         // Pass display configuration
-        frameWidth: displayConfig.frameWidth,
-        frameHeight: displayConfig.frameHeight,
-        hatFrameWidth: displayConfig.hatWidth,
-        hatFrameHeight: displayConfig.hatHeight,
+        frameWidth: getButtonFrameWidth(buttonData, displayConfig.frameWidth),
+        frameHeight: getButtonFrameHeight(buttonData, displayConfig.frameHeight),
+        hatFrameWidth: getButtonFrameWidth(buttonData, displayConfig.hatWidth),
+        hatFrameHeight: getButtonFrameHeight(buttonData, displayConfig.hatHeight),
         numLines: displayConfig.numLines,
         titleFontSize: displayConfig.titleSize + 'px',
         contentFontSize: displayConfig.contentSize + 'px'

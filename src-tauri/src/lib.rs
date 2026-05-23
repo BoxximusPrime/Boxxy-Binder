@@ -1,4 +1,5 @@
 use log::{error, info};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
@@ -13,6 +14,9 @@ use keybindings::{Action, ActionMap, ActionMaps, AllBinds, MergedBindings, Organ
 // Resources subfolder name - change this to customize the bundled resources folder
 // Note: Tauri automatically names this "_up_" in the bundle, so this must match that name
 const RESOURCES_SUBFOLDER: &str = "_up_";
+const ALL_BINDS_DATA_DIR: &str = "base-bindings";
+const ALL_BINDS_FILE_NAME: &str = "AllBinds.xml";
+const ALL_BINDS_MANIFEST_FILE_NAME: &str = "allbinds-manifest.json";
 
 // Command to get the app version from Cargo.toml
 #[tauri::command]
@@ -52,6 +56,38 @@ struct AppState {
     current_file_name: Option<String>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+struct AllBindsManifest {
+    data_version: Option<String>,
+    game_version: Option<String>,
+    min_app_version: Option<String>,
+    sha256: Option<String>,
+    download_url: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AllBindsUpdateStatus {
+    source: String,
+    data_version: Option<String>,
+    game_version: Option<String>,
+    min_app_version: Option<String>,
+    sha256: Option<String>,
+    local_path: String,
+    manifest_path: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ApplyAllBindsUpdateResult {
+    source: String,
+    data_version: Option<String>,
+    game_version: Option<String>,
+    reloaded: bool,
+}
+
 impl AppState {
     fn new() -> Self {
         AppState {
@@ -60,6 +96,86 @@ impl AppState {
             current_file_name: None,
         }
     }
+}
+
+fn get_bundled_all_binds_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if cfg!(debug_assertions) {
+        let exe_path =
+            std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
+        let exe_dir = exe_path
+            .parent()
+            .ok_or_else(|| "Failed to get exe directory".to_string())?;
+
+        Ok(exe_dir
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .ok_or_else(|| "Failed to find project root".to_string())?
+            .join(ALL_BINDS_FILE_NAME))
+    } else {
+        Ok(app_handle
+            .path()
+            .resource_dir()
+            .map_err(|e| format!("Failed to get resource dir: {}", e))?
+            .join(RESOURCES_SUBFOLDER)
+            .join(ALL_BINDS_FILE_NAME))
+    }
+}
+
+fn get_all_binds_data_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {}", e))?
+        .join(ALL_BINDS_DATA_DIR))
+}
+
+fn get_cached_all_binds_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(get_all_binds_data_dir(app_handle)?.join(ALL_BINDS_FILE_NAME))
+}
+
+fn get_cached_all_binds_manifest_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(get_all_binds_data_dir(app_handle)?.join(ALL_BINDS_MANIFEST_FILE_NAME))
+}
+
+fn resolve_all_binds_path(app_handle: &tauri::AppHandle) -> Result<(PathBuf, bool), String> {
+    let cached_path = get_cached_all_binds_path(app_handle)?;
+    if cached_path.exists() {
+        return Ok((cached_path, true));
+    }
+
+    Ok((get_bundled_all_binds_path(app_handle)?, false))
+}
+
+fn read_cached_all_binds_manifest(
+    app_handle: &tauri::AppHandle,
+) -> Result<Option<AllBindsManifest>, String> {
+    let manifest_path = get_cached_all_binds_manifest_path(app_handle)?;
+    if !manifest_path.exists() {
+        return Ok(None);
+    }
+
+    let manifest_content = std::fs::read_to_string(&manifest_path)
+        .map_err(|e| format!("Failed to read cached AllBinds manifest: {}", e))?;
+
+    let manifest = serde_json::from_str::<AllBindsManifest>(&manifest_content)
+        .map_err(|e| format!("Failed to parse cached AllBinds manifest: {}", e))?;
+
+    Ok(Some(manifest))
+}
+
+fn replace_file(target_path: &PathBuf, contents: &str) -> Result<(), String> {
+    let temp_path = target_path.with_extension("tmp");
+    std::fs::write(&temp_path, contents)
+        .map_err(|e| format!("Failed to write temporary file {:?}: {}", temp_path, e))?;
+
+    if target_path.exists() {
+        std::fs::remove_file(target_path)
+            .map_err(|e| format!("Failed to replace file {:?}: {}", target_path, e))?;
+    }
+
+    std::fs::rename(&temp_path, target_path)
+        .map_err(|e| format!("Failed to finalize file {:?}: {}", target_path, e))
 }
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -104,6 +220,9 @@ async fn wait_for_inputs_with_events(
     session_id: String,
     initial_timeout_secs: u64,
     collect_duration_secs: u64,
+    input_event_name: Option<String>,
+    completion_event_name: Option<String>,
+    emit_buttons_only: Option<bool>,
 ) -> Result<(), String> {
     // Run the blocking operation in a separate thread to avoid freezing the UI
     tokio::task::spawn_blocking(move || {
@@ -112,6 +231,9 @@ async fn wait_for_inputs_with_events(
             session_id,
             initial_timeout_secs,
             collect_duration_secs,
+            input_event_name.unwrap_or_else(|| "input-detected".to_string()),
+            completion_event_name.unwrap_or_else(|| "input-detection-complete".to_string()),
+            emit_buttons_only.unwrap_or(false),
         )
     })
     .await
@@ -487,6 +609,14 @@ fn export_keybindings(
 ) -> Result<(), String> {
     let mut app_state = state.lock().unwrap();
 
+    let stored_file_name = std::path::Path::new(&file_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("layout_exported.xml")
+        .to_string();
+
+    app_state.current_file_name = Some(stored_file_name);
+
     if let Some(ref mut bindings) = app_state.current_bindings {
         // Extract filename from path (without extension)
         let mut file_name = std::path::Path::new(&file_path)
@@ -614,74 +744,125 @@ fn load_all_binds(
     state: tauri::State<Mutex<AppState>>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    // Load AllBinds.xml from resources
-    let all_binds_path = if cfg!(debug_assertions) {
-        // Development: look in project root
-        let exe_path =
-            std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
-        let exe_dir = exe_path
-            .parent()
-            .ok_or_else(|| "Failed to get exe directory".to_string())?;
-        exe_dir
-            .parent()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .ok_or_else(|| "Failed to find project root".to_string())?
-            .join("AllBinds.xml")
-    } else {
-        // Production: use Tauri's resource resolver
-        // File is in the resources subfolder within resources
-        app_handle
-            .path()
-            .resource_dir()
-            .map_err(|e| format!("Failed to get resource dir: {}", e))?
-            .join(RESOURCES_SUBFOLDER)
-            .join("AllBinds.xml")
+    let (all_binds_path, is_cached_copy) = resolve_all_binds_path(&app_handle)?;
+
+    let loaded = std::fs::read_to_string(&all_binds_path)
+        .map_err(|e| format!("Failed to read AllBinds.xml at {:?}: {}", all_binds_path, e))
+        .and_then(|xml_content| AllBinds::from_xml(&xml_content));
+
+    let (all_binds, loaded_path, loaded_from_cache) = match loaded {
+        Ok(all_binds) => (all_binds, all_binds_path, is_cached_copy),
+        Err(error) if is_cached_copy => {
+            error!(
+                "Failed to load cached AllBinds.xml at {:?}: {}. Falling back to bundled copy.",
+                all_binds_path, error
+            );
+            let bundled_path = get_bundled_all_binds_path(&app_handle)?;
+            let bundled_xml = std::fs::read_to_string(&bundled_path).map_err(|e| {
+                format!(
+                    "Failed to read bundled AllBinds.xml at {:?}: {}",
+                    bundled_path, e
+                )
+            })?;
+            let bundled_all_binds = AllBinds::from_xml(&bundled_xml)?;
+            (bundled_all_binds, bundled_path, false)
+        }
+        Err(error) => return Err(error),
     };
 
-    // Read the XML file
-    let xml_content = std::fs::read_to_string(&all_binds_path)
-        .map_err(|e| format!("Failed to read AllBinds.xml at {:?}: {}", all_binds_path, e))?;
-
-    // Parse the XML
-    let all_binds = AllBinds::from_xml(&xml_content)?;
-
-    // Store in state
     let mut app_state = state.lock().unwrap();
     app_state.all_binds = Some(all_binds);
+
+    info!(
+        "Loaded AllBinds.xml from {} at {:?}",
+        if loaded_from_cache {
+            "app data cache"
+        } else {
+            "bundled resources"
+        },
+        loaded_path
+    );
 
     Ok(())
 }
 
 #[tauri::command]
 fn get_all_binds_xml(app_handle: tauri::AppHandle) -> Result<String, String> {
-    // Get the AllBinds.xml path
-    let all_binds_path = if cfg!(debug_assertions) {
-        // Development: look in project root
-        let exe_path =
-            std::env::current_exe().map_err(|e| format!("Failed to get exe path: {}", e))?;
-        let exe_dir = exe_path
-            .parent()
-            .ok_or_else(|| "Failed to get exe directory".to_string())?;
-        exe_dir
-            .parent()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .ok_or_else(|| "Failed to find project root".to_string())?
-            .join("AllBinds.xml")
-    } else {
-        // Production: use Tauri's resource resolver
-        app_handle
-            .path()
-            .resource_dir()
-            .map_err(|e| format!("Failed to get resource dir: {}", e))?
-            .join(RESOURCES_SUBFOLDER)
-            .join("AllBinds.xml")
-    };
+    let (all_binds_path, _) = resolve_all_binds_path(&app_handle)?;
 
-    // Read and return the raw XML content
     std::fs::read_to_string(&all_binds_path)
         .map_err(|e| format!("Failed to read AllBinds.xml at {:?}: {}", all_binds_path, e))
+}
+
+#[tauri::command]
+fn get_all_binds_update_status(
+    app_handle: tauri::AppHandle,
+) -> Result<AllBindsUpdateStatus, String> {
+    let (local_path, is_cached_copy) = resolve_all_binds_path(&app_handle)?;
+    let manifest_path = get_cached_all_binds_manifest_path(&app_handle)?;
+    let cached_manifest = read_cached_all_binds_manifest(&app_handle)?;
+
+    Ok(AllBindsUpdateStatus {
+        source: if is_cached_copy {
+            "downloaded".to_string()
+        } else {
+            "bundled".to_string()
+        },
+        data_version: cached_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.data_version.clone()),
+        game_version: cached_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.game_version.clone()),
+        min_app_version: cached_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.min_app_version.clone()),
+        sha256: cached_manifest
+            .as_ref()
+            .and_then(|manifest| manifest.sha256.clone()),
+        local_path: local_path.to_string_lossy().to_string(),
+        manifest_path: manifest_path.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
+fn apply_all_binds_update(
+    state: tauri::State<Mutex<AppState>>,
+    app_handle: tauri::AppHandle,
+    manifest: AllBindsManifest,
+    xml_content: String,
+) -> Result<ApplyAllBindsUpdateResult, String> {
+    let parsed_all_binds = AllBinds::from_xml(&xml_content)?;
+    let data_dir = get_all_binds_data_dir(&app_handle)?;
+    std::fs::create_dir_all(&data_dir).map_err(|e| {
+        format!(
+            "Failed to create AllBinds data directory {:?}: {}",
+            data_dir, e
+        )
+    })?;
+
+    let cached_xml_path = get_cached_all_binds_path(&app_handle)?;
+    let cached_manifest_path = get_cached_all_binds_manifest_path(&app_handle)?;
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| format!("Failed to serialize AllBinds manifest: {}", e))?;
+
+    replace_file(&cached_xml_path, &xml_content)?;
+    replace_file(&cached_manifest_path, &manifest_json)?;
+
+    let mut app_state = state.lock().unwrap();
+    app_state.all_binds = Some(parsed_all_binds);
+
+    info!(
+        "Applied AllBinds update {:?} to {:?}",
+        manifest.data_version, cached_xml_path
+    );
+
+    Ok(ApplyAllBindsUpdateResult {
+        source: "downloaded".to_string(),
+        data_version: manifest.data_version,
+        game_version: manifest.game_version,
+        reloaded: true,
+    })
 }
 
 #[tauri::command]
@@ -1371,7 +1552,6 @@ fn get_log_file_path(app_handle: tauri::AppHandle) -> Result<String, String> {
         .app_log_dir()
         .map_err(|e| format!("Failed to get log directory: {}", e))?;
 
-    // Use date-based log file name
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     let log_file = log_dir.join(format!("boxxy-binder-{}.log", today));
     Ok(log_file.to_string_lossy().to_string())
@@ -1435,7 +1615,7 @@ fn setup_logging(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error
             .open(&log_file)?,
     );
 
-    env_logger::Builder::from_default_env()
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .target(env_logger::Target::Pipe(target))
         .format(|buf, record| {
             writeln!(
@@ -1929,19 +2109,19 @@ fn read_hid_device_report(device_path: String, timeout_ms: Option<i32>) -> Resul
 fn parse_hid_report(
     report: Vec<u8>,
     device_path: String,
-) -> Result<hid_reader::HidAxisReport, String> {
+) -> Result<hid_reader::HidFullReport, String> {
     // Use descriptor-based parsing for accuracy
     // Get descriptor once and parse
     let descriptor = hid_reader::get_hid_descriptor_bytes(&device_path)?;
-    hid_reader::parse_hid_axes_from_descriptor_bytes(&report, &descriptor)
+    hid_reader::parse_hid_full_report(&report, &descriptor)
 }
 
 #[tauri::command]
 fn parse_hid_report_with_descriptor(
     report: Vec<u8>,
     descriptor: Vec<u8>,
-) -> Result<hid_reader::HidAxisReport, String> {
-    hid_reader::parse_hid_axes_from_descriptor_bytes(&report, &descriptor)
+) -> Result<hid_reader::HidFullReport, String> {
+    hid_reader::parse_hid_full_report(&report, &descriptor)
 }
 
 #[tauri::command]
@@ -2498,6 +2678,8 @@ pub fn run() {
             load_all_binds,
             get_all_binds_xml,
             get_merged_bindings,
+            get_all_binds_update_status,
+            apply_all_binds_update,
             get_user_customizations,
             restore_user_customizations,
             find_conflicting_bindings,
