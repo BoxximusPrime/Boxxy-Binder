@@ -642,6 +642,10 @@ input[type="range"]::-moz-range-track {
     padding-bottom: 0.5rem;
 }
 
+.viewer-config-footer {
+    flex-wrap: wrap;
+}
+
 .config-section {
     margin-bottom: 1.25rem;
 }
@@ -659,17 +663,6 @@ input[type="range"]::-moz-range-track {
     border-bottom: 1px solid var(--bg-light);
     text-transform: uppercase;
     letter-spacing: 0.5px;
-}
-
-.config-actions {
-    display: flex;
-    gap: 0.75rem;
-    justify-content: flex-end;
-    padding: 1rem 1.5rem;
-    border-top: 1px solid var(--bg-light);
-    background: var(--bg-dark);
-    margin: 0 -1.5rem -1.5rem -1.5rem;
-    border-radius: 0 0 8px 8px;
 }
 
 /* Checkbox row styles for config modal */

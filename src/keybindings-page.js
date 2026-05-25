@@ -1921,6 +1921,86 @@ function renderKeybindings()
 let actionDragState = null;
 let actionDragGhostEl = null;
 let actionDragInitialized = false;
+let hoveredActionItem = null;
+
+function getLocatableBindingCandidates(action)
+{
+    const bindings = Array.isArray(action?.bindings) ? action.bindings : [];
+
+    const isUnboundPlaceholder = (bindingInput, binding) =>
+    {
+        const isEmptyBinding = !!bindingInput.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/);
+        return binding.is_default && isEmptyBinding && binding.display_name === 'Unbound';
+    };
+
+    return bindings
+        .map(binding =>
+        {
+            const bindingInput = (binding.input || '').trim();
+            if (!bindingInput) return null;
+            if (isUnboundPlaceholder(bindingInput, binding)) return null;
+
+            let priority = 4;
+            if (bindingInput.match(/^js\d+_/i)) priority = 0;
+            else if (bindingInput.match(/^gp\d+_/i)) priority = 1;
+            else if (bindingInput.match(/^mouse\d+_/i)) priority = 2;
+            else if (bindingInput.match(/^kb\d+_/i)) priority = 3;
+
+            return {
+                bindingInput,
+                priority,
+                isDefault: !!binding.is_default
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) =>
+        {
+            if (a.priority !== b.priority) return a.priority - b.priority;
+            if (a.isDefault !== b.isDefault) return a.isDefault ? 1 : -1;
+            return 0;
+        });
+}
+
+function highlightActionInCurrentVisualPage(actionMapName, actionName)
+{
+    if (!currentKeybindings || !window.highlightButtonInJoystickViewer) return false;
+
+    const actionMap = currentKeybindings.action_maps.find(am => am.name === actionMapName);
+    if (!actionMap) return false;
+
+    const action = actionMap.actions.find(a => a.name === actionName);
+    if (!action) return false;
+
+    const actionDisplayName = action.ui_label || action.display_name || action.name;
+    const candidates = getLocatableBindingCandidates(action);
+
+    for (const candidate of candidates)
+    {
+        const didHighlight = window.highlightButtonInJoystickViewer(candidate.bindingInput, actionDisplayName, {
+            searchOtherPages: false,
+            clearAfterMs: 0,
+            panToHighlight: false,
+            source: 'hover'
+        });
+
+        if (didHighlight)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function clearHoveredActionHighlight()
+{
+    hoveredActionItem = null;
+
+    if (window.clearJoystickViewerHoverHighlight)
+    {
+        window.clearJoystickViewerHoverHighlight();
+    }
+}
 
 function setupActionDragToJoystickView()
 {
@@ -2020,6 +2100,39 @@ function setupActionDragToJoystickView()
 
         startDrag(event, actionItem);
     }, true);
+
+    container.addEventListener('mouseover', (event) =>
+    {
+        const currentView = localStorage.getItem('bindingsView') || 'list';
+        if (currentView !== 'split' || actionDragState) return;
+
+        const actionItem = event.target.closest('.action-item');
+        if (!actionItem || !container.contains(actionItem)) return;
+        if (actionItem === hoveredActionItem) return;
+
+        const relatedActionItem = event.relatedTarget instanceof Element
+            ? event.relatedTarget.closest('.action-item')
+            : null;
+
+        if (relatedActionItem === actionItem) return;
+
+        hoveredActionItem = actionItem;
+        highlightActionInCurrentVisualPage(actionItem.dataset.actionMap, actionItem.dataset.actionName);
+    });
+
+    container.addEventListener('mouseout', (event) =>
+    {
+        const actionItem = event.target.closest('.action-item');
+        if (!actionItem || actionItem !== hoveredActionItem) return;
+
+        const relatedActionItem = event.relatedTarget instanceof Element
+            ? event.relatedTarget.closest('.action-item')
+            : null;
+
+        if (relatedActionItem === actionItem) return;
+
+        clearHoveredActionHighlight();
+    });
 
     actionDragInitialized = true;
 }
@@ -2720,6 +2833,43 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
 function cancelBinding()
 {
     closeBindingModal();
+
+    const pendingActionBindings = window.consumePendingActionBindingsReturn?.();
+    if (pendingActionBindings?.actionMapName && pendingActionBindings?.actionName)
+    {
+        window.openActionBindingsModal(
+            pendingActionBindings.actionMapName,
+            pendingActionBindings.actionName,
+            pendingActionBindings.actionDisplayName
+        );
+    }
+}
+
+function getConflictActionLabel(conflict)
+{
+    const actionLabel = conflict.action_display_name || conflict.action_label;
+    if (actionLabel && !actionLabel.startsWith('@'))
+    {
+        return actionLabel;
+    }
+
+    return conflict.action_name;
+}
+
+function resetBindingModalFeedback()
+{
+    const bindingStatus = document.getElementById('binding-modal-status');
+    if (bindingStatus)
+    {
+        bindingStatus.innerHTML = '';
+    }
+
+    const conflictDisplay = document.getElementById('binding-conflict-display');
+    if (conflictDisplay)
+    {
+        conflictDisplay.style.display = 'none';
+        conflictDisplay.innerHTML = '';
+    }
 }
 
 async function clearBinding()
@@ -2751,6 +2901,7 @@ function closeBindingModal()
 {
     console.log('[TIMER] closeBindingModal called');
     stopDetection('modal-close');
+    resetBindingModalFeedback();
 
     bindingMode = false;
     currentBindingAction = null;
@@ -2963,9 +3114,7 @@ function updateConflictDisplay(conflicts)
 
     const conflictItems = conflicts.map(c =>
     {
-        const actionLabel = (c.action_label && !c.action_label.startsWith('@'))
-            ? c.action_label
-            : c.action_name;
+        const actionLabel = getConflictActionLabel(c);
 
         const mapLabel = (c.action_map_label && !c.action_map_label.startsWith('@'))
             ? c.action_map_label
@@ -3022,9 +3171,7 @@ function showConflictModal(conflicts)
     // Populate conflict list
     conflictList.innerHTML = conflicts.map(c =>
     {
-        const actionLabel = (c.action_label && !c.action_label.startsWith('@'))
-            ? c.action_label
-            : c.action_name;
+        const actionLabel = getConflictActionLabel(c);
 
         const mapLabel = (c.action_map_label && !c.action_map_label.startsWith('@'))
             ? c.action_map_label
@@ -3081,6 +3228,7 @@ async function confirmConflictBinding()
 async function applyBinding(actionMapName, actionName, mappedInput, multiTap = null, activationMode = null)
 {
     console.log('Calling update_binding...');
+    resetBindingModalFeedback();
     const normalizedInput = ensureSliderNumber(mappedInput);
 
     // Update the binding in backend
@@ -3110,10 +3258,20 @@ async function applyBinding(actionMapName, actionName, mappedInput, multiTap = n
         await window.refreshVisualView(true); // true = preserve pan/zoom
     }
 
-    // Close modal after a short delay
+    // Close modal after a short delay, then re-open action bindings modal if we came from "+ add new binding"
     setTimeout(() =>
     {
         closeBindingModal();
+
+        const pending = window.consumePendingActionBindingsReturn?.();
+        if (pending?.actionMapName && pending?.actionName)
+        {
+            window.openActionBindingsModal(
+                pending.actionMapName,
+                pending.actionName,
+                pending.actionDisplayName
+            );
+        }
     }, 1000);
 }
 
@@ -3228,40 +3386,7 @@ function locateActionBinding(actionMapName, actionName)
     if (!action) return;
 
     const actionDisplayName = action.ui_label || action.display_name || action.name;
-    const bindings = Array.isArray(action.bindings) ? action.bindings : [];
-
-    const isUnboundPlaceholder = (bindingInput, binding) =>
-    {
-        const isEmptyBinding = !!bindingInput.match(/^(js\d*|kb\d*|mouse\d*|gp\d*)_\s*$/);
-        return binding.is_default && isEmptyBinding && binding.display_name === 'Unbound';
-    };
-
-    const candidates = bindings
-        .map(binding =>
-        {
-            const bindingInput = (binding.input || '').trim();
-            if (!bindingInput) return null;
-            if (isUnboundPlaceholder(bindingInput, binding)) return null;
-
-            let priority = 4;
-            if (bindingInput.match(/^js\d+_/i)) priority = 0;
-            else if (bindingInput.match(/^gp\d+_/i)) priority = 1;
-            else if (bindingInput.match(/^mouse\d+_/i)) priority = 2;
-            else if (bindingInput.match(/^kb\d+_/i)) priority = 3;
-
-            return {
-                bindingInput,
-                priority,
-                isDefault: !!binding.is_default
-            };
-        })
-        .filter(Boolean)
-        .sort((a, b) =>
-        {
-            if (a.priority !== b.priority) return a.priority - b.priority;
-            if (a.isDefault !== b.isDefault) return a.isDefault ? 1 : -1;
-            return 0;
-        });
+    const candidates = getLocatableBindingCandidates(action);
 
     if (candidates.length === 0)
     {

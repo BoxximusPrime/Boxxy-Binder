@@ -80,6 +80,9 @@ let selectedButton = null;
 let selectedBox = null; // Track the currently selected/clicked box for highlighting
 let isPulsing = false; // Whether the current highlight should pulse
 let highlightTimeout = null; // Timeout for clearing external highlights
+let currentHighlightSource = null; // Tracks whether the current highlight is manual, hover, or locate
+let highlightedKeyElement = null;
+let highlightedKeyActionTextElements = [];
 let clickableBoxes = []; // Track clickable binding boxes for mouse events
 let dragHoverBox = null; // Track drag-hover box during action drag-and-drop
 let inputDragState = null; // Track input drag state for reverse drag
@@ -884,7 +887,7 @@ function highlightLiveInputBox(box)
         liveInputBox = null;
         resizeViewerCanvas();
         liveInputHighlightTimeout = null;
-    }, 350);
+    }, 2000);
 
     resizeViewerCanvas();
 }
@@ -1798,7 +1801,7 @@ function resizeViewerCanvas()
     if (liveInputBox)
     {
         ctx.save();
-        const accentPrimary = getComputedStyle(document.documentElement).getPropertyValue('--accent-primary').trim() || '#4a9eff';
+        const accentPrimary = '#ffffff';
         ctx.strokeStyle = accentPrimary;
         ctx.lineWidth = 3;
         ctx.shadowBlur = 12;
@@ -3291,6 +3294,7 @@ function onCanvasClick(event)
         {
             selectedBox = box;
             isPulsing = false; // Static outline for manual clicks
+            currentHighlightSource = 'manual';
             showBindingInfo(box.buttonData, box.bindings);
             resizeViewerCanvas();
             return;
@@ -3587,6 +3591,9 @@ window.hideBindingInfo = function ()
     selectedButton = null;
     selectedBox = null;
     isPulsing = false;
+    currentHighlightSource = null;
+    highlightedKeyElement = null;
+    highlightedKeyActionTextElements = [];
 
     if (highlightTimeout)
     {
@@ -4146,11 +4153,17 @@ function openConfigModal()
 
     // Set up button event listeners
     const applyBtn = document.getElementById('config-apply-btn');
+    const cancelBtn = document.getElementById('config-cancel-btn');
     const resetBtn = document.getElementById('config-reset-btn');
 
     if (applyBtn)
     {
         applyBtn.onclick = applyConfigChanges;
+    }
+
+    if (cancelBtn)
+    {
+        cancelBtn.onclick = closeConfigModal;
     }
 
     if (resetBtn)
@@ -5805,9 +5818,16 @@ function resetKeyboardView()
  * @param {string} bindingInput - The binding input string (e.g., "js1_button13", "kb1_f", "gp1_a")
  * @param {string} actionName - The action display name for console logging
  */
-window.highlightButtonInJoystickViewer = function (bindingInput, actionName)
+window.highlightButtonInJoystickViewer = function (bindingInput, actionName, options = {})
 {
     console.log('[Joystick Viewer] Highlighting button:', bindingInput, 'for action:', actionName);
+
+    const {
+        searchOtherPages = true,
+        clearAfterMs = 5000,
+        panToHighlight = true,
+        source = 'external'
+    } = options;
 
     // Clear any existing highlight timeout
     if (highlightTimeout)
@@ -5824,20 +5844,22 @@ window.highlightButtonInJoystickViewer = function (bindingInput, actionName)
     if (isKeyboardInput)
     {
         // Keyboard input - highlight in keyboard view
-        highlightKeyInKeyboardView(bindingInput, actionName);
-        return;
+        return highlightKeyInKeyboardView(bindingInput, actionName, {
+            clearAfterMs,
+            source
+        });
     }
 
     if (isMouseInput)
     {
         console.log('[Joystick Viewer] Mouse input highlighting not yet implemented:', bindingInput);
-        return;
+        return false;
     }
 
     if (!isJoystickInput)
     {
         console.warn('[Joystick Viewer] Unknown input type for highlighting:', bindingInput);
-        return;
+        return false;
     }
 
     // Helper to find matching box in current clickableBoxes
@@ -5897,7 +5919,7 @@ window.highlightButtonInJoystickViewer = function (bindingInput, actionName)
     let matchingBox = findMatchingBox();
 
     // 2. If not found, search other pages and templates
-    if (!matchingBox)
+    if (!matchingBox && searchOtherPages)
     {
         console.log('[Joystick Viewer] Button not found on current page, searching other pages and templates...');
 
@@ -6044,7 +6066,7 @@ window.highlightButtonInJoystickViewer = function (bindingInput, actionName)
                     matchingBox = findMatchingBox();
                     if (matchingBox)
                     {
-                        highlightBox(matchingBox);
+                        highlightBox(matchingBox, { clearAfterMs, panToHighlight, source });
                     } else
                     {
                         console.warn('[Joystick Viewer] Switched page but still could not find matching box');
@@ -6052,7 +6074,7 @@ window.highlightButtonInJoystickViewer = function (bindingInput, actionName)
                         setTimeout(() =>
                         {
                             matchingBox = findMatchingBox();
-                            if (matchingBox) highlightBox(matchingBox);
+                            if (matchingBox) highlightBox(matchingBox, { clearAfterMs, panToHighlight, source });
                         }, 300);
                     }
                 }, 200);
@@ -6066,45 +6088,88 @@ window.highlightButtonInJoystickViewer = function (bindingInput, actionName)
             {
                 switchPageAction();
             }
-            return;
+            return true;
         }
     }
 
     if (matchingBox)
     {
-        highlightBox(matchingBox);
+        highlightBox(matchingBox, { clearAfterMs, panToHighlight, source });
+        return true;
     }
     else
     {
         console.warn('[Joystick Viewer] No matching button found for input:', bindingInput);
         // Force a redraw just in case
         if (clickableBoxes.length === 0) resizeViewerCanvas();
+        return false;
     }
 };
 
-function highlightBox(box)
+window.clearJoystickViewerHoverHighlight = function ()
+{
+    if (currentHighlightSource !== 'hover') return;
+
+    clearCurrentHighlight();
+};
+
+function clearCurrentHighlight()
+{
+    selectedBox = null;
+    isPulsing = false;
+    currentHighlightSource = null;
+
+    if (highlightTimeout)
+    {
+        clearTimeout(highlightTimeout);
+        highlightTimeout = null;
+    }
+
+    if (highlightedKeyElement)
+    {
+        highlightedKeyElement.classList.remove('key-highlighted');
+        highlightedKeyActionTextElements.forEach(el => el.classList.remove('action-highlighted'));
+        highlightedKeyElement = null;
+        highlightedKeyActionTextElements = [];
+    }
+
+    resizeViewerCanvas();
+}
+
+function highlightBox(box, options = {})
 {
     console.log('[Joystick Viewer] Found matching box to highlight:', box);
+
+    const {
+        clearAfterMs = 5000,
+        panToHighlight = true,
+        source = 'external'
+    } = options;
 
     // Set the selected box for highlighting
     selectedBox = box;
     isPulsing = true; // Enable pulsing for external highlights
+    currentHighlightSource = source;
 
     // Redraw the canvas to show the highlight
     resizeViewerCanvas();
 
     // Pan to center the highlighted box in view
-    panToBox(box);
+    if (panToHighlight)
+    {
+        panToBox(box);
+    }
 
-    // Clear the highlight after 5 seconds
+    if (typeof clearAfterMs !== 'number' || clearAfterMs <= 0)
+    {
+        return;
+    }
+
     highlightTimeout = setTimeout(() =>
     {
-        selectedBox = null;
-        isPulsing = false;
-        resizeViewerCanvas();
-        highlightTimeout = null;
+        clearCurrentHighlight();
         console.log('[Joystick Viewer] Highlight cleared');
-    }, 5000);
+    }, clearAfterMs);
 }
 
 /**
@@ -6112,16 +6177,29 @@ function highlightBox(box)
  * @param {string} bindingInput - The keyboard binding input string (e.g., "kb1_f")
  * @param {string} actionName - The action display name
  */
-function highlightKeyInKeyboardView(bindingInput, actionName)
+function highlightKeyInKeyboardView(bindingInput, actionName, options = {})
 {
     console.log('[Keyboard View] Highlighting key:', bindingInput, 'for action:', actionName);
+
+    const {
+        clearAfterMs = 5000,
+        source = 'external'
+    } = options;
+
+    if (highlightedKeyElement)
+    {
+        highlightedKeyElement.classList.remove('key-highlighted');
+        highlightedKeyActionTextElements.forEach(el => el.classList.remove('action-highlighted'));
+        highlightedKeyElement = null;
+        highlightedKeyActionTextElements = [];
+    }
 
     // Extract the key from the binding (e.g., "kb1_f" -> "f")
     const match = bindingInput.match(/^kb\d+_(.+)$/i);
     if (!match)
     {
         console.warn('[Keyboard View] Could not parse key from binding:', bindingInput);
-        return;
+        return false;
     }
 
     const keyCode = match[1]; // e.g., "f", "lalt", "space", etc.
@@ -6133,23 +6211,31 @@ function highlightKeyInKeyboardView(bindingInput, actionName)
     {
         // Add highlight class
         keyElement.classList.add('key-highlighted');
+        highlightedKeyElement = keyElement;
+        currentHighlightSource = source;
 
         // Also highlight the action text if present
         const actionTextElements = keyElement.querySelectorAll('.key-binding-action');
         actionTextElements.forEach(el => el.classList.add('action-highlighted'));
+        highlightedKeyActionTextElements = [...actionTextElements];
 
-        // Clear highlight after 5 seconds
+        if (typeof clearAfterMs !== 'number' || clearAfterMs <= 0)
+        {
+            return true;
+        }
+
         highlightTimeout = setTimeout(() =>
         {
-            keyElement.classList.remove('key-highlighted');
-            actionTextElements.forEach(el => el.classList.remove('action-highlighted'));
-            highlightTimeout = null;
+            clearCurrentHighlight();
             console.log('[Keyboard View] Highlight cleared');
-        }, 5000);
+        }, clearAfterMs);
+
+        return true;
     }
     else
     {
         console.warn('[Keyboard View] Key element not found for:', keyCode);
+        return false;
     }
 }
 

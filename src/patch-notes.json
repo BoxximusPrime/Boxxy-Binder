@@ -7,10 +7,13 @@
                     "<strong>Template editor button redesign:</strong> Completely redesigned the button details modal.",
                     "<strong>Templates now support custom size/colors:</strong> You can now customize the size and colors of individual button frames.",
                     "<strong>Beta Testing Bind Updater:</strong> Added a new feature for updating the base binds file directly from GitHub.",
-                    "<strong>Element Duplication Shortcut:</strong> Added a new feature to duplicate elements using the Ctrl + D shortcut."
+                    "<strong>Element Duplication Shortcut:</strong> Added a new feature to duplicate elements using the Ctrl + D shortcut.",
+                    "<strong>Added a better FAQ modal:</strong> Introduced an interactive FAQ in the help section to assist users with common issues.",
+                    "<strong>New theme:</strong> Added a new dark with gold accents theme.",
+                    "<strong>Hovering actions now highlight:</strong> When hovering over an action, it will light the button frame up while in the split view"
                 ],
                 "🐛 Bug Fixes": [
-                    ""
+                    "<strong>Some UI Fixes:</strong> Various UI tweaks and fixes."
                 ]
             }
         }

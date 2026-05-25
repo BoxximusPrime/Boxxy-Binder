@@ -384,7 +384,7 @@
 
 .detected-device-info.detected {
     border-color: var(--status-success);
-    background: rgba(var(--status-success), 0.1);
+    background: rgba(var(--status-success-rgb), 0.1);
 }
 
 .detected-device-info .device-icon {
@@ -436,7 +436,7 @@
 
 .custom-axis-row.axis-assigned {
     border-color: var(--status-success);
-    background: rgba(var(--status-success), 0.1);
+    background: rgba(var(--status-success-rgb), 0.1);
 }
 
 .custom-axis-row.detecting {
@@ -624,7 +624,7 @@
 .template-controls-panel .toolbar-page-btn.active {
     background: var(--accent-primary);
     border-color: var(--accent-primary);
-    color: #fff;
+    color: var(--text-inverse);
     font-weight: 500;
 }
 
@@ -672,12 +672,12 @@
 .template-controls-panel .control-btn.btn-success {
     background: var(--status-success);
     border-color: var(--status-success);
-    color: #fff;
+    color: var(--text-inverse)
 }
 
 .template-controls-panel .control-btn.btn-success:hover {
-    background: rgba(var(--status-success), 0.85);
-    border-color: rgba(var(--status-success), 0.85);
+    background: rgba(var(--status-success-rgb), 0.85);
+    border-color: rgba(var(--status-success-rgb), 0.85);
     color: #fff;
 }
 

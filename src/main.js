@@ -555,6 +555,7 @@ window.addEventListener("DOMContentLoaded", async () =>
   initializeEventListeners();
   initializeTabSystem();
   initializeHelpNavigation();
+  initializeHelpWizard();
   initializeSplitResizer();
   initializeWhatsNewModal();
   initializeFontSizeScaling();
@@ -1288,6 +1289,228 @@ function initializeHelpNavigation()
         behavior: 'smooth'
       });
     });
+  });
+}
+
+const helpWizardIssues = [
+  {
+    id: 'app-js1-game-js2',
+    question: 'My right joystick binds as js1 here, but Star Citizen calls it js2.',
+    title: 'Make the app use the same joystick number as Star Citizen',
+    paragraphs: [
+      'Boxxy Binder and Star Citizen both use names like js1 and js2, but they may not always give those names to the same physical joystick.',
+      'First, find out what Star Citizen calls each stick. Then tell Boxxy Binder to use those same names.'
+    ],
+    steps: [
+      'Open Device Manager in Boxxy Binder.',
+      'Find the right joystick and the left joystick.',
+      'Change each Assigned Prefix so it matches what Star Citizen uses. For example, if Star Citizen says the right stick is js2, set the right stick to js2 here too.',
+      'Go back to Keybindings and bind again.'
+    ],
+    actions: [{ label: 'Open Device Manager', tab: 'debugger' }]
+  },
+  {
+    id: 'wrong-stick-action',
+    question: 'When I press my right trigger, the left trigger action happens.',
+    title: 'Check whether the device numbers are flipped inside the binding file',
+    paragraphs: [
+      'This usually means one of two things: either the app is using the wrong js number for a joystick, or the loaded keybinding file has the two joystick numbers swapped.',
+      'Do the simple check first: make sure Boxxy Binder and Star Citizen agree on which stick is js1 and which stick is js2.'
+    ],
+    steps: [
+      'In Star Citizen, bind any test action to the right joystick trigger and look at the js number it shows.',
+      'In Boxxy Binder, open Device Manager and check that the right joystick has that same Assigned Prefix.',
+      'If the app and game match, but the actions are still flipped, go to Keybindings.',
+      'Click Swap Device Prefixes, swap the two joystick prefixes, then save the keybinding file.',
+      'Reload the bindings in Star Citizen with the console command, or restart the game.'
+    ],
+    actions: [
+      { label: 'Open Device Manager', tab: 'debugger' },
+      { label: 'Open Keybindings', tab: 'bindings', view: 'list' }
+    ]
+  },
+  {
+    id: 'saved-not-working',
+    question: 'I saved my keybindings, but the changes are not working in Star Citizen.',
+    title: 'Reload the saved file inside Star Citizen',
+    paragraphs: [
+      'Saving in Boxxy Binder updates the file on disk. Star Citizen does not automatically re-read that file while it is running.',
+      'Think of Star Citizen as holding its own active copy of your controls. After saving, you still need to tell the game to load the updated file.'
+    ],
+    steps: [
+      'Save your keybindings in Boxxy Binder.',
+      'Use the Copy Command button on the Keybindings page if it is available.',
+      'In Star Citizen, open the console with the tilde key (~).',
+      'Paste the command and press Enter. You can also restart Star Citizen instead.'
+    ],
+    actions: [{ label: 'Open Keybindings', tab: 'bindings', view: 'list' }]
+  },
+  {
+    id: 'device-supported',
+    question: 'Is my device supported?',
+    title: 'Most USB HID devices should work',
+    paragraphs: [
+      'Most likely, yes. Boxxy Binder listens for USB devices using standard HID information, which is the common way many joysticks, gamepads, pedals, and button boxes report their inputs.',
+      'That said, some manufacturers report buttons or axes in unusual ways. Those devices may need extra mapping, and perfect support cannot be guaranteed for every device.'
+    ],
+    steps: [
+      'Open Device Manager and press buttons or move axes on the device.',
+      'If the app sees the inputs, you should be able to bind them.',
+      'If something looks wrong, use Device Manager to check or adjust the detected inputs.'
+    ],
+    actions: [{ label: 'Open Device Manager', tab: 'debugger' }]
+  },
+  {
+    id: 'template-required',
+    question: 'I do not understand templates. Are templates required?',
+    title: 'Templates are only needed for the visual view',
+    paragraphs: [
+      'A template is a visual map of your devices. It says which devices you use, shows an image for each one, and places button frames on top so the visual view can show what each button does.',
+      'Templates are optional. Without a template, you can still use the Keybindings list to bind inputs to actions. You just will not get the nice visual layout for that device.'
+    ],
+    steps: [
+      'Use Keybindings if you only want to edit controls in a list.',
+      'Create or import a template if you want to see your device image and click visual button frames.',
+      'Set each template device prefix to match the same js number Star Citizen uses.'
+    ],
+    actions: [
+      { label: 'Open Template Editor', tab: 'template' },
+      { label: 'Open Keybindings', tab: 'bindings', view: 'list' }
+    ]
+  },
+  {
+    id: 'multi-device-templates',
+    question: 'Why can templates have more than one device?',
+    title: 'Templates can group devices however you like',
+    paragraphs: [
+      'A template can be one device, or it can be a whole setup. Both are valid.',
+      'For example, you might use one downloaded template for two VKB sticks, then make a separate template for Virpil pedals. In the visual view, you can load both. Or you can build one big template that contains all three devices from scratch.'
+    ],
+    steps: [
+      'Use one template per device if you want small reusable pieces.',
+      'Use one template for your whole setup if you prefer everything in one file.',
+      'Load multiple templates in the visual view when you want to stack separate templates together.'
+    ],
+    actions: [{ label: 'Open Template Editor', tab: 'template' }]
+  }
+];
+
+function initializeHelpWizard()
+{
+  const openButton = document.getElementById('open-help-wizard-btn');
+  const modal = document.getElementById('help-wizard-modal');
+  const closeButton = document.getElementById('help-wizard-close-btn');
+  const doneButton = document.getElementById('help-wizard-done-btn');
+  const issueList = document.getElementById('help-wizard-issue-list');
+
+  if (!openButton || !modal || !closeButton || !doneButton || !issueList) return;
+
+  let selectedIssueId = helpWizardIssues[0]?.id || null;
+
+  const renderSelectedIssue = () =>
+  {
+    const selectedIssue = helpWizardIssues.find(issue => issue.id === selectedIssueId) || helpWizardIssues[0];
+    if (!selectedIssue) return;
+
+    document.querySelectorAll('.help-wizard-issue-btn').forEach(button =>
+    {
+      const isSelected = button.dataset.issueId === selectedIssue.id;
+      button.classList.toggle('active', isSelected);
+      button.setAttribute('aria-pressed', String(isSelected));
+    });
+
+    const answerTitle = document.getElementById('help-wizard-answer-title');
+    const answerBody = document.getElementById('help-wizard-answer-body');
+    const answerActions = document.getElementById('help-wizard-answer-actions');
+    if (!answerTitle || !answerBody || !answerActions) return;
+
+    answerTitle.textContent = selectedIssue.title;
+    answerBody.innerHTML = '';
+    answerActions.innerHTML = '';
+
+    selectedIssue.paragraphs.forEach(text =>
+    {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = text;
+      answerBody.appendChild(paragraph);
+    });
+
+    const list = document.createElement('ol');
+    selectedIssue.steps.forEach(text =>
+    {
+      const item = document.createElement('li');
+      item.textContent = text;
+      list.appendChild(item);
+    });
+    answerBody.appendChild(list);
+
+    selectedIssue.actions.forEach(action =>
+    {
+      const button = document.createElement('button');
+      button.className = 'btn btn-primary btn-sm';
+      button.type = 'button';
+      button.textContent = action.label;
+      button.addEventListener('click', () =>
+      {
+        closeHelpWizard();
+        switchTab(action.tab);
+
+        if (action.view)
+        {
+          switchBindingsView(action.view);
+        }
+      });
+      answerActions.appendChild(button);
+    });
+  };
+
+  helpWizardIssues.forEach(issue =>
+  {
+    const button = document.createElement('button');
+    button.className = 'help-wizard-issue-btn';
+    button.type = 'button';
+    button.dataset.issueId = issue.id;
+    button.textContent = issue.question;
+    button.setAttribute('aria-pressed', 'false');
+    button.addEventListener('click', () =>
+    {
+      selectedIssueId = issue.id;
+      renderSelectedIssue();
+    });
+    issueList.appendChild(button);
+  });
+
+  const handleEscape = (event) =>
+  {
+    if (event.key === 'Escape')
+    {
+      closeHelpWizard();
+    }
+  };
+
+  function openHelpWizard()
+  {
+    modal.style.display = 'flex';
+    renderSelectedIssue();
+    document.addEventListener('keydown', handleEscape);
+    setTimeout(() => closeButton.focus(), 100);
+  }
+
+  function closeHelpWizard()
+  {
+    modal.style.display = 'none';
+    document.removeEventListener('keydown', handleEscape);
+  }
+
+  openButton.addEventListener('click', openHelpWizard);
+  closeButton.addEventListener('click', closeHelpWizard);
+  doneButton.addEventListener('click', closeHelpWizard);
+  modal.addEventListener('click', (event) =>
+  {
+    if (event.target === modal)
+    {
+      closeHelpWizard();
+    }
   });
 }
 
@@ -2188,6 +2411,7 @@ window.resetFontSize = resetFontSize;
 // =====================
 
 let currentActionBindingsData = null;
+let pendingActionBindingsReturn = null;
 
 async function openActionBindingsModal(actionMapName, actionName, actionDisplayName)
 {
@@ -2209,7 +2433,7 @@ async function openActionBindingsModal(actionMapName, actionName, actionDisplayN
   const title = document.getElementById('action-bindings-title');
   const listContainer = document.getElementById('action-bindings-list');
 
-  title.textContent = `Manage Bindings: ${actionDisplayName}`;
+  title.textContent = `${actionDisplayName}`;
 
   // Render bindings list
   let html = '';
@@ -2453,6 +2677,12 @@ function addNewBindingFromModal()
 
   const { actionMapName, actionName, actionDisplayName } = currentActionBindingsData;
 
+  pendingActionBindingsReturn = {
+    actionMapName,
+    actionName,
+    actionDisplayName
+  };
+
   // Close this modal and open the binding detection modal
   closeActionBindingsModal();
   window.startBinding(actionMapName, actionName, actionDisplayName);
@@ -2461,6 +2691,16 @@ function addNewBindingFromModal()
 // Make it globally available
 window.openActionBindingsModal = openActionBindingsModal;
 window.removeBindingFromModal = removeBindingFromModal;
+window.consumePendingActionBindingsReturn = function ()
+{
+  const pending = pendingActionBindingsReturn;
+  pendingActionBindingsReturn = null;
+  return pending;
+};
+window.clearPendingActionBindingsReturn = function ()
+{
+  pendingActionBindingsReturn = null;
+};
 
 // ============================================================================
 // CLEAR SC BINDS FUNCTIONS

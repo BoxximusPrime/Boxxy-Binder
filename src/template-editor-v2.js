@@ -227,7 +227,7 @@ function renderPageList()
         card.dataset.pageIndex = index;
         card.innerHTML = `
             <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
-                <div class="page-drag-handle" title="Drag to reorder">⋮⋮</div>
+                <div class="page-drag-handle" title="Drag to reorder">\u22EE\u22EE</div>
                 <div class="page-card-content">
                     <span class="template-page-name">${page.name || 'Untitled Page'}</span>
                     <span class="template-page-device">${page.device_name || 'Device not selected'}</span>

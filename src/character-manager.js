@@ -22,15 +22,12 @@ class CharacterManager
         // Load saved library path
         this.libraryPath = localStorage.getItem('characterLibraryPath');
 
-        // Load master characters first (so sync status can be checked when rendering installations)
         if (this.libraryPath)
         {
             this.updateLibraryPathDisplay();
-            await this.loadMasterCharacters();
         }
 
-        // Load SC installations after master characters are ready
-        await this.loadInstallations();
+        await this.reloadCharacterData();
 
         // Setup event listeners
         this.setupEventListeners();
@@ -65,8 +62,7 @@ class CharacterManager
         {
             characterTab.addEventListener('click', async () =>
             {
-                await this.loadMasterCharacters();
-                await this.loadInstallations();
+                await this.reloadCharacterData();
             });
         }
 
@@ -75,10 +71,20 @@ class CharacterManager
         {
             if (!document.hidden)
             {
-                this.loadMasterCharacters();
-                this.loadInstallations();
+                this.reloadCharacterData();
             }
         });
+    }
+
+    async reloadCharacterData()
+    {
+        await this.loadMasterCharacters();
+        await this.loadInstallations();
+
+        if (this.activeInstallation)
+        {
+            this.renderInstallationContent(this.activeInstallation);
+        }
     }
 
     async refreshAll()
@@ -87,11 +93,7 @@ class CharacterManager
 
         try
         {
-            // Reload master characters
-            await this.loadMasterCharacters();
-
-            // Reload all installations
-            await this.loadInstallations();
+            await this.reloadCharacterData();
 
             this.showSuccess('Character data refreshed successfully');
         } catch (error)
@@ -152,6 +154,29 @@ class CharacterManager
         }
     }
 
+    updateCharacterCounts()
+    {
+        const masterCount = this.masterCharacters.length;
+        const installationCount = this.installations.length;
+        const installedCount = Object.values(this.installationCharacters)
+            .reduce((total, characters) => total + characters.length, 0);
+
+        this.setText('master-character-count', masterCount);
+        this.setText('installation-count', installationCount);
+        this.setText('installed-character-count', installedCount);
+        this.setText('master-character-count-inline', `${masterCount} ${masterCount === 1 ? 'file' : 'files'}`);
+        this.setText('installation-count-inline', `${installationCount} ${installationCount === 1 ? 'install' : 'installs'}`);
+    }
+
+    setText(id, value)
+    {
+        const element = document.getElementById(id);
+        if (element)
+        {
+            element.textContent = value;
+        }
+    }
+
     async loadMasterCharacters()
     {
         if (!this.libraryPath)
@@ -167,6 +192,7 @@ class CharacterManager
             });
 
             this.masterCharacters = characters;
+            this.updateCharacterCounts();
             this.renderMasterCharacters();
         } catch (error)
         {
@@ -180,6 +206,9 @@ class CharacterManager
         const scDirectory = localStorage.getItem('scInstallDirectory');
         if (!scDirectory)
         {
+            this.installations = [];
+            this.installationCharacters = {};
+            this.updateCharacterCounts();
             this.renderEmptyInstallations('not-configured');
             return;
         }
@@ -191,6 +220,12 @@ class CharacterManager
             });
 
             this.installations = installations;
+            this.installationCharacters = installations.reduce((accumulator, installation) =>
+            {
+                accumulator[installation.name] = this.installationCharacters[installation.name] || [];
+                return accumulator;
+            }, {});
+            this.updateCharacterCounts();
 
             if (installations.length > 0)
             {
@@ -199,6 +234,8 @@ class CharacterManager
                 {
                     await this.loadInstallationCharacters(install);
                 }
+
+                this.updateCharacterCounts();
 
                 this.renderInstallationTabs();
 
@@ -230,10 +267,12 @@ class CharacterManager
             });
 
             this.installationCharacters[installation.name] = characters;
+            this.updateCharacterCounts();
         } catch (error)
         {
             console.error(`Error loading characters for ${installation.name}:`, error);
             this.installationCharacters[installation.name] = [];
+            this.updateCharacterCounts();
         }
     }
 
@@ -244,15 +283,18 @@ class CharacterManager
 
         if (this.masterCharacters.length === 0)
         {
+            this.updateCharacterCounts();
             listEl.innerHTML = `
         <div class="empty-state">
-          <div class="empty-state-icon">📭</div>
+                    <div class="empty-state-icon">CHF</div>
           <h3>No Characters Found</h3>
           <p>No .chf files found in the library directory</p>
         </div>
       `;
             return;
         }
+
+        this.updateCharacterCounts();
 
         listEl.innerHTML = this.masterCharacters.slice().sort((a, b) => a.name.localeCompare(b.name)).map(char =>
         {
@@ -261,27 +303,27 @@ class CharacterManager
 
             return `
             <div class="character-card">
-                <div class="character-icon">👤</div>
+                <div class="character-icon">CHF</div>
                 <div class="character-info">
                     <h4 class="character-name">${char.name}</h4>
                     <div class="character-meta-row">
                         ${syncStatus ? `<div class="character-line character-sync-status">${syncStatus}</div>` : ''}
                         <div class="character-line character-meta">
-                            <span class="character-date">📅 ${this.formatDate(char.modified)}</span>
+                            <span class="character-date">Modified ${this.formatDate(char.modified)}</span>
                         </div>
                     </div>
                 </div>
                 <div class="character-actions">
                     ${hasNewerVersion ? `
                         <button class="btn btn-primary btn-sm" onclick="characterManager.updateFromNewest('${char.name}')" title="Update library with newest version">
-                            🔄 Update
+                            Save Newest
                         </button>
                     ` : ''}
                     <button class="btn btn-secondary btn-sm" onclick="characterManager.exportCharacter('${char.name}')" title="Export to all installations">
-                        📤 Export All
+                        Send to Installs
                     </button>
                     <button class="btn btn-danger btn-sm btn-delete" onclick="characterManager.deleteCharacter('${char.name}')" title="Delete from library">
-                        🗑️
+                        Delete
                     </button>
                 </div>
             </div>
@@ -366,9 +408,9 @@ class CharacterManager
     getMasterCharacterSyncStatus(masterChar)
     {
         const statuses = [];
-        let hasOutdated = false;
-        let hasNewer = false;
-        let hasMissing = false;
+        const newerInInstallations = [];
+        const outdatedInInstallations = [];
+        const missingInInstallations = [];
 
         // Check each installation for this character
         for (const [installName, characters] of Object.entries(this.installationCharacters))
@@ -377,32 +419,36 @@ class CharacterManager
 
             if (!installChar)
             {
-                hasMissing = true;
+                missingInInstallations.push(installName);
             } else if (installChar.modified > masterChar.modified)
             {
-                hasNewer = true;
+                newerInInstallations.push(installName);
             } else if (installChar.modified < masterChar.modified)
             {
-                hasOutdated = true;
+                outdatedInInstallations.push(installName);
             }
         }
 
         // Build status message
-        const parts = [];
-        if (hasNewer)
+        if (newerInInstallations.length > 0)
         {
-            parts.push('<span class="sync-status-newer">⚠️ Newer version in game</span>');
+            statuses.push(`<span class="sync-status-newer">Newer in ${this.formatInstallationList(newerInInstallations)}</span>`);
         }
-        if (hasOutdated)
+        if (outdatedInInstallations.length > 0)
         {
-            parts.push('<span class="sync-status-outdated">📤 Update available</span>');
+            statuses.push(`<span class="sync-status-outdated">Library newer than ${this.formatInstallationList(outdatedInInstallations)}</span>`);
         }
-        if (hasMissing && this.installations.length > 0)
+        if (missingInInstallations.length > 0)
         {
-            parts.push('<span class="sync-status-missing">📭 Not in all installations</span>');
+            statuses.push(`<span class="sync-status-missing">Missing in ${this.formatInstallationList(missingInInstallations)}</span>`);
         }
 
-        return parts.length > 0 ? parts.join(' ') : null;
+        return statuses.length > 0 ? statuses.join(' ') : null;
+    }
+
+    formatInstallationList(installNames)
+    {
+        return installNames.join('/');
     }
 
     renderEmptyMasterLibrary(message = null)
@@ -410,9 +456,11 @@ class CharacterManager
         const listEl = document.getElementById('master-characters-list');
         if (!listEl) return;
 
+        this.updateCharacterCounts();
+
         listEl.innerHTML = `
       <div class="empty-state">
-        <div class="empty-state-icon">📂</div>
+                <div class="empty-state-icon">CHF</div>
         <h3>${message || 'No Character Library'}</h3>
         <p>${message ? '' : 'Set a library path to start managing your character appearances'}</p>
       </div>
@@ -426,6 +474,7 @@ class CharacterManager
 
         if (this.installations.length === 0)
         {
+            this.updateCharacterCounts();
             this.renderEmptyInstallations();
             return;
         }
@@ -437,10 +486,13 @@ class CharacterManager
             'TECH-PREVIEW': '⚡'
         };
 
+        this.updateCharacterCounts();
+
         tabsEl.innerHTML = this.installations.map(install => `
       <button class="installation-tab" data-install="${install.name}">
-        <span class="installation-tab-icon">${installationIcons[install.name] || '🚀'}</span>
-        <span>${install.name}</span>
+                <span class="installation-tab-icon">${installationIcons[install.name] || 'SC'}</span>
+                <span class="installation-tab-main">${install.name}</span>
+                <span class="installation-tab-count">${(this.installationCharacters[install.name] || []).length}</span>
       </button>
     `).join('');
 
@@ -460,13 +512,15 @@ class CharacterManager
         const tabsEl = document.getElementById('installation-tabs');
         const contentEl = document.getElementById('installation-content');
 
+        this.updateCharacterCounts();
+
         if (tabsEl)
         {
             if (message === 'not-configured')
             {
                 tabsEl.innerHTML = `
           <div class="empty-state">
-            <div class="empty-state-icon">⚠️</div>
+                        <div class="empty-state-icon">SC</div>
             <h3>Star Citizen Installation Not Configured</h3>
             <p>To manage character appearances across installations, you need to configure your Star Citizen installation directory.</p>
             <button class="btn btn-primary" onclick="window.switchTab('settings')" style="margin-top: 1rem;">
@@ -479,7 +533,7 @@ class CharacterManager
             {
                 tabsEl.innerHTML = `
           <div class="empty-state">
-            <div class="empty-state-icon">🔍</div>
+                        <div class="empty-state-icon">SC</div>
             <h3>${message || 'No Installations Found'}</h3>
             <p>${message ? '' : 'Configure your SC directory in Settings to detect installations'}</p>
           </div>
@@ -522,36 +576,91 @@ class CharacterManager
         if (!installation) return;
 
         const characters = this.installationCharacters[installName] || [];
+        const displayCharacters = this.getInstallationDisplayCharacters(installName);
 
         contentEl.innerHTML = `
       <div class="installation-panel active">
         <div class="installation-header">
-          <div>
-            <h4 style="margin: 0 0 0.25rem 0;">${installName} Installation</h4>
+                    <div class="installation-header-copy">
+                        <span class="section-kicker">Selected Install</span>
+                        <h4>${installName}</h4>
             <div class="installation-path">${installation.path}</div>
           </div>
+                    <div class="installation-header-meta">
+                        <span>${characters.length} local ${characters.length === 1 ? 'character' : 'characters'}</span>
+                        <span>${this.masterCharacters.length} in library</span>
+                    </div>
           <button class="btn btn-primary" onclick="characterManager.deployAllToInstallation('${installName}')">
-            📥 Import All from Library
+                        Restore All from Library
           </button>
         </div>
 
-        ${characters.length === 0 ? `
+        ${displayCharacters.length === 0 ? `
           <div class="empty-state">
-            <div class="empty-state-icon">📭</div>
+                        <div class="empty-state-icon">CHF</div>
             <h3>No Characters Found</h3>
             <p>No character files in this installation</p>
           </div>
         ` : `
           <div class="installation-characters-list">
-            ${characters.slice().sort((a, b) => a.name.localeCompare(b.name)).map(char => this.renderInstallationCharacter(char, installName)).join('')}
+            ${displayCharacters.map(char => this.renderInstallationCharacter(char, installName)).join('')}
           </div>
         `}
       </div>
     `;
     }
 
+    getInstallationDisplayCharacters(installName)
+    {
+        const installationCharacters = this.installationCharacters[installName] || [];
+        const installCharacterNames = new Set(installationCharacters.map(char => char.name));
+
+        const missingLibraryCharacters = this.masterCharacters
+            .filter(char => !installCharacterNames.has(char.name))
+            .map(char => ({
+                ...char,
+                isMissingFromInstallation: true
+            }));
+
+        return [...installationCharacters, ...missingLibraryCharacters]
+            .sort((a, b) =>
+            {
+                if (!!a.isMissingFromInstallation !== !!b.isMissingFromInstallation)
+                {
+                    return a.isMissingFromInstallation ? 1 : -1;
+                }
+
+                return a.name.localeCompare(b.name);
+            });
+    }
+
     renderInstallationCharacter(char, installName)
     {
+        if (char.isMissingFromInstallation)
+        {
+            return `
+            <div class="character-card character-card-missing-install">
+                <div class="character-icon">CHF</div>
+                <div class="character-info">
+                    <h4 class="character-name">${char.name}</h4>
+                    <div class="character-meta-row">
+                        <div class="character-line character-status-row">
+                            <span class="character-status missing">Missing in Install</span>
+                        </div>
+                        <div class="character-line character-meta">
+                            <span class="character-date">Available in library</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="character-actions">
+                    <button class="btn btn-primary btn-sm" onclick="characterManager.deployToInstallation('${char.name}', '${installName}')" title="Restore from library">
+                        Import
+                    </button>
+                </div>
+            </div>
+        `;
+        }
+
         const masterChar = this.masterCharacters.find(m => m.name === char.name);
 
         let status = 'missing';
@@ -576,7 +685,7 @@ class CharacterManager
 
         return `
             <div class="character-card">
-                <div class="character-icon">👤</div>
+                <div class="character-icon">CHF</div>
                 <div class="character-info">
                     <h4 class="character-name">${char.name}</h4>
                     <div class="character-meta-row">
@@ -584,23 +693,23 @@ class CharacterManager
                             <span class="character-status ${status}">${statusText}</span>
                         </div>
                         <div class="character-line character-meta">
-                            <span class="character-date">📅 ${this.formatDate(char.modified)}</span>
+                            <span class="character-date">Modified ${this.formatDate(char.modified)}</span>
                         </div>
                     </div>
                 </div>
                 <div class="character-actions">
                     ${status === 'newer' || status === 'missing' ? `
                         <button class="btn btn-primary btn-sm" onclick="characterManager.importToLibrary('${char.name}', '${installName}')" title="Import to library">
-                            📥 Import
+                            Save to Library
                         </button>
                     ` : ''}
                     ${masterChar ? `
                         <button class="btn btn-secondary btn-sm" onclick="characterManager.deployToInstallation('${char.name}', '${installName}')" title="Deploy from library">
-                            📤 Deploy
+                            Restore
                         </button>
                     ` : ''}
                     <button class="btn btn-danger btn-sm btn-delete" onclick="characterManager.deleteFromInstallation('${char.name}', '${installName}')" title="Delete from installation">
-                        🗑️
+                        Delete
                     </button>
                 </div>
             </div>
@@ -840,8 +949,9 @@ class CharacterManager
             });
 
             this.showSuccess(`Character "${characterName}" deleted from ${installName}`);
-            await this.loadInstallationCharacters(installName);
-            await this.renderMasterCharacters(); // Update sync status
+            await this.loadInstallationCharacters(installation);
+            this.renderInstallationContent(installName);
+            this.renderMasterCharacters();
         } catch (error)
         {
             console.error('Error deleting character from installation:', error);
@@ -851,7 +961,22 @@ class CharacterManager
 
     formatDate(timestamp)
     {
-        const date = new Date(timestamp);
+        const numericTimestamp = Number(timestamp);
+        if (!Number.isFinite(numericTimestamp))
+        {
+            return 'Unknown';
+        }
+
+        const timestampMs = numericTimestamp < 1000000000000
+            ? numericTimestamp * 1000
+            : numericTimestamp;
+
+        const date = new Date(timestampMs);
+        if (Number.isNaN(date.getTime()))
+        {
+            return 'Unknown';
+        }
+
         return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
     }
 

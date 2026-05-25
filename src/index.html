@@ -71,6 +71,9 @@
           <button class="theme-btn" data-theme="neon" title="Neon Theme">
             <span class="theme-sphere theme-sphere-neon"></span>
           </button>
+          <button class="theme-btn" data-theme="gold" title="Golden Theme">
+            <span class="theme-sphere theme-sphere-gold"></span>
+          </button>
         </div>
       </div>
 
@@ -229,16 +232,12 @@
               <aside class="sidebar">
                 <div class="filter-section">
                   <h3>Actions</h3>
-                  <button id="clear-sc-binds-btn" class="btn btn-secondary" style="width: 100%;">🗑️ Generate Unbind
-                    Profile</button>
                   <button id="swap-joystick-prefixes-btn" class="btn btn-secondary" style="width: 100%;">🔄 Swap Device
                     Prefixes</button>
-                  <!-- Restore Defaults - COMMENTED OUT: Has issues with SC not properly applying bindings
-                <button id="restore-defaults-btn" class="btn btn-secondary" style="width: 100%;">🔄 Restore
-                  Defaults</button>
-                -->
-                  <button id="configure-joystick-mapping-btn" class="btn btn-secondary" style="width: 100%;">⚙️ Manage
-                    Devices</button>
+                    <button id="configure-joystick-mapping-btn" class="btn btn-secondary" style="width: 100%;">⚙️ Manage
+                      Devices</button>
+                      <button id="clear-sc-binds-btn" class="btn btn-secondary" style="width: 100%;">🗑️ Generate Unbind
+                        Profile</button>
                 </div>
 
                 <div class=" filter-section">
@@ -833,52 +832,85 @@
       <!-- TAB 4: Character Manager Page -->
       <div id="tab-content-character" class="tab-content">
         <div class="tab-subheader">
-          <h2>👤 Character Appearance Manager</h2>
-          <p class="tab-description">Backup and manage your Star Citizen character appearance files across installations
-          </p>
+          <h2>Character Manager</h2>
+          <p class="tab-description">Keep character appearance files backed up and ready for every Star Citizen install.</p>
         </div>
 
         <div class="character-manager-container">
-          <!-- Master Library Section -->
-          <div class="character-section master-library-section">
-            <div class="section-header">
-              <h3>📚 Master Character Library</h3>
-              <div style="display: flex; gap: 0.5rem;">
-                <button id="refresh-characters-btn" class="btn btn-secondary">🔄 Refresh All</button>
-                <button id="set-library-path-btn" class="btn btn-primary">📁 Set Library Path</button>
+          <div class="character-overview">
+            <div class="character-overview-copy">
+              <span class="character-eyebrow">Appearance Library</span>
+              <p>Your library stores the characters you want to keep. LIVE, PTU, EPTU, and other installs can import from it or send newer edits back.</p>
+            </div>
+            <div class="character-overview-stats" aria-label="Character manager summary">
+              <div class="character-stat">
+                <span class="character-stat-label">Library</span>
+                <strong id="master-character-count">0</strong>
+                <span>characters</span>
+              </div>
+              <div class="character-stat">
+                <span class="character-stat-label">Installs</span>
+                <strong id="installation-count">0</strong>
+                <span>detected</span>
+              </div>
+              <div class="character-stat">
+                <span class="character-stat-label">Game Copies</span>
+                <strong id="installed-character-count">0</strong>
+                <span>files</span>
               </div>
             </div>
-
-            <div class="library-path-display" id="library-path-display">
-              <span class="path-label">Library Location:</span>
-              <span class="path-value" id="library-path-value">Not configured</span>
-            </div>
-
-            <div class="master-characters-list" id="master-characters-list">
-              <div class="empty-state">
-                <div class="empty-state-icon">📂</div>
-                <h3>No Character Library</h3>
-                <p>Set a library path to start managing your character appearances</p>
-              </div>
+            <div class="character-overview-actions">
+              <button id="refresh-characters-btn" class="btn btn-secondary">Refresh</button>
+              <button id="set-library-path-btn" class="btn btn-primary">Choose Library</button>
             </div>
           </div>
 
-          <!-- Installation Tabs -->
-          <div class="character-section installations-section">
-            <div class="section-header">
-              <h3>🚀 Installation Characters</h3>
-            </div>
+          <div class="character-workspace">
+            <!-- Master Library Section -->
+            <div class="character-section master-library-section">
+              <div class="section-header">
+                <div>
+                  <span class="section-kicker">Master Library</span>
+                  <h3>Saved Characters</h3>
+                </div>
+                <span class="section-count" id="master-character-count-inline">0 files</span>
+              </div>
 
-            <div class="installation-tabs" id="installation-tabs">
-              <div class="empty-state">
-                <div class="empty-state-icon">🔍</div>
-                <h3>No Installations Found</h3>
-                <p>Configure your SC directory in Auto Save Settings to detect installations</p>
+              <div class="library-path-display" id="library-path-display">
+                <span class="path-label">Library folder</span>
+                <span class="path-value" id="library-path-value">Not configured</span>
+              </div>
+
+              <div class="master-characters-list" id="master-characters-list">
+                <div class="empty-state">
+                  <div class="empty-state-icon">CHF</div>
+                  <h3>No Character Library</h3>
+                  <p>Set a library path to start managing your character appearances</p>
+                </div>
               </div>
             </div>
 
-            <div class="installation-content" id="installation-content">
-              <!-- Installation-specific character lists will appear here -->
+            <!-- Installation Tabs -->
+            <div class="character-section installations-section">
+              <div class="section-header">
+                <div>
+                  <span class="section-kicker">Game Installs</span>
+                  <h3>LIVE / PTU Copies</h3>
+                </div>
+                <span class="section-count" id="installation-count-inline">0 installs</span>
+              </div>
+
+              <div class="installation-tabs" id="installation-tabs">
+                <div class="empty-state">
+                  <div class="empty-state-icon">SC</div>
+                  <h3>No Installations Found</h3>
+                  <p>Configure your SC directory in Auto Save Settings to detect installations</p>
+                </div>
+              </div>
+
+              <div class="installation-content" id="installation-content">
+                <!-- Installation-specific character lists will appear here -->
+              </div>
             </div>
           </div>
         </div>
@@ -891,6 +923,17 @@
         </div>
 
         <div class="help-page-container">
+          <div class="help-wizard-launch">
+            <div class="help-wizard-launch-copy">
+              <div class="help-wizard-launch-eyebrow">Start Here</div>
+              <h3>Common Issues / Questions</h3>
+              <p>If something is not working and you are not sure where to begin, start with the FAQ. Pick the issue that matches what you are seeing, and it will tell you what to check next.</p>
+            </div>
+            <div class="help-wizard-launch-actions">
+              <button id="open-help-wizard-btn" class="btn btn-primary" type="button">Open Frequently Asked Questions</button>
+            </div>
+          </div>
+
           <!-- HELP NAVIGATION -->
           <div class="help-nav"
             style="background: var(--bg-light); border-radius: 8px; padding: 1.5rem; margin-bottom: 2rem; border-left: 4px solid var(--accent-color);">
@@ -901,12 +944,6 @@
                 onmouseover="this.style.background='var(--bg-dark)'"
                 onmouseout="this.style.background='var(--bg-medium)'">
                 🚀 Getting Started
-              </a>
-              <a href="#help-faq"
-                style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
-                onmouseover="this.style.background='var(--bg-dark)'"
-                onmouseout="this.style.background='var(--bg-medium)'">
-                ❓ FAQ
               </a>
               <a href="#help-howto"
                 style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
@@ -920,12 +957,7 @@
                 onmouseout="this.style.background='var(--bg-medium)'">
                 💡 Tips & Best Practices
               </a>
-              <a href="#help-troubleshooting"
-                style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
-                onmouseover="this.style.background='var(--bg-dark)'"
-                onmouseout="this.style.background='var(--bg-medium)'">
-                🔧 Troubleshooting
-              </a>
+
               <a href="#help-support"
                 style="padding: 0.75rem; background: var(--bg-medium); border-radius: 4px; text-decoration: none; color: var(--accent-color); font-weight: 500; transition: all 0.2s; display: flex; align-items: center; gap: 0.5rem;"
                 onmouseover="this.style.background='var(--bg-dark)'"
@@ -959,14 +991,23 @@
           <div class="help-section">
             <h3>Common Workflow</h3>
             <ol>
-              <li>Create a template in the template editor for your devices (or skip this if you have one to import)
-              </li>
+              <li><strong>Create or import a template (optional):</strong> Templates are only used for the visual view. If you don't need to see your bindings visually, skip this step.</li>
               <li>Go to the keybindings page, import your keybindings file</li>
-              <li>Go to the visual view, and load the template you created or imported</li>
+              <li>If using the visual view, load the template you created or imported</li>
               <li>Use the keybindings page to set your binds</li>
-              <li>Use the visual view to check what buttons you have available, and what actions are bound to them</li>
-              <li>While working save your keybidnings, and use the auto-save feature to quickly import your changes</li>
+              <li>Use the visual view (if loaded) to check what buttons you have available, and what actions are bound to them</li>
+              <li>While working save your keybindings, and use the auto-save feature to quickly import your changes</li>
             </ol>
+          </div>
+
+          <div class="help-section">
+            <h3>Saving Workflow</h3>
+            <strong>How does the auto save feature work?</strong>
+            <p>Auto save allows the app to automatically deploy your keybindings to your Star Citizen installation directories whenever you save them. You can enable "auto save" by clicking the "auto save settings" button at the top right of the keybindings page.</p>
+            <p><strong>Make sure your star citizen install directory is set in the settings page!</strong></p>
+            <p>Once enabled, when you save your keybindings, the app will automatically deploy them to your Star Citizen installation directories (including all installs like Live, PTU, etc).</p>
+            <p><strong>Note:</strong> This won't update your keybindings in-game. They still will need to be pulled in using the console, or manually in the in-game keybindings page.</p>
+            <p>You can simplify this by clicking the "copy command" button at the top right, opening the console in-game, and pasting in the command and hit enter - this will pull in your updated keybindings automatically.</p>
           </div>
 
           <div class="help-section">
@@ -1000,86 +1041,7 @@
             </table>
           </div>
 
-          <!-- SECTION 2: FAQ -->
-          <h2 id="help-faq"
-            style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
-            ❓ Frequently Asked Questions</h2>
-
-          <div class="help-section">
-            <h3>What is a template?</h3>
-            <p>Think of a template like a blueprint for your devices. It defines where buttons and controls are located,
-              so the app knows how to visually represent them in the visual view. A template can have more than one
-              devices within it, so you can create groups of devices.</p>
-            <p>The template editor is the page you'll use to create your layouts where you can assign the device
-              prefixes to match your physical devices, add images of the devices, and arrange buttons to reflect your
-              actual hardware.</p>
-          </div>
-
-          <div class="help-section">
-            <h3>Is my device supported?</h3>
-            <p>I've done my best to try and make the app compatible with a wide range of devices, by reading the HID
-              information directly from the deivces. Buttons and axes should generally work as expected. There may be
-              some exceptions to this, but perfectly supporting EVERY possible device is a huge challenge.</p>
-          </div>
-
-          <div class="help-section">
-            <h3>Understanding Device Prefixes (JS1, JS2, GP1, etc)</h3>
-            <p>Star Citizen uses "js1", "js2", "js3", etc. to identify different joystick/gamepad devices. This
-              numbering
-              system is crucial for proper binding management.</p>
-            <ul>
-              <li><strong>js1</strong> = First joystick device as detected by star citizen</li>
-              <li><strong>js2</strong> = Second joystick device as detected by star citizen</li>
-              <li><strong>gp1</strong> = First gamepad device (Xbox controllers, etc.) as detected by star citizen</li>
-            </ul>
-            <p class="help-note"><strong>Your device prefixes must match your in-game configuration:</strong> If the
-              prefixes are not correct when binding actions, you'll need to head to the Device Manager, and override
-              them manually.</p>
-          </div>
-
-          <div class="help-section">
-            <h3>Joysticks Mirrored In-Game?</h3>
-            <p>If your left and right joysticks are responding the opposite way they should (e.g., right stick movement
-              is detected as left stick), follow these steps to fix it:</p>
-
-            <h4>Step 1: Verify Device Prefixes</h4>
-            <ol>
-              <li>Go to the <strong>Device Manager</strong> tab</li>
-              <li>Check that your joystick devices have the correct prefixes assigned (typically <code>js1</code>,
-                <code>js2</code>, etc.)
-              </li>
-              <li>If needed, use the prefix dropdown to manually override them to match your in-game configuration</li>
-            </ol>
-
-            <h4>Step 2: Swap Device Prefixes in Keybindings</h4>
-            <ol>
-              <li>Go to the <strong>Keybindings</strong> tab</li>
-              <li>Click the <strong>"🔄 Swap Device Prefixes"</strong> button in the left sidebar</li>
-              <li>Select which two prefixes to swap (typically <code>js1</code> and <code>js2</code>)</li>
-              <li>This will swap all bindings between the two devices</li>
-              <li>Save your keybindings file</li>
-            </ol>
-
-            <h4>Step 3: Swap in Star Citizen (if needed)</h4>
-            <p>If swapping the prefixes doesn't resolve the issue, you can also swap them in-game without restarting:
-            </p>
-            <ol>
-              <li>Open the Star Citizen console by pressing <code>~</code> (tilde)</li>
-              <li>Enter the following command to swap joystick 1 and joystick 2:</li>
-            </ol>
-            <div style="display: flex; gap: 0.5rem; align-items: center; margin: 1rem 0;">
-              <code
-                style="flex: 1; padding: 0.75rem; background: var(--bg-dark); border-radius: 4px; font-family: 'Consolas', 'Courier New', monospace;">pp_resortdevices joystick 1 2</code>
-              <button id="copy-resort-devices-btn" class="btn btn-primary" title="Copy to clipboard"
-                onclick="copyResortDevicesCommand()">📋 Copy</button>
-            </div>
-            <p class="help-note"><strong>Note:</strong> The <strong>Swap Device Prefixes</strong> method in step 2 is
-              recommended as the primary solution, as it ensures your keybindings file matches your device
-              configuration. The in-game console command is a fallback option if you prefer to swap them in Star Citizen
-              instead.</p>
-          </div>
-
-          <!-- SECTION 3: HOW-TO GUIDES -->
+          <!-- SECTION 2: HOW-TO GUIDES -->
           <h2 id="help-howto"
             style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
             📚 How-To Guides</h2>
@@ -1192,7 +1154,7 @@
               Settings" button to enable this feature.</p>
           </div>
 
-          <!-- SECTION 4: TIPS & BEST PRACTICES -->
+          <!-- SECTION 3: TIPS & BEST PRACTICES -->
           <h2 id="help-tips"
             style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
             💡 Tips & Best Practices</h2>
@@ -1276,52 +1238,7 @@
           </div>
 
 
-          <!-- SECTION 5: TROUBLESHOOTING -->
-          <h2 id="help-troubleshooting"
-            style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
-            🔧 Troubleshooting</h2>
-
-          <div class="help-section">
-            <h3>My buttons are mapping to the wrong device</h3>
-            <p>This is where things can get a little tricky and confusing. As mentioned above, the main concern here are
-              device prefixes. Here's the steps I'd recommend trying:</p>
-            <ul>
-              <li>Record what prefix your devices are detected as in star citizen.</li>
-              <li>Head over to the Device Manager page</li>
-              <li>Use the drop down to override their prefix to match your in-game configuration</li>
-              <li>Return to the Keybindings page and try binding again</li>
-              <li>Remember, the prefix you set here is what gets recorded in your keybindings when you press a button on
-                the device. If the prefix is wrong, your bindings will be assigned to the wrong device, and your
-                controls won't work correctly in Star Citizen.</li>
-            </ul>
-          </div>
-
-          <div class="help-section">
-            <h3>Common Issues & Solutions</h3>
-            <ul>
-              <li><strong>Buttons not working in-game?</strong> Check your device prefixes in the Device Manager. The js
-                numbers in your
-                bindings file must match how Star Citizen sees your devices.</li>
-              <li><strong>Bindings not working in-game?</strong> Make sure there isn't a similar binding with different
-                wording already set. Star Citizen includes many legacy actions that may no longer function—check for
-                duplicate bindings with slightly different names.</li>
-              <li><strong>Button still active after unbinding?</strong> If you bind a button to an action and then
-                unbind it,
-                the button may still be bound in-game. You can either manually unbind that specific button in the game's
-                control
-                settings, or clear all bindings for that device: Advanced Control Customization → Control Profiles →
-                Clear All
-                Device Bindings.</li>
-              <li><strong>Wrong device responding?</strong> Reconfigure joystick mapping and make sure to test each
-                device.</li>
-              <li><strong>Lost your mapping?</strong> The app stores device mapping in localStorage, but you can always
-                reconfigure it.</li>
-              <li><strong>Template buttons look wrong?</strong> Use the mirror template feature or adjust image flip
-                settings.</li>
-            </ul>
-          </div>
-
-          <!-- SECTION 6: SUPPORT & FEEDBACK -->
+          <!-- SECTION 5: SUPPORT & FEEDBACK -->
           <h2 id="help-support"
             style="margin-top: 2rem; margin-bottom: 1rem; font-size: 1.4rem; color: var(--text-primary); border-bottom: 2px solid var(--accent-color); padding-bottom: 0.5rem;">
             🤝 Support & Feedback</h2>
@@ -1330,9 +1247,9 @@
             <h3>Report Issues</h3>
             <p>If you encounter any bugs or issues, please report them on GitHub:</p>
             <p>
-              <a href="https://github.com/BoxximusPrime/SC-Binding-Utility/issues" target="_blank"
+              <a href="https://github.com/BoxximusPrime/Boxxy-Binder/issues" target="_blank"
                 rel="noopener noreferrer" class="external-link">
-                https://github.com/BoxximusPrime/SC-Binding-Utility/issues
+                https://github.com/BoxximusPrime/Boxxy-Binder/issues
               </a>
             </p>
             <p class="help-note"><strong>When reporting issues:</strong> Include details about your joystick
@@ -1462,6 +1379,29 @@
             <button id="reset-cache-btn" class="btn btn-danger">🗑️ Reset Application Cache</button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Help Wizard Modal -->
+  <div id="help-wizard-modal" class="modal" style="display: none;">
+    <div class="modal-content help-wizard-modal-content" role="dialog" aria-modal="true" aria-labelledby="help-wizard-title">
+      <div class="modal-header">
+        <h2 id="help-wizard-title">Frequently Asked Questions</h2>
+        <button id="help-wizard-close-btn" class="modal-close" type="button" aria-label="Close help wizard">&times;</button>
+      </div>
+      <div class="modal-body help-wizard-body">
+        <div class="help-wizard-layout">
+          <div id="help-wizard-issue-list" class="help-wizard-issue-list" aria-label="Common issues"></div>
+          <div class="help-wizard-answer-panel">
+            <h3 id="help-wizard-answer-title"></h3>
+            <div id="help-wizard-answer-body" class="help-wizard-answer-body" aria-live="polite"></div>
+            <div id="help-wizard-answer-actions" class="help-wizard-answer-actions"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="help-wizard-done-btn" class="btn btn-secondary" type="button">Close</button>
       </div>
     </div>
   </div>
@@ -1608,66 +1548,69 @@
   <!-- Button Details Modal (for Template Editor) -->
   <div id="button-modal" class="modal" style="display: none;">
     <div class="modal-content">
-      <h2>Button Details</h2>
-
-      <div class="button-modal-section button-modal-identity-section">
-        <div class="button-modal-section-title">Identity</div>
-        <label>
-          Button Name:
-          <input type="text" id="button-name-input" placeholder="e.g., Trigger or Hat 1" />
-        </label>
-        <label>
-          Button Type:
-          <select id="button-type-select">
-            <option value="simple">Simple Button</option>
-            <option value="axis">Axis Control</option>
-            <option value="hat4way">4-Way Hat Switch</option>
-            <option value="hat2way-vertical">2-Way Hat Switch (Up/Down)</option>
-            <option value="hat2way-horizontal">2-Way Hat Switch (Left/Right)</option>
-            <option value="toggle3way-vertical">3-Way Toggle (Vertical)</option>
-            <option value="toggle3way-horizontal">3-Way Toggle (Horizontal)</option>
-            <option value="rotary3way">3-Way Rotary (Optional Push)</option>
-            <option value="rotary4way">4-Way Rotary (Optional Push)</option>
-          </select>
-        </label>
+      <div class="modal-header">
+        <h2>Button Details</h2>
       </div>
+      <div class="modal-body button-modal-body">
+        <div class="button-modal-section button-modal-identity-section">
+          <div class="button-modal-section-title">Identity</div>
+          <label>
+            Button Name:
+            <input type="text" id="button-name-input" placeholder="e.g., Trigger or Hat 1" />
+          </label>
+          <label>
+            Button Type:
+            <select id="button-type-select">
+              <option value="simple">Simple Button</option>
+              <option value="axis">Axis Control</option>
+              <option value="hat4way">4-Way Hat Switch</option>
+              <option value="hat2way-vertical">2-Way Hat Switch (Up/Down)</option>
+              <option value="hat2way-horizontal">2-Way Hat Switch (Left/Right)</option>
+              <option value="toggle3way-vertical">3-Way Toggle (Vertical)</option>
+              <option value="toggle3way-horizontal">3-Way Toggle (Horizontal)</option>
+              <option value="rotary3way">3-Way Rotary (Optional Push)</option>
+              <option value="rotary4way">4-Way Rotary (Optional Push)</option>
+            </select>
+          </label>
+        </div>
 
-      <div class="button-modal-section button-modal-graphic-section">
-        <div class="button-graphic-stage">
-          <div id="button-graphic-container" class="button-graphic-container"></div>
+        <div class="button-modal-section button-modal-graphic-section">
+          <div class="button-graphic-stage">
+            <div id="button-graphic-container" class="button-graphic-container"></div>
 
-          <div id="simple-input-section" class="button-graphic-overlay button-graphic-overlay-simple">
-            <button type="button" id="button-input-socket" class="input-target button-graphic-slot button-graphic-slot-simple" data-slot-label="Binding"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-          </div>
+            <div id="simple-input-section" class="button-graphic-overlay button-graphic-overlay-simple">
+              <button type="button" id="button-input-socket" class="input-target button-graphic-slot button-graphic-slot-simple" data-slot-label="Binding"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+            </div>
 
-          <div id="hat-input-section" class="button-graphic-overlay button-graphic-overlay-hat">
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-top button-graphic-slot-toggle-up" data-direction="up" data-slot-label="Up" data-hat-type="hat4way,hat2way-vertical,toggle3way-vertical"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-bottom button-graphic-slot-toggle-down" data-direction="down" data-slot-label="Down" data-hat-type="hat4way,hat2way-vertical,toggle3way-vertical"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-left" data-direction="left" data-slot-label="Left" data-hat-type="hat4way,hat2way-horizontal,toggle3way-horizontal"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-right" data-direction="right" data-slot-label="Right" data-hat-type="hat4way,hat2way-horizontal,toggle3way-horizontal"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-center" data-direction="middle" data-slot-label="Middle" data-hat-type="toggle3way-vertical,toggle3way-horizontal"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-rotary-1" data-direction="1" data-slot-label="Position 1" data-hat-type="rotary3way,rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-rotary-2" data-direction="2" data-slot-label="Position 2" data-hat-type="rotary3way,rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-rotary-3" data-direction="3" data-slot-label="Position 3" data-hat-type="rotary3way,rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-rotary-4" data-direction="4" data-slot-label="Position 4" data-hat-type="rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-            <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-push" data-direction="push" data-slot-label="Push" data-hat-type="hat4way,hat2way-vertical,hat2way-horizontal,rotary3way,rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
-          </div>
+            <div id="hat-input-section" class="button-graphic-overlay button-graphic-overlay-hat">
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-top button-graphic-slot-toggle-up" data-direction="up" data-slot-label="Up" data-hat-type="hat4way,hat2way-vertical,toggle3way-vertical"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-bottom button-graphic-slot-toggle-down" data-direction="down" data-slot-label="Down" data-hat-type="hat4way,hat2way-vertical,toggle3way-vertical"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-left" data-direction="left" data-slot-label="Left" data-hat-type="hat4way,hat2way-horizontal,toggle3way-horizontal"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-right" data-direction="right" data-slot-label="Right" data-hat-type="hat4way,hat2way-horizontal,toggle3way-horizontal"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-center" data-direction="middle" data-slot-label="Middle" data-hat-type="toggle3way-vertical,toggle3way-horizontal"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-rotary-1" data-direction="1" data-slot-label="Position 1" data-hat-type="rotary3way,rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-rotary-2" data-direction="2" data-slot-label="Position 2" data-hat-type="rotary3way,rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-rotary-3" data-direction="3" data-slot-label="Position 3" data-hat-type="rotary3way,rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-rotary-4" data-direction="4" data-slot-label="Position 4" data-hat-type="rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+              <button type="button" class="input-target hat-input-socket button-graphic-slot button-graphic-slot-push" data-direction="push" data-slot-label="Push" data-hat-type="hat4way,hat2way-vertical,hat2way-horizontal,rotary3way,rotary4way"><span class="socket-text">—</span><span class="socket-clear-btn" title="Clear binding">✕</span></button>
+            </div>
 
-          <div id="button-binding-overlay" class="button-binding-overlay" aria-hidden="true">
-            <div class="button-binding-overlay-card">
-              <div id="button-binding-overlay-title" class="button-binding-overlay-title">Press Button</div>
-              <div id="button-binding-overlay-subtitle" class="button-binding-overlay-subtitle">Listening for input...</div>
-              <div id="button-binding-overlay-timer" class="button-binding-overlay-timer" hidden></div>
-              <div id="button-binding-overlay-captured" class="button-binding-overlay-captured" hidden></div>
-              <div id="button-binding-overlay-options" class="button-binding-overlay-options" hidden></div>
+            <div id="button-binding-overlay" class="button-binding-overlay" aria-hidden="true">
+              <div class="button-binding-overlay-card">
+                <div id="button-binding-overlay-title" class="button-binding-overlay-title">Press Button</div>
+                <div id="button-binding-overlay-subtitle" class="button-binding-overlay-subtitle">Listening for input...</div>
+                <div id="button-binding-overlay-timer" class="button-binding-overlay-timer" hidden></div>
+                <div id="button-binding-overlay-captured" class="button-binding-overlay-captured" hidden></div>
+                <div id="button-binding-overlay-options" class="button-binding-overlay-options" hidden></div>
+              </div>
             </div>
           </div>
+          <div id="input-detection-status" class="info-text button-graphic-status"></div>
+          <div id="hat-detection-status" class="info-text button-graphic-status"></div>
         </div>
-        <div id="input-detection-status" class="info-text button-graphic-status"></div>
-        <div id="hat-detection-status" class="info-text button-graphic-status"></div>
       </div>
 
-      <div class="modal-buttons" style="margin-top: 1.5rem;">
+      <div class="modal-footer button-modal-footer">
         <button id="button-modal-delete" class="btn btn-danger" style="margin-right: auto;">Delete Button</button>
         <button id="button-modal-cancel" class="btn btn-secondary">Cancel</button>
         <button id="button-modal-save" class="btn btn-success">Save</button>
@@ -1678,11 +1621,15 @@
   <!-- Template Selection Modal (for Visual View) -->
   <div id="template-modal" class="modal" style="display: none;">
     <div class="modal-content wide-modal">
-      <h2>Select Joystick Template</h2>
-      <div id="template-list" class="template-grid">
-        <!-- Templates will be populated here -->
+      <div class="modal-header">
+        <h2>Select Joystick Template</h2>
       </div>
-      <div class="modal-buttons">
+      <div class="modal-body">
+        <div id="template-list" class="template-grid">
+          <!-- Templates will be populated here -->
+        </div>
+      </div>
+      <div class="modal-footer">
         <button id="template-modal-cancel" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
@@ -1774,7 +1721,8 @@
           </div>
         </div>
       </div>
-      <div class="config-actions">
+      <div class="modal-footer viewer-config-footer">
+        <button id="config-cancel-btn" class="btn btn-secondary">Cancel</button>
         <button id="config-reset-btn" class="btn btn-danger">Reset to Defaults</button>
         <button id="config-apply-btn" class="btn btn-success">Apply</button>
       </div>
@@ -1889,33 +1837,31 @@
         <h2>Swap Device Prefixes</h2>
       </div>
       <div class="modal-body">
-        <div class="info-text" style="margin-bottom: 1rem;">
-          Swap device prefixes (js1, js2, gp1, etc.) on all button inputs across the entire template. This is useful
-          when devices change order.
+        <div class="swap-prefix-intro">
+          <div class="swap-prefix-intro-title">How this works</div>
+          <p>If Star Citizen has your devices flipped, this swaps two prefixes everywhere in the loaded keybindings.</p>
+          <p>Example: if your right stick <b>trigger button</b> is acting like your left stick <b>trigger button</b>, swap those prefixes here so each device triggers the correct actions.</p>
+          <p>You will still need to reload the updated bindings in-game afterward.</p>
         </div>
 
-        <label>
-          First Device Prefix:
-          <select id="swap-prefix-first-select">
-            <option value="">-- Select a prefix --</option>
-          </select>
-        </label>
+        <div class="swap-prefix-row">
+          <label>
+            From Prefix
+            <select id="swap-prefix-first-select">
+              <option value="">-- Select a prefix --</option>
+            </select>
+          </label>
 
-        <div style="text-align: center; margin: 0.5rem 0; font-size: 1.5rem; color: var(--text-muted);">
-          ⇄
-        </div>
+          <div class="swap-prefix-arrow" aria-hidden="true">
+            ⇄
+          </div>
 
-        <label>
-          Second Device Prefix:
-          <select id="swap-prefix-second-select">
-            <option value="">-- Select a prefix --</option>
-          </select>
-        </label>
-
-        <div class="info-text"
-          style="margin-top: 1rem; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 4px;">
-          ℹ️ This will swap the prefixes on all button inputs throughout the entire template. For example, all
-          "js1_button3" will become "js2_button3" and vice versa.
+          <label>
+            To Prefix
+            <select id="swap-prefix-second-select">
+              <option value="">-- Select a prefix --</option>
+            </select>
+          </label>
         </div>
       </div>
       <div class="modal-footer">
@@ -2005,7 +1951,7 @@
         <div class="whats-new-footer">
           <p>Thank you for using the Boxxy Binder!</p>
           <p class="text-muted">Be sure to report any issues on the github <a
-              href="https://github.com/BoxximusPrime/SC-Binding-Utility/issues" target="_blank"
+              href="https://github.com/BoxximusPrime/Boxxy-Binder/issues" target="_blank"
               rel="noopener noreferrer" class="external-link">repository</a>.</p>
         </div>
       </div>
@@ -2062,43 +2008,43 @@
 
   <!-- Action Search Modal (for Visual View binding) -->
   <div id="action-search-modal" class="modal" style="display: none;">
-    <div class="modal-header">
-      <div class="whats-new-footer">
-        <p>Thank you for using the Boxxy Binder!</p>
-        <p class="text-muted">Be sure to report any issues on the github <a
-            href="https://github.com/BoxximusPrime/SC-Binding-Utility/issues" target="_blank" rel="noopener noreferrer"
-            class="external-link">repository</a>.</p>
+    <div class="modal-content" style="max-width: 980px;">
+      <div class="modal-header action-search-modal-header">
+        <h2>Add Action</h2>
       </div>
-      <code id="action-search-button-id">js1_button1</code>
-    </div>
-    <div class="action-search-modifiers">
-      <span class="modifier-label">Modifier:</span>
-      <div class="modifier-buttons">
-        <button class="modifier-btn" data-modifier="" title="No modifier">None</button>
-        <button class="modifier-btn" data-modifier="lalt" title="Left Alt">L Alt</button>
-        <button class="modifier-btn" data-modifier="lctrl" title="Left Ctrl">L Ctrl</button>
-        <button class="modifier-btn" data-modifier="lshift" title="Left Shift">L Shift</button>
-        <button class="modifier-btn" data-modifier="ralt" title="Right Alt">R Alt</button>
-        <button class="modifier-btn" data-modifier="rctrl" title="Right Ctrl">R Ctrl</button>
-        <button class="modifier-btn" data-modifier="rshift" title="Right Shift">R Shift</button>
+      <div class="modal-body">
+        <div class="action-search-meta">
+          <p class="text-muted action-search-modal-subtitle">Choose an action to bind to the selected input: <code id="action-search-button-id" style="margin-bottom: 10px;">js1_button1</code></p>
+          
+        </div>
+        <div class="action-search-modifiers">
+          <span class="modifier-label">Modifier:</span>
+          <div class="modifier-buttons">
+            <button class="modifier-btn" data-modifier="" title="No modifier">None</button>
+            <button class="modifier-btn" data-modifier="lalt" title="Left Alt">L Alt</button>
+            <button class="modifier-btn" data-modifier="lctrl" title="Left Ctrl">L Ctrl</button>
+            <button class="modifier-btn" data-modifier="lshift" title="Left Shift">L Shift</button>
+            <button class="modifier-btn" data-modifier="ralt" title="Right Alt">R Alt</button>
+            <button class="modifier-btn" data-modifier="rctrl" title="Right Ctrl">R Ctrl</button>
+            <button class="modifier-btn" data-modifier="rshift" title="Right Shift">R Shift</button>
+          </div>
+        </div>
+        <div class="action-search-input-container">
+          <input type="text" id="action-search-input" class="action-search-input"
+            placeholder="Search actions... (use | for OR, + for AND)" autofocus />
+          <button id="action-search-clear-btn" class="action-search-clear-btn" style="display: none;">✕</button>
+        </div>
+        <div class="action-search-tips">
+          <span>💡 Tips: Use <code>|</code> for OR (fire|missile), <code>+</code> for AND (required+both)</span>
+        </div>
+        <div id="action-search-results" class="action-search-results">
+          <div class="action-search-empty">Type to search for actions...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="action-search-cancel-btn" class="btn btn-secondary">Cancel</button>
       </div>
     </div>
-    <div class="action-search-input-container">
-      <input type="text" id="action-search-input" class="action-search-input"
-        placeholder="Search actions... (use | for OR, + for AND)" autofocus />
-      <button id="action-search-clear-btn" class="action-search-clear-btn" style="display: none;">✕</button>
-    </div>
-    <div class="action-search-tips">
-      <span>💡 Tips: Use <code>|</code> for OR (fire|missile), <code>+</code> for AND (required+both)</span>
-    </div>
-    <div id="action-search-results" class="action-search-results">
-      <div class="action-search-empty">Type to search for actions...</div>
-    </div>
-  </div>
-  <div class="modal-footer">
-    <button id="action-search-cancel-btn" class="btn btn-secondary">Cancel</button>
-  </div>
-  </div>
   </div>
 
   <!-- Clear SC Binds Success Modal -->

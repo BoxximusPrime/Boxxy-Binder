@@ -1,12 +1,13 @@
 /**
  * Theme Switcher Module
- * Handles switching between different themes (Scifi, VS Code Dark, and Neon)
+ * Handles switching between different themes.
  */
 
 const THEMES = {
     SCIFI: 'scifi',
     VSCODE: 'vscode',
-    NEON: 'neon'
+    NEON: 'neon',
+    GOLD: 'gold'
 };
 
 // Theme display configuration
@@ -22,6 +23,10 @@ const THEME_CONFIG = {
     [THEMES.NEON]: {
         name: 'Neon',
         class: 'theme-neon'
+    },
+    [THEMES.GOLD]: {
+        name: 'Gold',
+        class: 'theme-gold'
     }
 };
 
