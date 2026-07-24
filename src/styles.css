@@ -2159,6 +2159,63 @@ body.is-action-dragging {
   display: inline;
 }
 
+.binding-tag-note {
+  width: 1.35em;
+  height: 1.35em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: inherit;
+  background: none;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.45;
+  font-size: 0.95em;
+  line-height: 1;
+}
+
+.binding-tag-note:hover,
+.binding-tag-note.has-note {
+  opacity: 1;
+}
+
+.binding-tag-note.has-note {
+  filter: drop-shadow(0 0 3px currentColor);
+}
+
+.binding-tag-custom-note {
+  padding-left: 0.45rem;
+  border-left: 1px solid currentColor;
+  opacity: 0.85;
+  font-style: italic;
+}
+
+.input-note-modal-content {
+  max-width: 460px;
+}
+
+.input-note-target {
+  margin-bottom: 1rem;
+  color: var(--text-secondary);
+}
+
+.input-note-target code {
+  color: var(--accent-primary);
+}
+
+#input-note-modal-input {
+  width: 100%;
+  margin-top: 0.4rem;
+}
+
+.input-note-modal-hint {
+  margin-top: 0.6rem;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
 .binding-tag-remove {
   background: none;
   border: none;

@@ -1,8 +1,8 @@
 {
-    "dataVersion": "alpha-4.8",
-    "gameVersion": "",
+    "dataVersion": "alpha-4.9",
+    "gameVersion": "4.9",
     "minAppVersion": "1.2.0",
-    "sha256": "43359cf399c34d2257d65abccd11699a0d0248549451930082ca693a1487edf1",
+    "sha256": "01a125e5e59c90c826bcd632e6720e3278225c32b667ee23ed7f0fa20b6fd94e",
     "downloadUrl": "https://raw.githubusercontent.com/BoxximusPrime/Boxxy-Binder/main/AllBinds.xml",
-    "notes": "Initial manifest for remotely updating the bundled base bindings database."
+    "notes": "Updated for 4.9"
 }

@@ -31,7 +31,20 @@ import
     getToggle3WayPositions,
     getRotaryPositions
 } from './input-type-renderer.js';
-import { toStarCitizenFormat, getInputType } from './input-utils.js';
+import
+{
+    toStarCitizenFormat,
+    getInputType,
+    normalizeStarCitizenGamepadInput
+} from './input-utils.js';
+import
+{
+    MAX_CONTROL_ANNOTATION_LENGTH,
+    buildControlAnnotationKey,
+    normalizeControlAnnotation,
+    normalizeControlInputId,
+    withControlAnnotation
+} from './control-annotations.js';
 
 // ========================================
 // Configurable Display Settings
@@ -63,6 +76,7 @@ let currentTemplateIndex = 0; // Index of currently selected template in loadedT
 // Template and bindings (currentTemplate is now derived from loadedTemplates)
 let currentTemplate = null;
 let currentBindings = null;
+let controlAnnotations = {};
 
 // Canvas elements
 let canvas, ctx;
@@ -91,6 +105,18 @@ let inputDragGhostEl = null;
 let inputDragStart = null;
 let inputDragSuppressClick = false;
 let actionDropTarget = null;
+
+window.addEventListener('control-annotations-changed', (event) =>
+{
+    if (!event.detail || typeof event.detail !== 'object') return;
+
+    controlAnnotations = event.detail;
+    refreshKeyboardBindings();
+    if (canvas && window.viewerImage)
+    {
+        resizeViewerCanvas();
+    }
+});
 
 // Live input highlight state
 let liveInputBox = null;
@@ -268,8 +294,14 @@ function normalizeInputStringForStick(rawInput, jsPrefix)
 
     let normalized = trimmed.toLowerCase();
 
-    // Convert to SC axis naming when possible
-    const scFormat = toStarCitizenFormat(normalized);
+    // Preserve directional XInput axes for multi-direction template controls,
+    // while converting numbered Xbox controls to SC's semantic gp tokens.
+    const gamepadFormat = normalizeStarCitizenGamepadInput(normalized, {
+        preserveAxisDirection: true
+    });
+    const scFormat = gamepadFormat !== normalized
+        ? gamepadFormat
+        : toStarCitizenFormat(normalized);
     if (scFormat && typeof scFormat === 'string')
     {
         normalized = scFormat.toLowerCase();
@@ -288,6 +320,14 @@ function normalizeInputStringForStick(rawInput, jsPrefix)
     }
 
     return normalized;
+}
+
+function normalizeVisualGamepadInput(inputString)
+{
+    if (typeof inputString !== 'string') return inputString;
+    return normalizeStarCitizenGamepadInput(inputString.toLowerCase().trim(), {
+        preserveAxisDirection: true
+    });
 }
 
 // Normalize template data to current format (handles legacy formats)
@@ -460,6 +500,11 @@ window.initializeVisualView = function ()
 
     // Load display configuration from localStorage
     loadDisplayConfig();
+
+    const savedAnnotations = ViewerState.load('viewerControlAnnotations', {});
+    controlAnnotations = savedAnnotations && typeof savedAnnotations === 'object' && !Array.isArray(savedAnnotations)
+        ? savedAnnotations
+        : {};
 
     restoreSmartFilterSelection();
 
@@ -832,7 +877,7 @@ function handleViewerInputDetected(inputData)
 
 function findMatchingBoxForInput(bindingInput)
 {
-    const targetInput = bindingInput.toLowerCase().trim();
+    const targetInput = normalizeVisualGamepadInput(bindingInput);
 
     for (const box of clickableBoxes)
     {
@@ -842,10 +887,10 @@ function findMatchingBoxForInput(bindingInput)
             {
                 if (binding && typeof binding === 'object')
                 {
-                    if (binding.inputRaw && binding.inputRaw.toLowerCase().trim() === targetInput) return true;
-                    if (binding.input && binding.input.toLowerCase().trim() === targetInput) return true;
+                    if (binding.inputRaw && normalizeVisualGamepadInput(binding.inputRaw) === targetInput) return true;
+                    if (binding.input && normalizeVisualGamepadInput(binding.input) === targetInput) return true;
                 }
-                if (typeof binding === 'string' && binding.toLowerCase().trim() === targetInput) return true;
+                if (typeof binding === 'string' && normalizeVisualGamepadInput(binding) === targetInput) return true;
                 return false;
             });
 
@@ -1899,21 +1944,10 @@ function drawButtons(img, mode = DrawMode.NORMAL)
     });
 }
 
-function bindingsToContentLines(bindings)
+function bindingsToContentLines(bindings, buttonData = null)
 {
     const safeBindings = Array.isArray(bindings) ? bindings : [];
-    if (safeBindings.length === 0)
-    {
-        const hiddenCount = bindings && typeof bindings.hiddenCount === 'number' ? bindings.hiddenCount : 0;
-        if (hiddenCount > 0)
-        {
-            const label = hiddenCount === 1 ? '1 hidden' : `${hiddenCount} hidden`;
-            return [`[muted]${label}`];
-        }
-        return [];
-    }
-
-    return safeBindings.map(binding =>
+    const contentLines = safeBindings.map(binding =>
     {
         let actionLabel = binding.actionLabel || binding.action;
         if (binding.multiTap && binding.multiTap > 1)
@@ -1927,6 +1961,24 @@ function bindingsToContentLines(bindings)
         }
         return `[action]${actionLabel}`;
     });
+
+    const annotation = buttonData ? getControlAnnotation(buttonData) : '';
+    if (annotation)
+    {
+        contentLines.unshift(`[bright]Note: ${annotation}`);
+    }
+
+    if (contentLines.length === 0)
+    {
+        const hiddenCount = bindings && typeof bindings.hiddenCount === 'number' ? bindings.hiddenCount : 0;
+        if (hiddenCount > 0)
+        {
+            const label = hiddenCount === 1 ? '1 hidden' : `${hiddenCount} hidden`;
+            contentLines.push(`[muted]${label}`);
+        }
+    }
+
+    return contentLines;
 }
 
 // Helper function to draw connecting line for a button (first pass)
@@ -2024,7 +2076,7 @@ function drawToggle3WayVertical(toggle, mode = DrawMode.NORMAL)
         mode,
         alpha: 1,
         orientation: 'vertical',
-        getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || []),
+        getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || [], { ...toggle, direction: dir }),
         colors: {
             ...VIEWER_TEXT_COLORS,
             boxColor: getButtonBoxColor(toggle)
@@ -2084,7 +2136,7 @@ function drawToggle3WayHorizontal(toggle, mode = DrawMode.NORMAL)
         mode,
         alpha: 1,
         orientation: 'horizontal',
-        getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || []),
+        getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || [], { ...toggle, direction: dir }),
         colors: {
             ...VIEWER_TEXT_COLORS,
             boxColor: getButtonBoxColor(toggle)
@@ -2167,7 +2219,7 @@ function drawRotaryInternal(rotary, mode, steps)
         alpha: 1,
         steps,
         includePush: true,
-        getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || []),
+        getContentForDirection: (dir) => bindingsToContentLines(bindingsByDirection[dir] || [], { ...rotary, direction: dir }),
         colors: {
             ...VIEWER_TEXT_COLORS,
             boxColor: getButtonBoxColor(rotary)
@@ -2192,7 +2244,7 @@ function drawSingleButton(button, mode = DrawMode.NORMAL)
     // Only track bounds in bounds mode
     if (mode === DrawMode.BOUNDS_ONLY)
     {
-        if (bindings.length > 0)
+        if (bindings.length > 0 || getControlAnnotation(button))
         {
             updateBounds(button.buttonPos.x, button.buttonPos.y, 14, 14);
         }
@@ -2288,7 +2340,7 @@ function drawHat4Way(hat, mode = DrawMode.NORMAL)
         getContentForDirection: (dir, input) =>
         {
             const bindings = bindingsByDirection[dir] || [];
-            return bindingsToContentLines(bindings);
+            return bindingsToContentLines(bindings, { ...hat, direction: dir });
         },
         colors: {
             ...VIEWER_TEXT_COLORS,
@@ -2374,7 +2426,7 @@ function drawHat2WayVertical(hat, mode = DrawMode.NORMAL)
         getContentForDirection: (dir, input) =>
         {
             const bindings = bindingsByDirection[dir] || [];
-            return bindingsToContentLines(bindings);
+            return bindingsToContentLines(bindings, { ...hat, direction: dir });
         },
         colors: {
             ...VIEWER_TEXT_COLORS,
@@ -2456,7 +2508,7 @@ function drawHat2WayHorizontal(hat, mode = DrawMode.NORMAL)
         getContentForDirection: (dir, input) =>
         {
             const bindings = bindingsByDirection[dir] || [];
-            return bindingsToContentLines(bindings);
+            return bindingsToContentLines(bindings, { ...hat, direction: dir });
         },
         colors: {
             ...VIEWER_TEXT_COLORS,
@@ -2495,7 +2547,7 @@ function drawBindingBoxLocal(x, y, label, bindings, compact = false, buttonData 
         }
     };
 
-    const contentLines = bindingsToContentLines(bindings);
+    const contentLines = bindingsToContentLines(bindings, buttonData);
 
     // Use improved rendering function from button-renderer.js with display config
     drawButtonBox(ctx, x, y, label, contentLines, compact, {
@@ -2768,9 +2820,12 @@ function searchBindings(buttonIdentifier)
             for (let bindingIndex = 0; bindingIndex < action.bindings.length; bindingIndex++)
             {
                 const binding = action.bindings[bindingIndex];
-                if (binding.input_type === 'Joystick')
+                if (binding.input_type === 'Joystick' || binding.input_type === 'Gamepad')
                 {
-                    let input = binding.input.toLowerCase();
+                    let input = normalizeStarCitizenGamepadInput(
+                        binding.input.toLowerCase(),
+                        { preserveAxisDirection: true }
+                    );
                     let modifiers = [];
                     let inputWithoutModifier = input;
 
@@ -2803,7 +2858,7 @@ function searchBindings(buttonIdentifier)
                     }
 
                     // Skip invalid/empty joystick bindings
-                    if (!inputWithoutModifier || inputWithoutModifier.match(/^js\d+_\s*$/) || inputWithoutModifier.endsWith('_')) continue;
+                    if (!inputWithoutModifier || inputWithoutModifier.match(/^(?:js|gp)\d+_\s*$/) || inputWithoutModifier.endsWith('_')) continue;
 
                     let isMatch = false;
 
@@ -2833,8 +2888,10 @@ function searchBindings(buttonIdentifier)
                     {
                         // Only use button number matching if the binding is actually a button
                         // Check that it doesn't contain 'axis' or 'hat' to avoid false matches
-                        const buttonPattern = new RegExp(`^${jsPrefix}button${buttonNum}(?:_|$)`);
-                        if (buttonPattern.test(inputWithoutModifier) && !inputWithoutModifier.includes('_axis') && !inputWithoutModifier.includes('_hat'))
+                        const expectedButtonInput = normalizeStarCitizenGamepadInput(
+                            `${jsPrefix}button${buttonNum}`
+                        );
+                        if (inputWithoutModifier === expectedButtonInput && !inputWithoutModifier.includes('_axis') && !inputWithoutModifier.includes('_hat'))
                         {
                             isMatch = true;
                         }
@@ -3525,6 +3582,7 @@ function showBindingInfo(buttonData, bindings)
     }
 
     const buttonIdString = getButtonIdString(buttonData);
+    const controlAnnotation = getControlAnnotation(buttonData);
 
     let html = `
         <div class="binding-info-header">
@@ -3532,7 +3590,16 @@ function showBindingInfo(buttonData, bindings)
             <button class="binding-info-close" onclick="hideBindingInfo()">×</button>
         </div>
         <div class="binding-info-details">
-            <span class="binding-info-id">Button ID: <code class="button-id-link" onclick="window.searchMainTabForButtonId('${buttonIdString}')" style="cursor: pointer; color: #4a9eff; text-decoration: underline;">${buttonIdString}</code></span>
+            <span class="binding-info-id">Input ID: <code class="button-id-link" onclick="window.searchMainTabForButtonId('${buttonIdString}')" style="cursor: pointer; color: #4a9eff; text-decoration: underline;">${buttonIdString}</code></span>
+        </div>
+        <div class="binding-info-note-editor">
+            <label for="binding-info-note-input">Custom note</label>
+            <div class="binding-info-note-row">
+                <input id="binding-info-note-input" type="text" maxlength="${MAX_CONTROL_ANNOTATION_LENGTH}"
+                    value="${escapeForHtml(controlAnnotation)}" placeholder="e.g., R Ctrl via JoyToKey" />
+                <button id="binding-info-note-save" type="button">Save</button>
+            </div>
+            <div class="binding-info-note-hint">Shown on this input in visual maps. Star Citizen bindings are not changed.</div>
         </div>
         <div class="binding-info-content">
     `;
@@ -3577,7 +3644,37 @@ function showBindingInfo(buttonData, bindings)
     `;
 
     panel.innerHTML = html;
-    panel.style.display = 'block';
+    panel.style.display = 'flex';
+
+    const noteInput = panel.querySelector('#binding-info-note-input');
+    const noteSaveButton = panel.querySelector('#binding-info-note-save');
+    const persistNote = () =>
+    {
+        saveControlAnnotation(buttonData, noteInput ? noteInput.value : '');
+        resizeViewerCanvas();
+        refreshKeyboardBindings();
+
+        const refreshedBindings = findBindingsForInputData(buttonData);
+        showBindingInfo(buttonData, refreshedBindings);
+
+        if (window.showSuccessMessage)
+        {
+            window.showSuccessMessage(getControlAnnotation(buttonData) ? 'Custom note saved' : 'Custom note cleared');
+        }
+    };
+
+    if (noteSaveButton) noteSaveButton.addEventListener('click', persistNote);
+    if (noteInput)
+    {
+        noteInput.addEventListener('keydown', (event) =>
+        {
+            if (event.key === 'Enter')
+            {
+                event.preventDefault();
+                persistNote();
+            }
+        });
+    }
     console.log('Panel display set to block');
 }
 
@@ -3661,6 +3758,11 @@ window.removeBindingFromVisualView = async function (actionMapName, actionName, 
 
 function getButtonIdString(buttonData)
 {
+    if (buttonData && typeof buttonData.input === 'string' && buttonData.input.trim())
+    {
+        return normalizeStarCitizenGamepadInput(buttonData.input.toLowerCase().trim());
+    }
+
     const identifier = extractButtonIdentifier(
         buttonData,
         buttonData.direction || null
@@ -3668,14 +3770,69 @@ function getButtonIdString(buttonData)
 
     if (identifier.inputString)
     {
-        return identifier.inputString;
+        return normalizeStarCitizenGamepadInput(identifier.inputString);
     }
     else if (identifier.buttonNum !== null)
     {
-        return `js${identifier.jsNum}_button${identifier.buttonNum}`;
+        return normalizeStarCitizenGamepadInput(
+            `${identifier.jsPrefix}button${identifier.buttonNum}`
+        );
     }
 
     return 'Unknown';
+}
+
+function findBindingsForInputData(buttonData)
+{
+    const inputId = normalizeControlInputId(getButtonIdString(buttonData));
+    const keyboardMatch = inputId.match(/^kb\d*_(.+)$/i);
+    if (keyboardMatch)
+    {
+        return searchKeyboardBindings(keyboardMatch[1]);
+    }
+
+    return searchBindings(extractButtonIdentifier(
+        buttonData,
+        buttonData.direction || null
+    ));
+}
+
+function getControlAnnotationKey(buttonData)
+{
+    const templateEntry = loadedTemplates[currentTemplateIndex];
+    const inputId = getButtonIdString(buttonData);
+    const hasKnownInput = inputId !== 'Unknown';
+    const direction = buttonData && buttonData.direction ? buttonData.direction : 'main';
+    const fallbackId = `button:${buttonData?.id ?? buttonData?.name ?? 'unknown'}:${direction}`;
+    const scopeId = buttonData?.annotationScope || (hasKnownInput
+        ? 'input:global'
+        : `template:${templateEntry ? templateEntry.fileName : 'Untitled Template'}`);
+    const surfaceIndex = hasKnownInput
+        ? 0
+        : Number.isInteger(buttonData?.annotationSurfaceIndex)
+        ? buttonData.annotationSurfaceIndex
+        : currentPageIndex;
+
+    return buildControlAnnotationKey(
+        scopeId,
+        surfaceIndex,
+        hasKnownInput ? inputId : '',
+        fallbackId
+    );
+}
+
+function getControlAnnotation(buttonData)
+{
+    if (!buttonData) return '';
+    return normalizeControlAnnotation(controlAnnotations[getControlAnnotationKey(buttonData)] || '');
+}
+
+function saveControlAnnotation(buttonData, value)
+{
+    const key = getControlAnnotationKey(buttonData);
+    controlAnnotations = withControlAnnotation(controlAnnotations, key, value);
+    ViewerState.save('viewerControlAnnotations', controlAnnotations);
+    window.dispatchEvent(new CustomEvent('control-annotations-changed', { detail: controlAnnotations }));
 }
 
 // LocalStorage helpers for cleaner state management
@@ -3732,7 +3889,7 @@ window.findButtonNameForInput = function (inputString)
     const template = getCurrentTemplate();
     if (!template || !inputString) return null;
 
-    inputString = inputString.toLowerCase().trim();
+    inputString = normalizeVisualGamepadInput(inputString);
 
     // Helper to check match
     const checkMatch = (button, jsNum, direction = null) =>
@@ -5303,11 +5460,23 @@ function updateKeyBindings(keyElement, keyDef)
     if (!scKey) return;
 
     const bindings = searchKeyboardBindings(scKey);
+    const buttonData = getKeyboardButtonData(keyDef, scKey);
+    const annotation = getControlAnnotation(buttonData);
     const bindingsContainer = keyElement.querySelector('.key-bindings');
     bindingsContainer.innerHTML = '';
 
     // Update key state
-    keyElement.classList.remove('has-binding', 'has-custom-binding');
+    keyElement.classList.remove('has-binding', 'has-custom-binding', 'has-annotation');
+
+    if (annotation)
+    {
+        keyElement.classList.add('has-annotation');
+
+        const noteItem = document.createElement('div');
+        noteItem.className = 'key-binding-item key-annotation-item';
+        noteItem.textContent = `Note: ${annotation}`;
+        bindingsContainer.appendChild(noteItem);
+    }
 
     if (bindings.length > 0)
     {
@@ -5320,7 +5489,7 @@ function updateKeyBindings(keyElement, keyDef)
         }
 
         // Show up to 5 bindings on the key (keys are 70px tall now)
-        const maxVisible = 5;
+        const maxVisible = annotation ? 4 : 5;
         const visibleBindings = bindings.slice(0, maxVisible);
 
         visibleBindings.forEach(binding =>
@@ -5359,16 +5528,20 @@ function onKeyboardKeyClick(keyElement, keyDef)
     keyElement.classList.add('selected');
 
     // Show binding info panel
-    const buttonId = `kb1_${scKey}`;
     const bindings = searchKeyboardBindings(scKey);
-
-    // Create a pseudo button data object for the info panel
-    const buttonData = {
-        name: keyDef.label,
-        input: buttonId
-    };
+    const buttonData = getKeyboardButtonData(keyDef, scKey);
 
     showBindingInfo(buttonData, bindings);
+}
+
+function getKeyboardButtonData(keyDef, scKey)
+{
+    return {
+        name: keyDef.label,
+        input: `kb1_${scKey}`,
+        annotationScope: 'input:global',
+        annotationSurfaceIndex: 0
+    };
 }
 
 /**
@@ -5380,7 +5553,8 @@ function showKeyTooltip(event, keyDef)
     if (!scKey) return;
 
     const bindings = searchKeyboardBindings(scKey);
-    if (bindings.length === 0) return;
+    const annotation = getControlAnnotation(getKeyboardButtonData(keyDef, scKey));
+    if (bindings.length === 0 && !annotation) return;
 
     // Remove existing tooltip
     hideKeyTooltip();
@@ -5390,6 +5564,11 @@ function showKeyTooltip(event, keyDef)
     tooltip.id = 'keyboard-key-tooltip';
 
     let html = `<div class="tooltip-title">${keyDef.label} (kb1_${scKey})</div>`;
+
+    if (annotation)
+    {
+        html += `<div class="tooltip-binding key-annotation-item">Note: ${escapeForHtml(annotation)}</div>`;
+    }
 
     bindings.forEach(binding =>
     {
@@ -5872,16 +6051,16 @@ window.highlightButtonInJoystickViewer = function (bindingInput, actionName, opt
                 const hasMatch = box.bindings.some(binding =>
                 {
                     // Normalize target input
-                    const targetInput = bindingInput.toLowerCase().trim();
+                    const targetInput = normalizeVisualGamepadInput(bindingInput);
 
                     // 1. Check inputRaw (e.g., "js1_button1")
-                    if (binding.inputRaw && binding.inputRaw.toLowerCase().trim() === targetInput) return true;
+                    if (binding.inputRaw && normalizeVisualGamepadInput(binding.inputRaw) === targetInput) return true;
 
                     // 2. Check input (display name, e.g., "Joystick 1 - Button 1")
-                    if (binding.input && binding.input.toLowerCase().trim() === targetInput) return true;
+                    if (binding.input && normalizeVisualGamepadInput(binding.input) === targetInput) return true;
 
                     // 3. Check if the binding is a string and matches
-                    if (typeof binding === 'string' && binding.toLowerCase().trim() === targetInput) return true;
+                    if (typeof binding === 'string' && normalizeVisualGamepadInput(binding) === targetInput) return true;
 
                     return false;
                 });
@@ -5895,7 +6074,7 @@ window.highlightButtonInJoystickViewer = function (bindingInput, actionName, opt
                 try
                 {
                     const info = extractButtonIdentifier(box.buttonData);
-                    const targetInput = bindingInput.toLowerCase().trim();
+                    const targetInput = normalizeVisualGamepadInput(bindingInput);
 
                     // Check exact inputString match
                     if (info.inputString && info.inputString.toLowerCase() === targetInput) return true;
@@ -5923,7 +6102,7 @@ window.highlightButtonInJoystickViewer = function (bindingInput, actionName, opt
     {
         console.log('[Joystick Viewer] Button not found on current page, searching other pages and templates...');
 
-        const targetInput = bindingInput.toLowerCase().trim();
+        const targetInput = normalizeVisualGamepadInput(bindingInput);
         let foundTemplateIndex = -1;
         let foundPageIndex = -1;
 

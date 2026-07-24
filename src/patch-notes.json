@@ -16,6 +16,17 @@
                     "<strong>Some UI Fixes:</strong> Various UI tweaks and fixes."
                 ]
             }
+        },
+        {
+            "version": "1.2.1",
+            "notes": {
+                "📋 Updates": [
+                    "<strong>Hotfix Detection:</strong> App now detects the HOTFIX channel."
+                ],
+                "🐛 Bug Fixes": [
+                    "<strong>XBOX controller support:</strong> fixed XBOX controller bindings not being displayed in visual mode."
+                ]
+            }
         }
     ]
 }

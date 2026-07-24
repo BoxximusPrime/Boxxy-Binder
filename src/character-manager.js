@@ -483,7 +483,8 @@ class CharacterManager
             'LIVE': '🌟',
             'PTU': '🧪',
             'EPTU': '🔬',
-            'TECH-PREVIEW': '⚡'
+            'TECH-PREVIEW': '⚡',
+            'HOTFIX': '🩹'
         };
 
         this.updateCharacterCounts();

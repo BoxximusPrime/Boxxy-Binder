@@ -1,9 +1,23 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open, save } = window.__TAURI__.dialog;
-import { toStarCitizenFormat, normalizeHidAxisNameToSCAxisName, ensureSliderNumber } from './input-utils.js';
+import
+{
+    toStarCitizenFormat,
+    normalizeHidAxisNameToSCAxisName,
+    ensureSliderNumber,
+    parseInputDisplayName
+} from './input-utils.js';
 import { CustomDropdown } from './custom-dropdown.js';
 import { Tooltip } from './tooltip.js';
+import
+{
+    MAX_CONTROL_ANNOTATION_LENGTH,
+    buildControlAnnotationKey,
+    normalizeControlAnnotation,
+    normalizeControlInputId,
+    withControlAnnotation
+} from './control-annotations.js';
 
 // Keyboard detection state
 let keyboardDetectionActive = false;
@@ -28,6 +42,7 @@ let customizedOnly = false;
 let showUnboundActions = true;
 let categoryFriendlyNames = {};
 let currentFilename = null; // Track the current file name for the copy command
+let inputAnnotations = loadInputAnnotations();
 const SECONDARY_WINDOW_MS = 1000; // One-second window for multi-input capture
 let deviceAxisNames = {}; // Cache of device_name -> { axis_id -> axis_name } from HID descriptors
 let deviceAxisMappings = {}; // Cache of device_name -> { directinput_index -> hid_usage_id }
@@ -2175,15 +2190,131 @@ function renderActionBindings(action)
         }
 
         const actionDisplayName = action.ui_label || action.display_name || action.name;
+        const customNote = getInputAnnotation(binding.input);
+        const noteTitle = customNote
+            ? `Edit custom note: ${customNote}`
+            : `Add custom note for ${binding.input}`;
 
         return `
             <span class="binding-tag ${inputType.toLowerCase()}" onclick="window.highlightButtonInVisualView(event, '${binding.input.replace(/'/g, "\\'")}', '${actionDisplayName.replace(/'/g, "\\'")}')" style="cursor: pointer;" title="Click to highlight in visual view">
                 <span class="binding-tag-text">${displayText}</span>
+                ${customNote ? `<span class="binding-tag-custom-note">${escapeAnnotationHtml(customNote)}</span>` : ''}
+                <button class="binding-tag-note ${customNote ? 'has-note' : ''}" onclick="window.editBindingInputNote(event, '${binding.input.replace(/'/g, "\\'")}')" title="${escapeAnnotationHtml(noteTitle)}" aria-label="${escapeAnnotationHtml(noteTitle)}">&#128221;</button>
                 <button class="binding-tag-remove" onclick="window.removeBindingTag(event, '${action.name.replace(/'/g, "\\'")}', '${binding.input.replace(/'/g, "\\'")}')" title="Remove this binding">×</button>
             </span>
         `;
     }).filter(Boolean).join('');
 }
+
+function loadInputAnnotations()
+{
+    try
+    {
+        const parsed = JSON.parse(localStorage.getItem('viewerControlAnnotations') || '{}');
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    }
+    catch (error)
+    {
+        console.error('Failed to load input annotations:', error);
+        return {};
+    }
+}
+
+function getInputAnnotationKey(inputId)
+{
+    return buildControlAnnotationKey('input:global', 0, normalizeControlInputId(inputId));
+}
+
+function getInputAnnotation(inputId)
+{
+    return normalizeControlAnnotation(inputAnnotations[getInputAnnotationKey(inputId)] || '');
+}
+
+function escapeAnnotationHtml(value)
+{
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+window.editBindingInputNote = function (event, inputId)
+{
+    event.preventDefault();
+    event.stopPropagation();
+
+    const existingModal = document.getElementById('input-note-modal');
+    if (existingModal) existingModal.remove();
+
+    const normalizedInputId = normalizeControlInputId(inputId);
+    const modal = document.createElement('div');
+    modal.id = 'input-note-modal';
+    modal.className = 'modal';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+        <div class="modal-content input-note-modal-content" role="dialog" aria-modal="true" aria-labelledby="input-note-modal-title">
+            <div class="modal-header">
+                <h2 id="input-note-modal-title">Custom Input Note</h2>
+            </div>
+            <div class="modal-body">
+                <p class="input-note-target">Input: <code>${escapeAnnotationHtml(normalizedInputId)}</code></p>
+                <label for="input-note-modal-input">Note</label>
+                <input id="input-note-modal-input" type="text" maxlength="${MAX_CONTROL_ANNOTATION_LENGTH}" placeholder="e.g., R Ctrl via JoyToKey" />
+                <p class="input-note-modal-hint">This label is stored by Boxxy Binder and does not change the Star Citizen binding.</p>
+            </div>
+            <div class="modal-footer">
+                <button id="input-note-modal-cancel" class="btn btn-secondary" type="button">Cancel</button>
+                <button id="input-note-modal-save" class="btn btn-success" type="button">Save Note</button>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    const noteInput = modal.querySelector('#input-note-modal-input');
+    const closeModal = () => modal.remove();
+    const saveNote = () =>
+    {
+        const key = getInputAnnotationKey(normalizedInputId);
+        inputAnnotations = withControlAnnotation(inputAnnotations, key, noteInput.value);
+        localStorage.setItem('viewerControlAnnotations', JSON.stringify(inputAnnotations));
+        window.dispatchEvent(new CustomEvent('control-annotations-changed', { detail: inputAnnotations }));
+        closeModal();
+        renderKeybindings();
+        window.showSuccessMessage(getInputAnnotation(normalizedInputId) ? 'Custom note saved' : 'Custom note cleared');
+    };
+
+    noteInput.value = getInputAnnotation(normalizedInputId);
+    modal.querySelector('#input-note-modal-cancel').addEventListener('click', closeModal);
+    modal.querySelector('#input-note-modal-save').addEventListener('click', saveNote);
+    modal.addEventListener('click', (modalEvent) =>
+    {
+        if (modalEvent.target === modal) closeModal();
+    });
+    noteInput.addEventListener('keydown', (keyEvent) =>
+    {
+        if (keyEvent.key === 'Enter')
+        {
+            keyEvent.preventDefault();
+            saveNote();
+        }
+        else if (keyEvent.key === 'Escape')
+        {
+            closeModal();
+        }
+    });
+    noteInput.focus();
+};
+
+window.addEventListener('control-annotations-changed', (event) =>
+{
+    if (event.detail && typeof event.detail === 'object')
+    {
+        inputAnnotations = event.detail;
+    }
+});
 
 // Global success message helper
 window.showSuccessMessage = function (message)
@@ -2292,6 +2423,7 @@ const processInput = (result) =>
     }
 
     scFormattedInput = ensureSliderNumber(scFormattedInput);
+    const baseScFormattedInput = scFormattedInput;
 
     // Add modifier after device prefix (e.g., kb1_lalt+f, js2_lalt+button13)
     if (result.modifiers && result.modifiers.length > 0)
@@ -2325,11 +2457,22 @@ const processInput = (result) =>
     let displayName = result.display_name;
     if (mappedInput !== result.input_string)
     {
-        displayName = displayName.replace(/Joystick \d+/, (match) =>
+        const mappedJoystick = mappedInput.match(/^js(\d+)_/);
+        const mappedGamepad = mappedInput.match(/^gp(\d+)_/);
+        if (mappedJoystick)
         {
-            const newJsNum = mappedInput.match(/^js(\d+)_/)[1];
-            return `Joystick ${newJsNum}`;
-        });
+            displayName = displayName.replace(/Joystick \d+/, `Joystick ${mappedJoystick[1]}`);
+        }
+        else if (mappedGamepad)
+        {
+            displayName = displayName.replace(/Gamepad \d+/, `Gamepad ${mappedGamepad[1]}`);
+        }
+    }
+
+    const gamepadDisplayMatch = baseScFormattedInput.match(/^gp(\d+)_/i);
+    if (gamepadDisplayMatch)
+    {
+        displayName = `Gamepad ${gamepadDisplayMatch[1]} - ${parseInputDisplayName(baseScFormattedInput)}`;
     }
 
     // Add modifiers to display name after device type (e.g., "Keyboard - Left Alt + F")

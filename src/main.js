@@ -436,7 +436,7 @@ function renderWhatsNewContent(currentVersion)
 
 function initializeWhatsNewModal()
 {
-  const CURRENT_VERSION = '1.2.0';
+  const CURRENT_VERSION = '1.2.1';
   const WHATS_NEW_KEY = 'whatsNew';
 
   renderWhatsNewContent(CURRENT_VERSION);
@@ -453,7 +453,7 @@ function initializeWhatsNewModal()
 
 function showWhatsNewModal()
 {
-  const CURRENT_VERSION = '1.2.0';
+  const CURRENT_VERSION = '1.2.1';
   const WHATS_NEW_KEY = 'whatsNew';
 
   const modal = document.getElementById('whats-new-modal');

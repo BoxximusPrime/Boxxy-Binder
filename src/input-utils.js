@@ -4,6 +4,156 @@
 
 import { convertToSCAxisFormat, shouldInvertAxis, getAxisMapping } from './axis-mapping.js';
 
+// XInput exposes Xbox controls as numbered buttons/axes, while Star Citizen's
+// gamepad action-map format uses semantic names. Keep this mapping here so
+// binding detection, templates, and the visual viewer all speak the same format.
+const XINPUT_BUTTON_TO_SC = {
+    1: 'a',
+    2: 'b',
+    3: 'x',
+    4: 'y',
+    5: 'shoulderl',
+    6: 'shoulderr',
+    // The current detector's legacy numbering follows its XInput mask table,
+    // where button 7 is Start and button 8 is Back/View.
+    7: 'start',
+    8: 'back',
+    9: 'thumbl',
+    10: 'thumbr',
+    11: 'dpad_up',
+    12: 'dpad_down',
+    13: 'dpad_left',
+    14: 'dpad_right'
+};
+
+const XINPUT_AXIS_TO_SC = {
+    1: { axis: 'thumblx', positive: 'thumbl_right', negative: 'thumbl_left' },
+    2: { axis: 'thumbly', positive: 'thumbl_up', negative: 'thumbl_down' },
+    3: { axis: 'thumbrx', positive: 'thumbr_right', negative: 'thumbr_left' },
+    4: { axis: 'thumbry', positive: 'thumbr_up', negative: 'thumbr_down' },
+    5: { axis: 'triggerl_btn', positive: 'triggerl_btn', negative: 'triggerl_btn' },
+    6: { axis: 'triggerr_btn', positive: 'triggerr_btn', negative: 'triggerr_btn' }
+};
+
+// Older releases converted XInput's numbered axes with the DirectInput
+// fallback. These aliases let existing Xbox templates migrate at runtime.
+const LEGACY_XINPUT_AXIS_ALIAS_TO_SC = {
+    z: 'thumbrx',
+    rotx: 'thumbry',
+    roty: 'triggerl_btn',
+    rotz: 'triggerr_btn'
+};
+
+const GAMEPAD_INPUT_LABELS = {
+    a: 'A',
+    b: 'B',
+    x: 'X',
+    y: 'Y',
+    shoulderl: 'Left Shoulder',
+    shoulderr: 'Right Shoulder',
+    back: 'View',
+    start: 'Menu',
+    thumbl: 'Left Stick Press',
+    thumbr: 'Right Stick Press',
+    dpad_up: 'D-Pad Up',
+    dpad_down: 'D-Pad Down',
+    dpad_left: 'D-Pad Left',
+    dpad_right: 'D-Pad Right',
+    thumblx: 'Left Stick X',
+    thumbly: 'Left Stick Y',
+    thumbrx: 'Right Stick X',
+    thumbry: 'Right Stick Y',
+    thumbl_up: 'Left Stick Up',
+    thumbl_down: 'Left Stick Down',
+    thumbl_left: 'Left Stick Left',
+    thumbl_right: 'Left Stick Right',
+    thumbr_up: 'Right Stick Up',
+    thumbr_down: 'Right Stick Down',
+    thumbr_left: 'Right Stick Left',
+    thumbr_right: 'Right Stick Right',
+    triggerl_btn: 'Left Trigger',
+    triggerl_r_btn: 'Left Trigger Release',
+    triggerr_btn: 'Right Trigger'
+};
+
+const GAMEPAD_AXIS_INPUTS = new Set(['thumblx', 'thumbly', 'thumbrx', 'thumbry']);
+
+function normalizeGamepadInputPart(inputPart, preserveAxisDirection)
+{
+    const buttonMatch = inputPart.match(/^button(\d+)$/);
+    if (buttonMatch)
+    {
+        return XINPUT_BUTTON_TO_SC[Number(buttonMatch[1])] || inputPart;
+    }
+
+    const axisMatch = inputPart.match(/^axis(\d+)(?:_(positive|negative))?$/);
+    if (axisMatch)
+    {
+        const mapping = XINPUT_AXIS_TO_SC[Number(axisMatch[1])];
+        if (!mapping) return inputPart;
+
+        const direction = axisMatch[2];
+        if (preserveAxisDirection && direction)
+        {
+            return mapping[direction] || mapping.axis;
+        }
+        return mapping.axis;
+    }
+
+    return LEGACY_XINPUT_AXIS_ALIAS_TO_SC[inputPart] || inputPart;
+}
+
+/**
+ * Convert legacy numbered XInput controls to Star Citizen's semantic gamepad
+ * tokens. Controller chords and keyboard-modified inputs are preserved.
+ *
+ * @param {string} inputString - e.g. "gp1_button11" or "gp1_axis1_positive"
+ * @param {Object} options
+ * @param {boolean} options.preserveAxisDirection - Use directional stick tokens
+ *        for visual-template slots instead of the whole analog axis.
+ * @returns {string}
+ */
+export function normalizeStarCitizenGamepadInput(inputString, { preserveAxisDirection = false } = {})
+{
+    if (typeof inputString !== 'string' || !inputString)
+    {
+        return inputString;
+    }
+
+    const match = inputString.match(/^(gp\d+)_(.+)$/i);
+    if (!match)
+    {
+        return inputString;
+    }
+
+    const prefix = match[1].toLowerCase();
+    const normalizedParts = match[2]
+        .toLowerCase()
+        .split('+')
+        .map(part => normalizeGamepadInputPart(part, preserveAxisDirection));
+
+    return `${prefix}_${normalizedParts.join('+')}`;
+}
+
+function getGamepadInputDisplayName(inputString)
+{
+    const normalized = normalizeStarCitizenGamepadInput(inputString, { preserveAxisDirection: true });
+    const match = normalized && normalized.match(/^gp\d+_(.+)$/i);
+    if (!match) return null;
+
+    // Let the existing generic parsers handle non-XInput button, hat, and
+    // axis identifiers that are still valid for some controller drivers.
+    if (match[1].split('+').some(part => /^(?:button\d+|hat\d+_|axis\d+)/.test(part)))
+    {
+        return null;
+    }
+
+    return match[1]
+        .split('+')
+        .map(part => GAMEPAD_INPUT_LABELS[part] || part.replace(/_/g, ' ').toUpperCase())
+        .join(' + ');
+}
+
 export function ensureSliderNumber(inputString)
 {
     if (typeof inputString !== 'string' || !inputString)
@@ -22,6 +172,9 @@ export function ensureSliderNumber(inputString)
 export function parseInputDisplayName(inputString)
 {
     if (!inputString) return '';
+
+    const gamepadDisplayName = getGamepadInputDisplayName(inputString);
+    if (gamepadDisplayName) return gamepadDisplayName;
 
     // Hat switch: js1_hat1_up or gp1_hat1_up -> "Hat 1 Up"
     if (inputString.includes('_hat'))
@@ -75,6 +228,9 @@ export function parseInputDisplayName(inputString)
 export function parseInputShortName(inputString)
 {
     if (!inputString) return '';
+
+    const gamepadDisplayName = getGamepadInputDisplayName(inputString);
+    if (gamepadDisplayName) return gamepadDisplayName;
 
     // Hat switch: js1_hat1_up -> "Hat 1 Up"
     if (inputString.includes('_hat'))
@@ -133,7 +289,14 @@ export function getInputType(inputString)
     if (inputString.includes('_button')) return 'button';
     if (inputString.includes('_axis')) return 'axis';
     if (inputString.startsWith('kb1_')) return 'keyboard';
-    if (inputString.startsWith('gp1_') || inputString.startsWith('js1_')) return 'gamepad'; // Both are game controllers
+    const normalizedGamepadInput = normalizeStarCitizenGamepadInput(inputString, { preserveAxisDirection: true });
+    const gamepadMatch = normalizedGamepadInput.match(/^gp\d+_(.+)$/i);
+    if (gamepadMatch)
+    {
+        const inputParts = gamepadMatch[1].toLowerCase().split('+');
+        return inputParts.some(part => GAMEPAD_AXIS_INPUTS.has(part)) ? 'axis' : 'button';
+    }
+    if (/^js\d+_/i.test(inputString)) return 'gamepad';
 
     return 'unknown';
 }
@@ -255,6 +418,12 @@ export function normalizeHidAxisNameToSCAxisName(hidAxisName)
  */
 export function toStarCitizenFormat(inputString)
 {
+    const normalizedGamepadInput = normalizeStarCitizenGamepadInput(inputString);
+    if (normalizedGamepadInput !== inputString)
+    {
+        return ensureSliderNumber(normalizedGamepadInput);
+    }
+
     const type = getInputType(inputString);
 
     if (type === 'axis')

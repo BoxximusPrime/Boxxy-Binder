@@ -248,10 +248,12 @@
     border: 2px solid var(--bg-light);
     border-radius: 8px;
     padding: 0;
-    min-width: 280px;
+    width: min(400px, calc(100% - 40px));
     max-width: 400px;
     max-height: 60vh;
+    box-sizing: border-box;
     overflow: hidden;
+    flex-direction: column;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
     z-index: 10000;
     display: none;
@@ -264,6 +266,7 @@
     padding: 0.75rem 1rem;
     background: var(--bg-darkest);
     border-bottom: 1px solid var(--bg-light);
+    flex-shrink: 0;
 }
 
 .binding-info-header h3 {
@@ -300,6 +303,7 @@
     border-bottom: 1px solid var(--bg-light);
     font-size: 0.85rem;
     color: var(--text-secondary);
+    flex-shrink: 0;
 }
 
 .binding-info-id {
@@ -317,9 +321,77 @@
     font-size: 0.9em;
 }
 
+.binding-info-note-editor {
+    padding: 0.75rem 1rem;
+    background: var(--bg-darkest);
+    border-bottom: 1px solid var(--bg-light);
+    flex-shrink: 0;
+}
+
+.binding-info-note-editor label {
+    display: block;
+    margin-bottom: 0.4rem;
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.binding-info-note-row {
+    display: flex;
+    gap: 0.45rem;
+}
+
+.binding-info-note-row input {
+    min-width: 0;
+    flex: 1;
+    padding: 0.48rem 0.6rem;
+    color: var(--text-primary);
+    background: var(--bg-dark);
+    border: 1px solid var(--bg-light);
+    border-radius: 4px;
+    font-size: 0.85rem;
+}
+
+.binding-info-note-row input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.binding-info-note-row button {
+    padding: 0.45rem 0.7rem;
+    color: var(--bg-darkest);
+    background: var(--accent-primary);
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.binding-info-note-row button:hover {
+    background: var(--accent-hover);
+}
+
+.binding-info-note-hint {
+    margin-top: 0.35rem;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    line-height: 1.3;
+}
+
+.key-annotation-item {
+    color: var(--accent-primary) !important;
+    font-style: italic;
+}
+
+.keyboard-key.has-annotation {
+    box-shadow: inset 0 0 0 1px rgba(var(--accent-primary-rgb), 0.75);
+}
+
 .binding-info-content {
     padding: 0.5rem;
-    max-height: calc(60vh - 60px);
+    min-height: 0;
+    flex: 1;
     overflow-y: auto;
     background: var(--bg-darkest);
 }
@@ -977,6 +1049,7 @@ input[type="range"]::-moz-range-track {
     padding: 0.5rem 1rem 1rem;
     background: var(--bg-darkest);
     border-top: 1px solid var(--bg-light);
+    flex-shrink: 0;
 }
 
 /* ========================================

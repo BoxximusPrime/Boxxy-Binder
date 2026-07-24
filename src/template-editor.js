@@ -670,7 +670,7 @@ function normalizeTemplateSliderIds(template)
 }
 
 // Lazy imports - will be loaded when needed
-let parseInputDisplayName, parseInputShortName, getInputType, toStarCitizenFormat, normalizeHidAxisNameToSCAxisName, ensureSliderNumber;
+let parseInputDisplayName, parseInputShortName, getInputType, toStarCitizenFormat, normalizeStarCitizenGamepadInput, normalizeHidAxisNameToSCAxisName, ensureSliderNumber;
 
 // Load utilities when template editor initializes
 async function loadUtilities()
@@ -682,6 +682,7 @@ async function loadUtilities()
         parseInputShortName = utils.parseInputShortName;
         getInputType = utils.getInputType;
         toStarCitizenFormat = utils.toStarCitizenFormat;
+        normalizeStarCitizenGamepadInput = utils.normalizeStarCitizenGamepadInput;
         normalizeHidAxisNameToSCAxisName = utils.normalizeHidAxisNameToSCAxisName;
         ensureSliderNumber = utils.ensureSliderNumber;
     }
@@ -4607,6 +4608,19 @@ async function startHatInputDetection(direction)
                 }
             }
 
+            // XInput reports numbered gp buttons/axes; SC expects semantic
+            // gamepad names such as gp1_dpad_up and gp1_thumblx.
+            if (typeof normalizeStarCitizenGamepadInput === 'function')
+            {
+                adjustedInputString = normalizeStarCitizenGamepadInput(adjustedInputString, {
+                    preserveAxisDirection: true
+                });
+            }
+            else if (typeof toStarCitizenFormat === 'function')
+            {
+                adjustedInputString = toStarCitizenFormat(adjustedInputString);
+            }
+
             adjustedInputString = typeof ensureSliderNumber === 'function'
                 ? ensureSliderNumber(adjustedInputString)
                 : ensureTemplateSliderNumber(adjustedInputString);
@@ -4793,6 +4807,13 @@ async function startInputDetection()
                     adjustedInputString = scFormatString;
                     console.log('Converted to Star Citizen format using default mapping:', adjustedInputString);
                 }
+            }
+
+            // Also normalize numbered XInput buttons (for example,
+            // gp1_button11 -> gp1_dpad_up).
+            if (typeof toStarCitizenFormat === 'function')
+            {
+                adjustedInputString = toStarCitizenFormat(adjustedInputString);
             }
 
             adjustedInputString = typeof ensureSliderNumber === 'function'

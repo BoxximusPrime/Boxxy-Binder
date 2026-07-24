@@ -1354,6 +1354,8 @@ fn update_control_options(
     Ok(())
 }
 
+const SC_INSTALLATION_FOLDERS: [&str; 5] = ["LIVE", "PTU", "EPTU", "TECH-PREVIEW", "HOTFIX"];
+
 #[tauri::command]
 fn scan_sc_installations(base_path: String) -> Result<Vec<ScInstallation>, String> {
     use std::path::Path;
@@ -1371,11 +1373,8 @@ fn scan_sc_installations(base_path: String) -> Result<Vec<ScInstallation>, Strin
 
     let mut installations = Vec::new();
 
-    // Common Star Citizen installation folder names
-    let sc_folders = ["LIVE", "PTU", "EPTU", "TECH-PREVIEW"];
-
     // Scan for each potential installation
-    for folder_name in &sc_folders {
+    for folder_name in &SC_INSTALLATION_FOLDERS {
         let folder_path = base.join(folder_name);
 
         // Check if this folder exists
@@ -2629,10 +2628,8 @@ fn find_actionmaps_path(base_path: String) -> Result<Option<String>, String> {
         return Ok(Some(direct_actionmaps.to_string_lossy().to_string()));
     }
 
-    // Otherwise, check if it's a parent folder containing LIVE/PTU/etc.
-    let sc_folders = ["LIVE", "PTU", "EPTU", "TECH-PREVIEW"];
-
-    for folder in &sc_folders {
+    // Otherwise, check if it's a parent folder containing an SC installation.
+    for folder in &SC_INSTALLATION_FOLDERS {
         let actionmaps_path = base
             .join(folder)
             .join("user")
