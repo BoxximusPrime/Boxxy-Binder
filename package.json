@@ -6,7 +6,8 @@
         "dev": "vite",
         "build": "vite build",
         "preview": "vite preview",
-        "version-up": "node scripts/update-version.cjs"
+        "version-up": "node scripts/update-version.cjs",
+        "bindings-hash": "node scripts/update-allbinds-hash.cjs"
     },
     "devDependencies": {
         "@tauri-apps/cli": "^2.9.0",
