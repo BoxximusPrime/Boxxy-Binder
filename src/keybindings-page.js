@@ -421,19 +421,11 @@ function getActiveModifierTokens(event, currentScKey = null)
     {
         if (!isActive) return;
 
-        if (heldModifiers.has(leftToken))
+        if (heldModifiers.has(leftToken) || currentScKey === leftToken.toLowerCase())
         {
             modifiers.push(leftToken);
         }
-        else if (heldModifiers.has(rightToken))
-        {
-            modifiers.push(rightToken);
-        }
-        else if (currentScKey === leftToken.toLowerCase())
-        {
-            modifiers.push(leftToken);
-        }
-        else if (currentScKey === rightToken.toLowerCase())
+        else if (heldModifiers.has(rightToken) || currentScKey === rightToken.toLowerCase())
         {
             modifiers.push(rightToken);
         }
