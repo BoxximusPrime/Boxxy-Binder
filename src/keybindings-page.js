@@ -421,19 +421,11 @@ function getActiveModifierTokens(event, currentScKey = null)
     {
         if (!isActive) return;
 
-        if (heldModifiers.has(leftToken))
+        if (heldModifiers.has(leftToken) || currentScKey === leftToken.toLowerCase())
         {
             modifiers.push(leftToken);
         }
-        else if (heldModifiers.has(rightToken))
-        {
-            modifiers.push(rightToken);
-        }
-        else if (currentScKey === leftToken.toLowerCase())
-        {
-            modifiers.push(leftToken);
-        }
-        else if (currentScKey === rightToken.toLowerCase())
+        else if (heldModifiers.has(rightToken) || currentScKey === rightToken.toLowerCase())
         {
             modifiers.push(rightToken);
         }
@@ -453,7 +445,8 @@ function getActiveModifierTokens(event, currentScKey = null)
 function isStandaloneModifierDetectedInput(input)
 {
     if (!input?.scFormattedInput) return false;
-    return /^kb\d*_(lshift|rshift|lctrl|rctrl|lalt|ralt|lwin)$/i.test(input.scFormattedInput);
+    return /^kb\d*_(lshift|rshift|lctrl|rctrl|lalt|ralt|lwin)$/i.test(input.scFormattedInput)
+        || /^gp\d+_shoulderl$/i.test(input.scFormattedInput);
 }
 
 async function finalizeSingleDetectedInput(processed)
@@ -2428,7 +2421,7 @@ const processInput = (result) =>
     // Add modifier after device prefix (e.g., kb1_lalt+f, js2_lalt+button13)
     if (result.modifiers && result.modifiers.length > 0)
     {
-        const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT'];
+        const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT', 'SHOULDERL'];
         const sortedModifiers = result.modifiers
             .filter(mod => modifierOrder.includes(mod))
             .sort((a, b) => modifierOrder.indexOf(a) - modifierOrder.indexOf(b))
@@ -2478,14 +2471,15 @@ const processInput = (result) =>
     // Add modifiers to display name after device type (e.g., "Keyboard - Left Alt + F")
     if (result.modifiers && result.modifiers.length > 0)
     {
-        const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT'];
+        const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT', 'SHOULDERL'];
         const modifierDisplayNames = {
             'LALT': 'Left Alt',
             'RALT': 'Right Alt',
             'LCTRL': 'Left Ctrl',
             'RCTRL': 'Right Ctrl',
             'LSHIFT': 'Left Shift',
-            'RSHIFT': 'Right Shift'
+            'RSHIFT': 'Right Shift',
+            'SHOULDERL': 'Left Shoulder/Bumper'
         };
         const sortedModifiers = result.modifiers
             .filter(mod => modifierOrder.includes(mod))

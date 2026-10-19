@@ -75,9 +75,19 @@ fn is_gamepad(name: &str) -> bool {
     false
 }
 
+fn get_all_active_modifiers(buttons_held: u16, detected_button: Option<u16>) -> Vec<String> {
+    let keyboard_modifiers = get_active_keyboard_modifiers();
+    let xinput_modifiers = get_active_xinput_modifiers(buttons_held, detected_button);
+
+    let mut all_modifiers: Vec<String> = keyboard_modifiers;
+    all_modifiers.extend(xinput_modifiers);
+
+    all_modifiers
+}
+
 // Get currently pressed modifiers using Windows API
 #[cfg(windows)]
-fn get_active_modifiers() -> Vec<String> {
+fn get_active_keyboard_modifiers() -> Vec<String> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_RCONTROL, VK_RMENU, VK_RSHIFT,
     };
@@ -110,16 +120,30 @@ fn get_active_modifiers() -> Vec<String> {
     modifiers
 }
 
+// Stub for non-Windows platforms
+#[cfg(not(windows))]
+fn get_active_keyboard_modifiers() -> Vec<String> {
+    Vec::new()
+}
+
+const XINPUT_LEFT_SHOULDER_MASK: u16 = 0x0100;
+
+//get active XInput modifiers based on currently held buttons and the detected button
+fn get_active_xinput_modifiers(buttons_held: u16, detected_button: Option<u16>) -> Vec<String> {
+    let mut modifiers = Vec::new();
+
+    let lb_is_held = buttons_held & XINPUT_LEFT_SHOULDER_MASK != 0;
+    if lb_is_held && detected_button != Some(XINPUT_LEFT_SHOULDER_MASK) {
+        modifiers.push("SHOULDERL".to_string());
+    }
+
+    modifiers
+}
+
 #[derive(Serialize, Clone, Debug)]
 pub struct AxisMovement {
     pub axis_id: u32,
     pub value: f32,
-}
-
-// Stub for non-Windows platforms
-#[cfg(not(windows))]
-fn get_active_modifiers() -> Vec<String> {
-    Vec::new()
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -686,7 +710,10 @@ impl InputDetector {
                                     ),
                                     device_type: "Gamepad".to_string(),
                                     axis_value: None,
-                                    modifiers: get_active_modifiers(),
+                                    modifiers: get_all_active_modifiers(
+                                        state.raw.Gamepad.wButtons,
+                                        Some(mask),
+                                    ),
                                     is_modifier: false,
                                     session_id: self.session_id.clone(),
                                     device_uuid: Some(resolve_xinput_uuid(controller_id)),
@@ -782,7 +809,10 @@ impl InputDetector {
                                     ),
                                     device_type: "Gamepad".to_string(),
                                     axis_value: Some(*value),
-                                    modifiers: get_active_modifiers(),
+                                    modifiers: get_all_active_modifiers(
+                                        state.raw.Gamepad.wButtons,
+                                        None,
+                                    ),
                                     is_modifier: false,
                                     session_id: self.session_id.clone(),
                                     device_uuid: Some(resolve_xinput_uuid(controller_id)),
@@ -987,7 +1017,7 @@ impl InputDetector {
                                 ),
                                 device_type: "Joystick".to_string(),
                                 axis_value: None,
-                                modifiers: get_active_modifiers(),
+                                modifiers: get_active_keyboard_modifiers(),
                                 is_modifier: false,
                                 session_id: self.session_id.clone(),
                                 device_uuid: Some(build_hid_uuid(device)),
@@ -1105,7 +1135,7 @@ impl InputDetector {
                                         ),
                                         device_type: "Joystick".to_string(),
                                         axis_value: Some(normalized),
-                                        modifiers: get_active_modifiers(),
+                                        modifiers: get_active_keyboard_modifiers(),
                                         is_modifier: false,
                                         session_id: self.session_id.clone(),
                                         device_uuid: Some(build_hid_uuid(device)),
@@ -1160,7 +1190,7 @@ impl InputDetector {
                                 ),
                                 device_type: "Joystick".to_string(),
                                 axis_value: Some(normalized),
-                                modifiers: get_active_modifiers(),
+                                modifiers: get_active_keyboard_modifiers(),
                                 is_modifier: false,
                                 session_id: self.session_id.clone(),
                                 device_uuid: Some(build_hid_uuid(device)),

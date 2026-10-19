@@ -228,7 +228,7 @@ impl Rebind {
             let prefix_upper = prefix.trim().to_uppercase();
             if matches!(
                 prefix_upper.as_str(),
-                "LALT" | "RALT" | "LCTRL" | "RCTRL" | "LSHIFT" | "RSHIFT"
+                "LALT" | "RALT" | "LCTRL" | "RCTRL" | "LSHIFT" | "RSHIFT" | "SHOULDERL"
             ) {
                 modifiers.push(prefix_upper);
                 remaining_input = rest;
