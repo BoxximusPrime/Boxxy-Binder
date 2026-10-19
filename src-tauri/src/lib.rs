@@ -223,6 +223,8 @@ async fn wait_for_inputs_with_events(
     input_event_name: Option<String>,
     completion_event_name: Option<String>,
     emit_buttons_only: Option<bool>,
+    ignore_axes: Option<bool>,
+    defer_modifiers: Option<bool>,
 ) -> Result<(), String> {
     // Run the blocking operation in a separate thread to avoid freezing the UI
     tokio::task::spawn_blocking(move || {
@@ -234,6 +236,8 @@ async fn wait_for_inputs_with_events(
             input_event_name.unwrap_or_else(|| "input-detected".to_string()),
             completion_event_name.unwrap_or_else(|| "input-detection-complete".to_string()),
             emit_buttons_only.unwrap_or(false),
+            ignore_axes.unwrap_or(false),
+            defer_modifiers.unwrap_or(false),
         )
     })
     .await

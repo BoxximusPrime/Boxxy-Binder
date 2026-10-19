@@ -41,6 +41,20 @@
                     "<strong>Safer Split View sizing:</strong> Saved pane widths are constrained to the available window, and Split View stacks vertically on smaller windows so both panes remain usable."
                 ]
             }
+        },
+        {
+            "version": "1.2.3",
+            "notes": {
+                "📋 Updates": [
+                    "<strong>Xbox LB modifier support:</strong> Hold the left bumper (LB) with another controller input to create combinations such as LB + A. Thanks to KobeRiddle-dev for contributing this feature in PR #32."
+                ],
+                "🐛 Bug Fixes": [
+                    "<strong>Reliable template button detection:</strong> Joystick axis movement no longer interrupts or prematurely ends button detection in the Template Editor, fixing issue #31.",
+                    "<strong>More time for LB combinations:</strong> Holding LB no longer starts the short capture timer before you press the next input. LB can still be assigned on its own.",
+                    "<strong>Template modifier combinations:</strong> The Template Editor now displays and saves combinations such as LB + A as one input instead of asking you to choose LB or A separately.",
+                    "<strong>New template devices stay selected:</strong> Adding a device now selects its page correctly, so you can add picture buttons without the incorrect 'Please select or create a page first' warning. Page selection also stays in sync when deleting devices or starting a new template."
+                ]
+            }
         }
     ]
 }

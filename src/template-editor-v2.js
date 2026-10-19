@@ -740,8 +740,9 @@ function savePageFromModal()
         }
     } else
     {
+        const pageId = generatePageId();
         state.template.pages.push({
-            id: generatePageId(),
+            id: pageId,
             name,
             device_prefix: devicePrefix, // Use snake_case to match JSON format
             axis_mapping: axisMapping,
@@ -751,6 +752,7 @@ function savePageFromModal()
             buttons: [],
             button_positions: []
         });
+        state.selectedPageId = pageId;
     }
 
     if (!state.selectedPageId && state.template.pages.length)
@@ -758,9 +760,9 @@ function savePageFromModal()
         state.selectedPageId = state.template.pages[0].id;
     }
 
-    renderPageList();
     markTemplateDirty();
     callbacks.onPagesChanged?.(state.template.pages);
+    selectPage(state.selectedPageId);
     closePageModal();
 }
 
@@ -773,9 +775,9 @@ function deletePage(pageId)
     {
         state.selectedPageId = state.template.pages[0]?.id || null;
     }
-    renderPageList();
     markTemplateDirty();
     callbacks.onPagesChanged?.(state.template.pages);
+    selectPage(state.selectedPageId);
 }
 
 async function deletePageWithConfirmation(pageId)

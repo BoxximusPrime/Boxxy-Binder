@@ -3,11 +3,53 @@ import assert from 'node:assert/strict';
 
 import
 {
+    addInputModifiers,
+    getDetectedInputCandidates,
     getInputType,
     normalizeStarCitizenGamepadInput,
     parseInputDisplayName,
     toStarCitizenFormat
 } from '../src/input-utils.js';
+
+test('preserves detected modifiers when formatting template inputs', () =>
+{
+    const input = addInputModifiers(toStarCitizenFormat('gp2_button1'), ['SHOULDERL']);
+    assert.equal(input, 'gp2_shoulderl+a');
+    assert.equal(parseInputDisplayName(input), 'Left Shoulder + A');
+    assert.equal(addInputModifiers('gp1_a', ['SHOULDERL', 'LCTRL', 'UNKNOWN']), 'gp1_lctrl+shoulderl+a');
+    assert.equal(addInputModifiers('js2_rotz', ['LALT']), 'js2_lalt+rotz');
+    assert.equal(addInputModifiers('gp1_shoulderl'), 'gp1_shoulderl');
+});
+
+const detected = (input_string, modifiers = []) => ({ input_string, modifiers });
+
+test('a controller combo replaces its standalone LB candidate in either event order', () =>
+{
+    const lb = detected('gp1_button5');
+    const combo = detected('gp1_button1', ['SHOULDERL']);
+    assert.deepEqual(getDetectedInputCandidates([lb, combo]), [combo]);
+    assert.deepEqual(getDetectedInputCandidates([combo, lb]), [combo]);
+    assert.deepEqual(getDetectedInputCandidates([lb]), [lb]);
+});
+
+test('keeps unrelated inputs and LB from a different controller selectable', () =>
+{
+    const lb = detected('gp2_button5');
+    const combo = detected('gp1_button1', ['SHOULDERL']);
+    const a = detected('gp1_button1');
+    const trigger1 = detected('js1_button1');
+    const trigger2 = detected('js1_button2');
+    assert.deepEqual(getDetectedInputCandidates([lb, combo]), [lb, combo]);
+    assert.deepEqual(getDetectedInputCandidates([detected('gp1_button5'), a]), [detected('gp1_button5'), a]);
+    assert.deepEqual(getDetectedInputCandidates([trigger1, trigger2]), [trigger1, trigger2]);
+});
+
+test('deduplicates repeated captures without merging plain and modified inputs', () =>
+{
+    const a = detected('gp1_button1');
+    const combo = detected('gp1_button1', ['SHOULDERL']);
+    assert.deepEqual(getDetectedInputCandidates([a, combo, combo]), [a, combo]);
+});
 
 test('converts XInput button numbers to Star Citizen gamepad tokens', () =>
 {

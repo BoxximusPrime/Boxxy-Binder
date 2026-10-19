@@ -3,6 +3,7 @@ const { listen } = window.__TAURI__.event;
 const { open, save } = window.__TAURI__.dialog;
 import
 {
+    addInputModifiers,
     toStarCitizenFormat,
     normalizeHidAxisNameToSCAxisName,
     ensureSliderNumber,
@@ -445,7 +446,8 @@ function getActiveModifierTokens(event, currentScKey = null)
 function isStandaloneModifierDetectedInput(input)
 {
     if (!input?.scFormattedInput) return false;
-    return /^kb\d*_(lshift|rshift|lctrl|rctrl|lalt|ralt|lwin)$/i.test(input.scFormattedInput)
+    return input.originalResult?.is_modifier === true
+        || /^kb\d*_(lshift|rshift|lctrl|rctrl|lalt|ralt|lwin)$/i.test(input.scFormattedInput)
         || /^gp\d+_shoulderl$/i.test(input.scFormattedInput);
 }
 
@@ -454,13 +456,24 @@ async function finalizeSingleDetectedInput(processed)
     statusEl.innerHTML = '';
     renderDetectedInputMessage(statusEl, `✅ Detected: ${processed.displayName}`);
 
-    clearPrimaryCountdown();
-    document.getElementById('binding-modal-countdown').textContent = '';
-    startSecondaryDetectionWindow();
+    const isModifier = isStandaloneModifierDetectedInput(processed);
+    if (isModifier)
+    {
+        // Keep the initial timeout while waiting for the rest of the combo.
+        clearSecondaryDetectionTimer();
+    }
+    else
+    {
+        clearPrimaryCountdown();
+        document.getElementById('binding-modal-countdown').textContent = '';
+        startSecondaryDetectionWindow();
+    }
 
     const helperNote = document.createElement('div');
     helperNote.className = 'input-confirm-note';
-    helperNote.textContent = 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
+    helperNote.textContent = isModifier
+        ? 'Hold this modifier and press another input to create a combo, or click Save Binding to bind it alone.'
+        : 'Press another input within 1 second to pick a different option, or click Save Binding to confirm.';
     statusEl.appendChild(helperNote);
 
     selectedInputKey = processed.scFormattedInput;
@@ -2419,32 +2432,7 @@ const processInput = (result) =>
     const baseScFormattedInput = scFormattedInput;
 
     // Add modifier after device prefix (e.g., kb1_lalt+f, js2_lalt+button13)
-    if (result.modifiers && result.modifiers.length > 0)
-    {
-        const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT', 'SHOULDERL'];
-        const sortedModifiers = result.modifiers
-            .filter(mod => modifierOrder.includes(mod))
-            .sort((a, b) => modifierOrder.indexOf(a) - modifierOrder.indexOf(b))
-            .map(mod => mod.toLowerCase());
-
-        if (sortedModifiers.length > 0)
-        {
-            // Insert modifier after device prefix: "kb1_f" -> "kb1_lalt+f"
-            // Match device prefix pattern like "kb1_", "js2_", "mouse1_", "gp1_"
-            const prefixMatch = scFormattedInput.match(/^(kb\d*|js\d*|mouse\d*|gp\d*)_(.+)$/);
-            if (prefixMatch)
-            {
-                const devicePrefix = prefixMatch[1];
-                const inputPart = prefixMatch[2];
-                scFormattedInput = `${devicePrefix}_${sortedModifiers.join('+')}+${inputPart}`;
-            }
-            else
-            {
-                // Fallback if no device prefix found
-                scFormattedInput = sortedModifiers.join('+') + '+' + scFormattedInput;
-            }
-        }
-    }
+    scFormattedInput = addInputModifiers(scFormattedInput, result.modifiers);
 
     // Update display name if mapping was applied
     let displayName = result.display_name;
@@ -2719,11 +2707,17 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
                 return;
             }
 
-            // If we have at least one input detected, IGNORE completion event
-            // Keep listening for potential double-tap within the 1-second window
+            // Keep a detected modifier selectable after the initial timeout.
+            // Other inputs finish through the one-second frontend timer.
             if (allDetectedInputs.size > 0)
             {
-                console.log('[TIMER] [EVENT] Ignoring input-detection-complete - waiting for potential double-tap (inputs detected:', allDetectedInputs.size, ')');
+                if (Array.from(allDetectedInputs.values()).every(isStandaloneModifierDetectedInput))
+                {
+                    stopDetection('modifier-timeout');
+                    document.getElementById('binding-modal-countdown').textContent = '';
+                    const helperNote = statusEl.querySelector('.input-confirm-note');
+                    if (helperNote) helperNote.textContent = 'Capture finished. Click Save Binding to bind this input.';
+                }
                 return;
             }
 
@@ -2947,7 +2941,8 @@ async function startBinding(actionMapName, actionName, actionDisplayName = null)
         invoke('wait_for_inputs_with_events', {
             sessionId: thisBindingId.toString(),
             initialTimeoutSecs: countdown,
-            collectDurationSecs: 2
+            collectDurationSecs: 2,
+            deferModifiers: true
         }).catch((error) =>
         {
             console.error('[TIMER] [RUST] Error during input detection:', error);

@@ -4,6 +4,35 @@
 
 import { convertToSCAxisFormat, shouldInvertAxis, getAxisMapping } from './axis-mapping.js';
 
+export function addInputModifiers(inputString, modifiers = [])
+{
+    const modifierOrder = ['LALT', 'RALT', 'LCTRL', 'RCTRL', 'LSHIFT', 'RSHIFT', 'SHOULDERL'];
+    const sortedModifiers = (modifiers || [])
+        .filter(mod => modifierOrder.includes(mod))
+        .sort((a, b) => modifierOrder.indexOf(a) - modifierOrder.indexOf(b))
+        .map(mod => mod.toLowerCase());
+    if (sortedModifiers.length === 0) return inputString;
+
+    const prefixMatch = inputString.match(/^(kb\d*|js\d*|mouse\d*|gp\d*)_(.+)$/);
+    return prefixMatch
+        ? `${prefixMatch[1]}_${sortedModifiers.join('+')}+${prefixMatch[2]}`
+        : `${sortedModifiers.join('+')}+${inputString}`;
+}
+
+export function getDetectedInputCandidates(inputs)
+{
+    const unique = new Map(inputs.map(input => [
+        addInputModifiers(input.input_string, input.modifiers), input
+    ]));
+    return [...unique.values()].filter(input =>
+    {
+        const shoulder = input.input_string.match(/^(gp\d+)_(?:button5|shoulderl)$/);
+        // LB belongs to the combo only when that same controller reports it held.
+        return !shoulder || !inputs.some(other =>
+            other.input_string.startsWith(`${shoulder[1]}_`) && other.modifiers?.includes('SHOULDERL'));
+    });
+}
+
 // XInput exposes Xbox controls as numbered buttons/axes, while Star Citizen's
 // gamepad action-map format uses semantic names. Keep this mapping here so
 // binding detection, templates, and the visual viewer all speak the same format.

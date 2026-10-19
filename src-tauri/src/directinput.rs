@@ -714,7 +714,7 @@ impl InputDetector {
                                         state.raw.Gamepad.wButtons,
                                         Some(mask),
                                     ),
-                                    is_modifier: false,
+                                    is_modifier: mask == XINPUT_LEFT_SHOULDER_MASK,
                                     session_id: self.session_id.clone(),
                                     device_uuid: Some(resolve_xinput_uuid(controller_id)),
                                     raw_button_code: Some(format!("XInput 0x{:04X}", mask)),
@@ -1251,6 +1251,21 @@ pub fn wait_for_input(
     Ok(None)
 }
 
+fn should_emit_input(input: &str, emit_buttons_only: bool, ignore_axes: bool) -> bool {
+    (!emit_buttons_only || input.contains("_button")) && (!ignore_axes || !input.contains("_axis"))
+}
+
+fn record_collection_input(
+    first_input_time: &mut Option<Instant>,
+    now: Instant,
+    is_modifier: bool,
+    defer_modifiers: bool,
+) {
+    if !(defer_modifiers && is_modifier) {
+        first_input_time.get_or_insert(now);
+    }
+}
+
 /// Wait for joystick inputs and emit events in real-time
 pub fn wait_for_inputs_with_events(
     window: tauri::Window,
@@ -1260,6 +1275,8 @@ pub fn wait_for_inputs_with_events(
     input_event_name: String,
     completion_event_name: String,
     emit_buttons_only: bool,
+    ignore_axes: bool,
+    defer_modifiers: bool,
 ) -> Result<(), String> {
     eprintln!("wait_for_inputs_with_events: Starting hybrid input detection");
 
@@ -1294,20 +1311,102 @@ pub fn wait_for_inputs_with_events(
 
         let inputs = detector.poll();
         for input in inputs {
-            if emit_buttons_only && !input.input_string.contains("_button") {
+            // Ignore unwanted inputs before they can start the collection timer.
+            if !should_emit_input(&input.input_string, emit_buttons_only, ignore_axes) {
                 continue;
             }
 
             let _ = window.emit(input_event_name.as_str(), &input);
-            if first_input_time.is_none() {
-                first_input_time = Some(Instant::now());
-            }
+            record_collection_input(
+                &mut first_input_time,
+                Instant::now(),
+                input.is_modifier,
+                defer_modifiers,
+            );
         }
 
         thread::sleep(Duration::from_millis(5));
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod input_filter_tests {
+    use super::{
+        get_active_xinput_modifiers, record_collection_input, should_emit_input,
+        XINPUT_LEFT_SHOULDER_MASK,
+    };
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn lb_waits_for_the_combo_before_starting_collection() {
+        let pressed_lb = Instant::now();
+        let pressed_a = pressed_lb + Duration::from_secs(3);
+        let mut first_input_time = None;
+        record_collection_input(&mut first_input_time, pressed_lb, true, true);
+        assert_eq!(first_input_time, None);
+        record_collection_input(&mut first_input_time, pressed_a, false, true);
+        assert_eq!(first_input_time, Some(pressed_a));
+        record_collection_input(
+            &mut first_input_time,
+            pressed_a + Duration::from_millis(100),
+            false,
+            true,
+        );
+        assert_eq!(first_input_time, Some(pressed_a));
+
+        // Template and device-monitor captures retain their original timing.
+        let mut template_first_input = None;
+        record_collection_input(&mut template_first_input, pressed_lb, true, false);
+        assert_eq!(template_first_input, Some(pressed_lb));
+    }
+
+    #[test]
+    fn lb_can_be_bound_alone_or_used_to_modify_another_button() {
+        assert!(get_active_xinput_modifiers(
+            XINPUT_LEFT_SHOULDER_MASK,
+            Some(XINPUT_LEFT_SHOULDER_MASK)
+        )
+        .is_empty());
+        assert_eq!(
+            get_active_xinput_modifiers(XINPUT_LEFT_SHOULDER_MASK | 0x1000, Some(0x1000)),
+            ["SHOULDERL"]
+        );
+        assert!(get_active_xinput_modifiers(0x1000, Some(0x1000)).is_empty());
+    }
+
+    #[test]
+    fn button_capture_ignores_axes_but_keeps_buttons_and_hats() {
+        let inputs = [
+            "js2_axis1_positive",
+            "js2_axis3_negative",
+            "gp1_axis5_positive",
+            "js1_button1",
+            "js1_button2",
+            "js1_hat1_up",
+            "gp1_button11",
+        ];
+        let captured: Vec<_> = inputs
+            .into_iter()
+            .filter(|input| should_emit_input(input, false, true))
+            .collect();
+
+        assert_eq!(
+            captured,
+            ["js1_button1", "js1_button2", "js1_hat1_up", "gp1_button11"]
+        );
+    }
+
+    #[test]
+    fn axis_capture_and_existing_buttons_only_filter_are_preserved() {
+        assert!(should_emit_input("js1_axis1_positive", false, false));
+        assert!(should_emit_input("gp1_axis5_positive", false, false));
+        assert!(should_emit_input("js1_hat1_up", false, false));
+        assert!(should_emit_input("js1_button1", true, false));
+        assert!(!should_emit_input("js1_axis1_positive", true, false));
+        assert!(!should_emit_input("js1_hat1_up", true, false));
+    }
 }
 
 /// Get list of available joysticks using hybrid approach (HID + XInput)

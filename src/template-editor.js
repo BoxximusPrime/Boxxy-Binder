@@ -50,6 +50,7 @@ import
     getRotaryPositions
 } from './input-type-renderer.js';
 import { RenderButtonGraphic } from './button-graphic.js';
+import { addInputModifiers, getDetectedInputCandidates } from './input-utils.js';
 
 function refreshButtonGraphic()
 {
@@ -380,7 +381,7 @@ function formatBindingOverlayCapturedInput(result)
 
     if (typeof parseInputShortName === 'function')
     {
-        return parseInputShortName(result.input_string);
+        return parseInputShortName(addInputModifiers(result.input_string, result.modifiers));
     }
 
     return result.display_name || result.input_string;
@@ -402,7 +403,11 @@ function updateBindingOverlayCapturedInputs(inputs)
         return;
     }
 
-    stopBindingOverlayCountdown();
+    const modifiersOnly = inputs.every(input => input.is_modifier);
+    if (!modifiersOnly)
+    {
+        stopBindingOverlayCountdown();
+    }
 
     const labels = inputs.map(formatBindingOverlayCapturedInput);
     capturedEl.hidden = false;
@@ -410,9 +415,11 @@ function updateBindingOverlayCapturedInputs(inputs)
         ? `Captured: ${labels[0]}`
         : `Captured: ${labels.join(' • ')}`;
 
-    if (subtitleEl && labels.length > 1)
+    if (subtitleEl)
     {
-        subtitleEl.textContent = 'Multiple inputs captured...';
+        subtitleEl.textContent = modifiersOnly
+            ? 'Hold LB and press another input, or wait to use LB alone.'
+            : labels.length > 1 ? 'Multiple inputs captured...' : 'Input captured...';
     }
 }
 
@@ -1245,12 +1252,14 @@ function handleTemplatePagesChanged()
 
 function handleTemplatePageSelected(pageId)
 {
-    if (!pageId)
+    currentPageId = pageId || null;
+    if (!currentPageId)
     {
+        loadedImage = null;
+        updateButtonList();
+        selectButton(null);
         return;
     }
-
-    currentPageId = pageId;
 
     // Find the page and load its data
     if (Array.isArray(templateData.pages))
@@ -4415,7 +4424,7 @@ async function detectInputWithDualStageSupport(sessionId, timeoutSecs = 10, opti
 {
     return new Promise((resolve) =>
     {
-        const detectedInputs = [];
+        let detectedInputs = [];
         const collectDurationSecs = 1; // Collect inputs for 1 second after first detection (must be integer)
         const sessionIdString = sessionId.toString();
         let unlistenInputDetected = null;
@@ -4455,13 +4464,8 @@ async function detectInputWithDualStageSupport(sessionId, timeoutSecs = 10, opti
                 return;
             }
 
-            if (detectedInputs.some(input => input.input_string === payload.input_string))
-            {
-                return;
-            }
-
             console.log('[DUAL-STAGE] Input detected:', payload.input_string);
-            detectedInputs.push(payload);
+            detectedInputs = getDetectedInputCandidates([...detectedInputs, payload]);
             updateBindingOverlayCapturedInputs(detectedInputs);
         };
 
@@ -4474,6 +4478,7 @@ async function detectInputWithDualStageSupport(sessionId, timeoutSecs = 10, opti
 
             console.log('[DUAL-STAGE] Detection complete, received', detectedInputs.length, 'input(s)');
             cleanupListeners();
+            stopBindingOverlayCountdown();
 
             // Determine which input to use
             if (detectedInputs.length === 0)
@@ -4511,7 +4516,9 @@ async function detectInputWithDualStageSupport(sessionId, timeoutSecs = 10, opti
         invoke('wait_for_inputs_with_events', {
             sessionId: sessionId.toString(),
             initialTimeoutSecs: timeoutSecs,
-            collectDurationSecs: collectDurationSecs
+            collectDurationSecs: collectDurationSecs,
+            ignoreAxes: options.ignoreAxes === true,
+            deferModifiers: true
         }).catch(error =>
         {
             console.error('[DUAL-STAGE] Detection error:', error);
@@ -4625,6 +4632,8 @@ async function startHatInputDetection(direction)
                 ? ensureSliderNumber(adjustedInputString)
                 : ensureTemplateSliderNumber(adjustedInputString);
 
+            adjustedInputString = addInputModifiers(adjustedInputString, result.modifiers);
+
             // Store the adjusted Star Citizen input string in tempButton
             if (tempButton)
             {
@@ -4727,6 +4736,7 @@ async function startInputDetection()
     {
         // Use enhanced detection with dual-stage trigger support
         const result = await detectInputWithDualStageSupport(thisSessionId, 10, {
+            ignoreAxes: !axisOnlyDetection,
             filterInput: axisOnlyDetection
                 ? (payload) =>
                 {
@@ -4819,6 +4829,8 @@ async function startInputDetection()
             adjustedInputString = typeof ensureSliderNumber === 'function'
                 ? ensureSliderNumber(adjustedInputString)
                 : ensureTemplateSliderNumber(adjustedInputString);
+
+            adjustedInputString = addInputModifiers(adjustedInputString, result.modifiers);
 
             // Use shared utility for friendly name (use adjusted string)
             // Prefer short name to avoid device prefix (e.g., "Joystick 1 - Button 13")
